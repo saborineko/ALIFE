@@ -93,7 +93,9 @@
     const a = line(d => d.n, '#8fd0ff'), b = line(d => d.segMean, '#ffd27a'); line(d => d.mouthShare, '#ff9a9a'); const s = line(d => d.speed, '#9af0b0');
     x.fillStyle = '#9fb8bd'; x.font = '10px system-ui'; x.fillText('最大：個体数 ' + a.toFixed(0) + ' / 体節 ' + b.toFixed(1) + ' / 速度 ' + s.toFixed(3), 6, 11);
   }
-  function select(o) { sel = o; shown = null; follow = follow && !!o; lastPanels = 0; }
+  // how the observed individual was chosen: by a rule (so the rule can pick again when it dies) or by hand
+  let rule = null, ruleName = '', notice = '';
+  function select(o, keepRule) { sel = o; shown = null; follow = follow && !!o; lastPanels = 0; if (!keepRule) { rule = null; ruleName = ''; notice = ''; } }
 
   function draw() {
     if (follow && sel && !sel.dead) { view.cx += (sel.cx - view.cx) * 0.15; view.cy += (sel.cy - view.cy) * 0.15; }
@@ -183,11 +185,16 @@
       zx.fillStyle = '#07121d'; zx.fillRect(0, 0, zc.width, zc.height);
       zoomR.draw(zx, sel.b.segs, { cx: cm[0], cy: cm[1], scale: sc, w: zc.width, h: zc.height }, { hue: sel.g.hue, glow: false, time: sel.b.t, clock: w.t, gut: sel.G / Math.max(1e-6, sel.prof.gutCap), speed: sel._v || 0, fill: sel.E / sel.prof.Emax, drive: sel.b.cmd.drive });
       const p = sel.prof, inc = sel.eaten + sel.absorbed;
-      $('info').textContent = '#' + sel.id + ' / 由来 ' + sel.g.origin + ' / 系統 ' + sel.line + ' / 世代 ' + sel.gen + ' / 変異 ' + sel.g.mutations + ' 回\n齢 ' + sel.age.toFixed(0) + ' / ' + sel.life.toFixed(0) + ' 秒 / 成熟段階 ' + sel.stage.toFixed(2) + ' / 子 ' + sel.kids + ' / 出生時の大きさ ' + sel.g.birth.toFixed(2)
+      $('info').textContent = (notice ? notice + '\n' : '') + (ruleName ? '［' + ruleName + 'を自動で観察中］ ' : '') + '#' + sel.id + ' / 由来 ' + sel.g.origin + ' / 系統 ' + sel.line + ' / 世代 ' + sel.gen + ' / 変異 ' + sel.g.mutations + ' 回\n齢 ' + sel.age.toFixed(0) + ' / ' + sel.life.toFixed(0) + ' 秒 / 成熟段階 ' + sel.stage.toFixed(2) + ' / 子 ' + sel.kids + ' / 出生時の大きさ ' + sel.g.birth.toFixed(2)
         + '\n体節 ' + sel.b.segs.length + '（成体 ' + sel.full.segs + '）/ 体積 ' + p.V.toFixed(2) + ' / 口 ' + p.mouths.length + ' / 部品 ' + sel.g.parts.length + ' 種・規則 ' + sel.g.links.length + ' 本'
         + '\nエネルギー ' + sel.E.toFixed(2) + ' / ' + p.Emax.toFixed(2) + ' / 消化管内 ' + sel.G.toFixed(2) + ' / 維持費 ' + p.basal.toFixed(3) + '/s'
         + '\n生涯の収入：口 ' + (inc ? sel.eaten / inc * 100 : 0).toFixed(0) + '%・体表 ' + (inc ? sel.absorbed / inc * 100 : 0).toFixed(0) + '% / 自力移動 ' + speedOf(sel).toFixed(3) + ' u/s' + (sel.passive ? '（動く関節なし）' : '');
-    } else if (sel) { $('info').textContent = '#' + sel.id + ' は死亡（' + sel.dead + '）。系譜の記録は子孫が生きている限り残る。'; sel = null; }
+    } else if (sel) {
+      // the observed individual has died: carry on with the next one by the same rule, or with a living descendant
+      const gone = sel, cause = CAUSE[gone.dead] || gone.dead, wasFollowing = follow;
+      if (rule && w.bodies.length) { const r = rule, n = ruleName; pick(r, n); notice = '#' + gone.id + ' が' + cause + '。「' + n + '」で次の個体 #' + sel.id + ' を選び直した。'; }
+      else { const heir = w.bodies.find(o => w.ancestors(o.id).some(n => n.id === gone.id)); if (heir) { select(heir, true); follow = wasFollowing; notice = '#' + gone.id + ' が' + cause + '。その子孫 #' + heir.id + ' に移った。'; } else { $('info').textContent = '#' + gone.id + ' は' + cause + '。生きている子孫はいない。記録は「絶滅した体制の記録」に残る。'; sel = null; } }
+    }
   }
   function loop(ms) {
     if (!paused) { const n = Number($('speed').value); for (let i = 0; i < n; i++) w.step(); }
@@ -207,9 +214,9 @@
     if (drag && !drag.moved) { const r = cv.getBoundingClientRect(), k = W / r.width, x = ((e.clientX - r.left) * k - W / 2) / view.scale + view.cx, y = ((e.clientY - r.top) * k - H / 2) / view.scale + view.cy; let best = null, bd = 1e9; for (const o of w.bodies) { let dx = o.cx - x; dx -= Math.round(dx / w.W) * w.W; const d = Math.hypot(dx, o.cy - y); if (d < bd) { bd = d; best = o; } } select(bd < 6 + 20 / view.scale ? best : null); }
     drag = null;
   });
-  const pick = f => { if (!w.bodies.length) return; select(w.bodies.reduce((a, b) => (f(b) > f(a) ? b : a))); follow = true; $('follow').textContent = '追跡中'; view.scale = Math.max(view.scale, 30); };
-  $('biggest').onclick = () => pick(o => o.prof.V); $('mover').onclick = () => pick(speedOf);
-  $('oldest').onclick = () => { const count = new Map(); for (const o of w.bodies) for (const n of w.ancestors(o.id)) count.set(n.id, (count.get(n.id) || 0) + 1); pick(o => count.get(o.id) || 0); };
+  const pick = (f, name) => { if (!w.bodies.length) return; rule = f; ruleName = name || ruleName; select(w.bodies.reduce((a, b) => (f(b) > f(a) ? b : a)), true); follow = true; $('follow').textContent = '追跡中'; view.scale = Math.max(view.scale, 30); };
+  $('biggest').onclick = () => pick(o => o.prof.V, '最大の身体'); $('mover').onclick = () => pick(speedOf, '最も動く個体');
+  $('oldest').onclick = () => { const count = new Map(); for (const o of w.bodies) for (const n of w.ancestors(o.id)) count.set(n.id, (count.get(n.id) || 0) + 1); pick(o => count.get(o.id) || 0, '最多の子孫'); rule = o => w.ancestors(o.id).length ? w.bodies.filter(b => w.ancestors(b.id).some(n => n.id === o.id)).length : 0; };
   $('follow').onclick = () => { follow = !follow && !!sel; $('follow').textContent = follow ? '追跡中' : '追跡'; if (follow) view.scale = Math.max(view.scale, 30); };
   $('restart').onclick = () => start(); $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; };
