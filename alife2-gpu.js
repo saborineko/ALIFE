@@ -20,7 +20,9 @@
 in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`;
   const FIELD = `#version 300 es
 precision highp float;
-uniform sampler2D uSeg; uniform int uN; uniform vec2 uRes;
+uniform sampler2D uSeg; uniform int uN; uniform vec2 uRes; uniform float uClock, uFlex, uPlump;
+float h1(float x){ return fract(sin(x * 127.1) * 43758.5453); }
+float n1(float x){ float i = floor(x), f = fract(x); f = f * f * (3. - 2. * f); return mix(h1(i), h1(i + 1.), f); }
 layout(location=0) out vec4 o0; layout(location=1) out vec4 o1; layout(location=2) out vec4 o2; layout(location=3) out vec4 o3;
 void merge(inout float S, inout float R, inout float Z, inout vec4 T, inout vec4 Q, inout vec4 P, float gs, float gr, float gz, vec4 gt, vec4 gq, vec4 gp){
   if (gs > 1e8) return;
@@ -38,8 +40,13 @@ void main(){
     vec4 a = texelFetch(uSeg, ivec2(i, 0), 0), b = texelFetch(uSeg, ivec2(i, 1), 0), c = texelFetch(uSeg, ivec2(i, 2), 0);
     if (c.z != cur) { merge(S, R, Z, T, Q, P, gs, gr, gz, gt, gq, gp); cur = c.z; gs = 1e9; }
     vec2 e = a.zw - a.xy, d = q - a.xy; float L2 = max(dot(e, e), 1e-9), L = sqrt(L2), tr = dot(d, e) / L2, t = clamp(tr, 0., 1.);
-    float r = mix(b.x, b.y, t), s = length(d - t * e) - r;
-    if (s < gs) { gs = s; gr = r; gz = mix(b.z, b.w, t); gt = vec4(c.x, c.y, c.w + tr * L, (d.x * e.y - d.y * e.x) / L); gq = texelFetch(uSeg, ivec2(i, 3), 0); gp = texelFetch(uSeg, ivec2(i, 4), 0); }
+    vec4 pp = texelFetch(uSeg, ivec2(i, 4), 0);
+    // a soft wall is not a fixed outline: it swells with what the body holds and ripples as the body moves through water.
+    // (Shown, not simulated: the ripple does not act back on the physics. How soft, how full and how fast are real.)
+    float r0 = mix(b.x, b.y, t), side = (d.x * e.y - d.y * e.x) < 0. ? 0. : 31.7, along = (c.w + tr * L) / max(r0, 1.);
+    float wob = n1(along * 0.9 + side + uClock * 0.9) + 0.5 * n1(along * 2.1 - side + uClock * 1.7 + 13.) - 0.75;
+    float r = r0 * (1. + pp.z * (uPlump + uFlex * wob)), s = length(d - t * e) - r;
+    if (s < gs) { gs = s; gr = r; gz = mix(b.z, b.w, t); gt = vec4(c.x, c.y, c.w + tr * L, (d.x * e.y - d.y * e.x) / L); gq = texelFetch(uSeg, ivec2(i, 3), 0); gp = pp; }
   }
   merge(S, R, Z, T, Q, P, gs, gr, gz, gt, gq, gp);
   float u = clamp(-S / R, 0., 1.);
@@ -140,7 +147,7 @@ void main(){
         const prog = fs => { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.bindAttribLocation(p, 0, 'p'); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; };
         this.pField = prog(FIELD); this.pShade = prog(SHADE);
         const loc = (p, names) => Object.fromEntries(names.map(n => [n, gl.getUniformLocation(p, n)]));
-        this.uF = loc(this.pField, ['uSeg', 'uN', 'uRes']); this.uS = loc(this.pShade, ['t0', 't1', 't2', 't3', 'uBody', 'uRim', 'uArm', 'uDeep', 'uOrgans', 'uQ', 'uGut', 'uTime']);
+        this.uF = loc(this.pField, ['uSeg', 'uN', 'uRes', 'uClock', 'uFlex', 'uPlump']); this.uS = loc(this.pShade, ['t0', 't1', 't2', 't3', 'uBody', 'uRim', 'uArm', 'uDeep', 'uOrgans', 'uQ', 'uGut', 'uTime']);
         const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
         gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
         this.seg = gl.createTexture(); this.data = new Float32Array(MAXS * ROWS * 4);
@@ -165,18 +172,18 @@ void main(){
     }
     // groups: arrays of pixel-space segments in draw order (from Renderer.layout).
     // Returns the canvas; the picture is in this.region = [sx, sy, w, h] of it.
-    render(groups, w, h, colors, organs, q, gut, time) {
+    render(groups, w, h, colors, organs, q, gut, time, flex, plump) {
       const gl = this.gl, d = this.data; this.reserve(w, h); if (!this.ok) return null;
       let n = 0;
       for (const grp of groups) for (const p of grp) {
         if (n >= MAXS) break;
         d.set([p.ax, p.ay, p.bx, p.by], n * 4); d.set([p.r0, p.r1, p.z0, p.z1], (MAXS + n) * 4); d.set([p.armor, p.skin, p.group, p.u0], (2 * MAXS + n) * 4);
-        d.set([p.gut, p.muscle, p.nerve, p.gonad], (3 * MAXS + n) * 4); d.set([p.act, p.store, 0, 0], (4 * MAXS + n) * 4); n++;
+        d.set([p.gut, p.muscle, p.nerve, p.gonad], (3 * MAXS + n) * 4); d.set([p.act, p.store, p.soft, 0], (4 * MAXS + n) * 4); n++;
       }
       gl.viewport(0, 0, w, h); gl.enable(gl.SCISSOR_TEST); gl.scissor(0, 0, w, h); gl.disable(gl.BLEND);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.seg); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MAXS, ROWS, gl.RGBA, gl.FLOAT, d);
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo); gl.useProgram(this.pField);
-      gl.uniform1i(this.uF.uSeg, 0); gl.uniform1i(this.uF.uN, n); gl.uniform2f(this.uF.uRes, w, h);
+      gl.uniform1i(this.uF.uSeg, 0); gl.uniform1i(this.uF.uN, n); gl.uniform2f(this.uF.uRes, w, h); gl.uniform1f(this.uF.uClock, (time || 0) % 1000); gl.uniform1f(this.uF.uFlex, flex || 0); gl.uniform1f(this.uF.uPlump, plump || 0);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.useProgram(this.pShade);
       this.tex.forEach((t, i) => { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, t); gl.uniform1i(this.uS['t' + i], i); });

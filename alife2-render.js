@@ -36,7 +36,8 @@
       const ps = segs.map(s => ({
         ax: (s.ax - view.cx) * sc + w / 2, ay: (s.ay - view.cy) * sc + h / 2, bx: (s.bx - view.cx) * sc + w / 2, by: (s.by - view.cy) * sc + h / 2,
         r0: Math.max(0.35, s.r0 * sc), r1: Math.max(0.35, s.r1 * sc), z0: Math.max(0.35, s.z0 * sc), z1: Math.max(0.35, s.z1 * sc), armor: s.p.armor, skin: s.p.skin, group: s.group,
-        gut: s.p.gut, muscle: s.parent >= 0 ? s.p.muscle : 0, nerve: s.p.nerve, gonad: s.p.gonad, store: s.p.store, act: s.act || 0
+        gut: s.p.gut, muscle: s.parent >= 0 ? s.p.muscle : 0, nerve: s.p.nerve, gonad: s.p.gonad, store: s.p.store, act: s.act || 0,
+        soft: Math.max(0, Math.min(1, 1 - 0.7 * s.p.stiff - 1.2 * s.p.armor - 0.3 * s.p.skin))
       }));
       const groups = new Map();
       for (const p of ps) { if (!groups.has(p.group)) groups.set(p.group, []); groups.get(p.group).push(p); }
@@ -133,7 +134,9 @@
       const q = opt.quality || 1, organs = opt.internals !== false; let skin = null, src = null; this.used = 'cpu';
       if (opt.gpu !== false && A.gpu) {
         const g = this.gpuSkin = A.gpu.shared();
-        if (g.ok && segs.length <= A.gpu.MAXS) { skin = g.render(this.layout(segs, view, q), Math.max(8, Math.round(view.w * q)), Math.max(8, Math.round(view.h * q)), this.colors(opt.hue == null ? 170 : opt.hue), organs, q, opt.gut, opt.clock == null ? opt.time : opt.clock); if (skin) { this.used = 'gpu'; src = g.region; } }
+        if (g.ok && segs.length <= A.gpu.MAXS) { skin = g.render(this.layout(segs, view, q), Math.max(8, Math.round(view.w * q)), Math.max(8, Math.round(view.h * q)), this.colors(opt.hue == null ? 170 : opt.hue), organs, q, opt.gut, opt.clock == null ? opt.time : opt.clock,
+          // ripple grows with real speed through the water; fullness swells or shrinks the wall a little
+          0.06 + 0.12 * Math.min(1, opt.speed || 0), opt.fill == null ? 0 : (opt.fill - 0.5) * 0.14); if (skin) { this.used = 'gpu'; src = g.region; } }
       }
       if (!skin) { const img = this.field(segs, view, opt); this.canvas.getContext('2d').putImageData(img, 0, 0); skin = this.canvas; src = [0, 0, this.w, this.h]; }
       const blit = (dx, dy) => ctx.drawImage(skin, src[0], src[1], src[2], src[3], dx, dy, view.w, view.h);

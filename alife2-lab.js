@@ -75,7 +75,8 @@
   function frame(ms) {
     const mode = $('mode').value, dt = 1 / 60, ground = $('env').value === 'ground';
     if (mode === 'gallery') { drawGallery(dt); requestAnimationFrame(frame); return; }
-    const o = { gpu: $('gfx').value === 'gpu', hue: genome.hue, internals: $('internals').checked, shadow: ground && mode !== 'design', time: body.t };
+    const sp = track && track.win.length > 30 ? Math.hypot(track.win[track.win.length - 1][1] - track.win[0][1], track.win[track.win.length - 1][2] - track.win[0][2]) / Math.max(1e-6, track.win[track.win.length - 1][0] - track.win[0][0]) : 0;
+    const o = { speed: mode === 'live' ? sp : 0, gpu: $('gfx').value === 'gpu', hue: genome.hue, internals: $('internals').checked, shadow: ground && mode !== 'design', time: body.t };
     if (mode === 'live') {
       if (!paused) {
         body.cmd = cmd(); A.physics.step(body, dt);

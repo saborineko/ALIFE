@@ -28,7 +28,7 @@
     if (world) w = world;
     else {
       w = new A.engine.World({ seed: Number($('seed').value) || 1 });
-      if (loaded) for (const k of loaded.top) for (let i = 0; i < Math.max(1, Math.round(k.count / 4)); i++) w.spawn(A.genome.copy(k.genome), w.rand() * w.W, w.rand() * w.H, 1, null);
+      if (loaded) for (const k of loaded.top) for (let i = 0; i < Math.max(1, Math.round(k.count / 4)); i++) w.spawn(A.genome.sanitize(A.genome.copy(k.genome)), w.rand() * w.W, w.rand() * w.H, 1, null); // older result files lack newer genes
       else w.seedWith(A.genome.primordial(w.seed));
     }
     fit(); sel = null; shown = null; lastPanels = 0;
@@ -143,6 +143,8 @@
     for (const o of w.bodies) {
       const b = o.b; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
       for (const s of b.segs) { const r = Math.max(s.r0, s.r1); x0 = Math.min(x0, s.ax - r, s.bx - r); x1 = Math.max(x1, s.ax + r, s.bx + r); y0 = Math.min(y0, s.ay - r, s.by - r); y1 = Math.max(y1, s.ay + r, s.by + r); }
+      // how fast it is really moving through the water (its own path, the current removed), smoothed
+      if (!paused) { const v = (o.path - (o._p == null ? o.path : o._p)) / Math.max(1e-6, w.t - (o._t == null ? w.t - 1 : o._t)); o._v = (o._v || 0) * 0.9 + 0.1 * Math.max(0, v); o._p = o.path; o._t = w.t; }
       const mxw = (x0 + x1) / 2, shift = wrapX(mxw) - (mxw - view.cx), px = (x1 - x0) * sc, py = (y1 - y0) * sc, mx = X(mxw), my = Y((y0 + y1) / 2);
       // wake: where a self-propelled body has just been (its own movement, not the drift)
       if (!o.passive) {
@@ -158,7 +160,7 @@
         // each body gets its own small picture, drawn larger than shown when the body is small
         const size = Math.ceil(Math.max(px, py) + 18), ss = Math.max(1, Math.min(4, Math.floor(440 / size)));
         ctx.save(); ctx.translate(Math.round(mx - size / 2), Math.round(my - size / 2));
-        bodyR.draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: gpuOn, quality: gpuOn ? ss : Math.min(2, ss), hue: o.g.hue, glow: sc > 18, shadow: o.cy >= w.yBottom, time: b.t, clock: w.t, gut: o.G / Math.max(1e-6, o.prof.gutCap), drive: b.cmd.drive, bristles: sc > 20, internals: sc > 6, pads: o.cy >= w.yBottom });
+        bodyR.draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: gpuOn, quality: gpuOn ? ss : Math.min(2, ss), hue: o.g.hue, glow: sc > 18, shadow: o.cy >= w.yBottom, time: b.t, clock: w.t, gut: o.G / Math.max(1e-6, o.prof.gutCap), speed: o._v || 0, fill: o.E / o.prof.Emax, drive: b.cmd.drive, bristles: sc > 20, internals: sc > 6, pads: o.cy >= w.yBottom });
         ctx.restore();
       }
       if (o === sel) { ctx.strokeStyle = '#eafff4'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(mx, my, Math.max(px, py) / 2 + 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
@@ -179,7 +181,7 @@
     } else if (sel && !sel.dead) {
       const d = A.development.describe(sel.plan), sc = Math.min((zc.width - 30) / (d.length + 1), (zc.height - 30) / (d.width + 1), 120), cm = A.physics.com(sel.b);
       zx.fillStyle = '#07121d'; zx.fillRect(0, 0, zc.width, zc.height);
-      zoomR.draw(zx, sel.b.segs, { cx: cm[0], cy: cm[1], scale: sc, w: zc.width, h: zc.height }, { hue: sel.g.hue, glow: false, time: sel.b.t, clock: w.t, gut: sel.G / Math.max(1e-6, sel.prof.gutCap), drive: sel.b.cmd.drive });
+      zoomR.draw(zx, sel.b.segs, { cx: cm[0], cy: cm[1], scale: sc, w: zc.width, h: zc.height }, { hue: sel.g.hue, glow: false, time: sel.b.t, clock: w.t, gut: sel.G / Math.max(1e-6, sel.prof.gutCap), speed: sel._v || 0, fill: sel.E / sel.prof.Emax, drive: sel.b.cmd.drive });
       const p = sel.prof, inc = sel.eaten + sel.absorbed;
       $('info').textContent = '#' + sel.id + ' / 由来 ' + sel.g.origin + ' / 系統 ' + sel.line + ' / 世代 ' + sel.gen + ' / 変異 ' + sel.g.mutations + ' 回\n齢 ' + sel.age.toFixed(0) + ' / ' + sel.life.toFixed(0) + ' 秒 / 成熟段階 ' + sel.stage.toFixed(2) + ' / 子 ' + sel.kids + ' / 出生時の大きさ ' + sel.g.birth.toFixed(2)
         + '\n体節 ' + sel.b.segs.length + '（成体 ' + sel.full.segs + '）/ 体積 ' + p.V.toFixed(2) + ' / 口 ' + p.mouths.length + ' / 部品 ' + sel.g.parts.length + ' 種・規則 ' + sel.g.links.length + ' 本'
