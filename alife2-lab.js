@@ -75,7 +75,7 @@
   function frame(ms) {
     const mode = $('mode').value, dt = 1 / 60, ground = $('env').value === 'ground';
     if (mode === 'gallery') { drawGallery(dt); requestAnimationFrame(frame); return; }
-    const o = { hue: genome.hue, internals: $('internals').checked, shadow: ground && mode !== 'design', time: body.t };
+    const o = { gpu: $('gfx').value === 'gpu', hue: genome.hue, internals: $('internals').checked, shadow: ground && mode !== 'design', time: body.t };
     if (mode === 'live') {
       if (!paused) {
         body.cmd = cmd(); A.physics.step(body, dt);
@@ -106,7 +106,7 @@
       t += '\n実測（直近 ' + T.toFixed(1) + ' 秒）：速度 ' + (d / T).toFixed(2) + ' u/s ＝ ' + (d / T / info.length).toFixed(3) + ' 体長/s / 筋仕事率 ' + pw.toFixed(0)
         + ' / 移動コスト ' + (d > 0.05 ? (pw * T / (body.mass * d)).toFixed(0) : '—（ほぼ移動なし）') + (body.env.ground ? ' / 脚が支える体重 ' + ((body.carried || 0) * 100).toFixed(0) + '%' : '');
     }
-    $('stats').textContent = t;
+    $('stats').textContent = t + '\n描画：' + (renderer.used === 'gpu' ? 'GPU (WebGL2)' : 'CPU') + (renderer.gpuSkin && !renderer.gpuSkin.ok ? '（GPU不可：' + (renderer.gpuSkin.error || '浮動小数点描画非対応') + '）' : '');
   }
   function drawGallery(dt) {
     if (!gallery) gallery = A.bodyplan.SAMPLES.map(s => {
@@ -122,7 +122,7 @@
       const sc = Math.min((w - 40) / (q.d.length + 3), (h - 60) / (q.d.width + 3)) * 0.9, v = { cx: q.cx, cy: q.cy, scale: sc, w: Math.round(w), h: Math.round(h) };
       ctx.save(); ctx.translate(x, y); ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
       const g = ctx.createRadialGradient(w * 0.45, h * 0.4, 0, w / 2, h / 2, w * 0.8); g.addColorStop(0, q.s.env === 'ground' ? '#1b2a2a' : '#12283a'); g.addColorStop(1, '#050a12'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
-      q.r.draw(ctx, q.b.segs, v, { hue: q.g.hue, internals: $('internals').checked, shadow: q.s.env === 'ground', time: q.b.t });
+      q.r.draw(ctx, q.b.segs, v, { gpu: $('gfx').value === 'gpu', hue: q.g.hue, internals: $('internals').checked, shadow: q.s.env === 'ground', time: q.b.t });
       ctx.fillStyle = '#e8f5f0'; ctx.font = '600 15px system-ui'; ctx.fillText(q.s.name, 14, 24);
       ctx.fillStyle = '#9fb8bd'; ctx.font = '12px system-ui'; ctx.fillText('体節 ' + q.d.segments + ' / 付属肢 ' + q.d.appendages + ' / ' + (q.s.env === 'ground' ? '底面' : '水中'), 14, 42);
       ctx.strokeStyle = '#2b414c'; ctx.strokeRect(0.5, 0.5, w - 1, h - 1); ctx.restore();
@@ -147,6 +147,7 @@
   if (query.get('env')) { $('env').value = query.get('env'); rebuild(true); }
   if (query.get('seed')) rngM = A.genome.rng(Number(query.get('seed')));
   if (query.get('mutate')) mut(Number(query.get('mutate')));
+  if (query.get('gfx')) $('gfx').value = query.get('gfx');
   if (query.get('internals') === '0') $('internals').checked = false;
   if (query.get('skeleton') === '1') $('skeleton').checked = true;
   const pre = Number(query.get('t') || 0);

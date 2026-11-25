@@ -55,6 +55,7 @@ summary{cursor:pointer;font-weight:600}
     <div class="controls">
       <label>表示 <select id="mode"><option value="design">設計図</option><option value="body">発生した身体</option><option value="live" selected>実際の運動</option><option value="gallery">5系統一覧</option></select></label>
       <label>環境 <select id="env"><option value="fluid">水中（遊泳）</option><option value="ground">底面（接地）</option><option value="vacuum">真空（抵抗なし）</option></select></label>
+      <label>描画 <select id="gfx"><option value="gpu">GPU (WebGL2)</option><option value="cpu">CPU</option></select></label>
       <label><input id="internals" type="checkbox" checked>内部器官</label>
       <label><input id="skeleton" type="checkbox">骨格重ね</label>
       <button id="pause">一時停止</button>
@@ -78,6 +79,7 @@ summary{cursor:pointer;font-weight:600}
 <script src="./alife2-neural.js"></script>
 <script src="./alife2-physics.js"></script>
 <script src="./alife2-render.js"></script>
+<script src="./alife2-gpu.js"></script>
 <script src="./alife2-bodyplan.js"></script>
 <script src="./alife2-lab.js"></script>
 </body>

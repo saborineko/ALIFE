@@ -30,6 +30,21 @@
       this.img = this.canvas ? this.canvas.getContext('2d').createImageData(w, h) : { data: new Uint8ClampedArray(n * 4), width: w, height: h };
     }
 
+    // Pixel-space segments grouped by chain, thickest chain first, with a running body coordinate u0.
+    layout(segs, view, q) {
+      const w = Math.max(8, Math.round(view.w * q)), h = Math.max(8, Math.round(view.h * q)), sc = view.scale * q;
+      const ps = segs.map(s => ({
+        ax: (s.ax - view.cx) * sc + w / 2, ay: (s.ay - view.cy) * sc + h / 2, bx: (s.bx - view.cx) * sc + w / 2, by: (s.by - view.cy) * sc + h / 2,
+        r0: Math.max(0.35, s.r0 * sc), r1: Math.max(0.35, s.r1 * sc), z0: Math.max(0.35, s.z0 * sc), z1: Math.max(0.35, s.z1 * sc), armor: s.p.armor, skin: s.p.skin, group: s.group
+      }));
+      const groups = new Map();
+      for (const p of ps) { if (!groups.has(p.group)) groups.set(p.group, []); groups.get(p.group).push(p); }
+      const order = [...groups.values()].sort((a, b) => Math.max(...b.map(p => p.r0)) - Math.max(...a.map(p => p.r0)));
+      for (const grp of order) { let run = grp[0].group * 37.3; for (const p of grp) { p.u0 = run; run += Math.hypot(p.bx - p.ax, p.by - p.ay); } }
+      return order;
+    }
+    colors(hue) { return { body: hsl(hue, 0.30, 0.60), rim: hsl(hue + 25, 0.45, 0.88), arm: hsl(hue - 25, 0.22, 0.55), deep: hsl(hue + 200, 0.5, 0.3) }; }
+
     // segs: world-space segments (plan.segs or body.segs). view: {cx, cy, scale, w, h}.
     // Returns the RGBA field; the bounding box drawn is left in this.box.
     field(segs, view, opt) {
@@ -38,13 +53,7 @@
       this.resize(w, h);
       const { S, R, Z, AR, SK, H, U, V, s2, r2, z2, a2, k2, u2, v2 } = this;
       S.fill(BIG);
-      const ps = segs.map(s => ({
-        ax: (s.ax - view.cx) * sc + w / 2, ay: (s.ay - view.cy) * sc + h / 2, bx: (s.bx - view.cx) * sc + w / 2, by: (s.by - view.cy) * sc + h / 2,
-        r0: Math.max(0.35, s.r0 * sc), r1: Math.max(0.35, s.r1 * sc), z0: Math.max(0.35, s.z0 * sc), z1: Math.max(0.35, s.z1 * sc), armor: s.p.armor, skin: s.p.skin, group: s.group
-      }));
-      const groups = new Map();
-      for (const p of ps) { if (!groups.has(p.group)) groups.set(p.group, []); groups.get(p.group).push(p); }
-      const order = [...groups.values()].sort((a, b) => Math.max(...b.map(p => p.r0)) - Math.max(...a.map(p => p.r0)));
+      const order = this.layout(segs, view, q);
       let X0 = w, Y0 = h, X1 = 0, Y1 = 0;
       for (const grp of order) {
         let gx0 = w, gy0 = h, gx1 = 0, gy1 = 0, rmax = 0;
@@ -58,9 +67,8 @@
         }
         if (gx1 < gx0 || gy1 < gy0) continue;
         for (let y = gy0; y <= gy1; y++) s2.fill(BIG, y * w + gx0, y * w + gx1 + 1);
-        let run = grp[0].group * 37.3;
         for (const p of grp) {
-          const u0 = run; run += Math.hypot(p.bx - p.ax, p.by - p.ay);
+          const u0 = p.u0;
           const ex = p.bx - p.ax, ey = p.by - p.ay, L2 = ex * ex + ey * ey || 1e-9, dr = p.r1 - p.r0, dz = p.z1 - p.z0;
           for (let y = p.y0; y <= p.y1; y++) {
             const dy = y + 0.5 - p.ay; let i = y * w + p.x0;
@@ -92,7 +100,7 @@
         H[i] = Z[i] * Math.sqrt(u * (2 - u));
       }
       const hue = opt.hue == null ? 170 : opt.hue;
-      const body = hsl(hue, 0.30, 0.60), rimC = hsl(hue + 25, 0.45, 0.88), arm = hsl(hue - 25, 0.22, 0.55), deep = hsl(hue + 200, 0.5, 0.3);
+      const { body, rim: rimC, arm, deep } = this.colors(hue);
       const lx = -0.42, ly = -0.58, lz = 0.70, hx = lx, hy = ly, hz = lz + 1, hn = Math.hypot(hx, hy, hz);
       for (let y = Y0; y <= Y1; y++) for (let x = X0, i = y * w + X0; x <= X1; x++, i++) {
         const s = S[i]; if (s > 0.5) continue;
@@ -119,15 +127,19 @@
     // Full picture: shadow, organs, skin, surface structures.
     draw(ctx, segs, view, opt) {
       opt = opt || {};
-      const img = this.field(segs, view, opt), q = this.box[4];
-      this.canvas.getContext('2d').putImageData(img, 0, 0);
+      let skin = null; this.used = 'cpu';
+      if (opt.gpu !== false && A.gpu) {
+        if (!this.gpuSkin) this.gpuSkin = new A.gpu.GpuSkin();
+        if (this.gpuSkin.ok && segs.length <= A.gpu.MAXS) { skin = this.gpuSkin.render(this.layout(segs, view, 1), view.w, view.h, this.colors(opt.hue == null ? 170 : opt.hue)); if (skin) this.used = 'gpu'; }
+      }
+      if (!skin) { const img = this.field(segs, view, opt); this.canvas.getContext('2d').putImageData(img, 0, 0); skin = this.canvas; }
       const T = (x, y) => [(x - view.cx) * view.scale + view.w / 2, (y - view.cy) * view.scale + view.h / 2], sc = view.scale;
       ctx.save();
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-      if (opt.shadow) { ctx.save(); ctx.globalAlpha = 0.45; ctx.filter = 'brightness(0) blur(' + Math.max(2, sc * 0.35) + 'px)'; ctx.drawImage(this.canvas, sc * 0.35, sc * 0.5, view.w, view.h); ctx.restore(); }
-      if (opt.glow !== false) { ctx.save(); ctx.globalAlpha = 0.35; ctx.globalCompositeOperation = 'lighter'; ctx.filter = 'blur(' + Math.max(3, sc * 0.5) + 'px)'; ctx.drawImage(this.canvas, 0, 0, view.w, view.h); ctx.restore(); }
+      if (opt.shadow) { ctx.save(); ctx.globalAlpha = 0.45; ctx.filter = 'brightness(0) blur(' + Math.max(2, sc * 0.35) + 'px)'; ctx.drawImage(skin, sc * 0.35, sc * 0.5, view.w, view.h); ctx.restore(); }
+      if (opt.glow !== false) { ctx.save(); ctx.globalAlpha = 0.35; ctx.globalCompositeOperation = 'lighter'; ctx.filter = 'blur(' + Math.max(3, sc * 0.5) + 'px)'; ctx.drawImage(skin, 0, 0, view.w, view.h); ctx.restore(); }
       if (opt.internals !== false) this.organs(ctx, segs, T, sc, opt);
-      ctx.drawImage(this.canvas, 0, 0, view.w, view.h);
+      ctx.drawImage(skin, 0, 0, view.w, view.h);
       this.surface(ctx, segs, T, sc, opt);
       ctx.restore();
     }
