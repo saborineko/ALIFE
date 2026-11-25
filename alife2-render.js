@@ -35,7 +35,8 @@
       const w = Math.max(8, Math.round(view.w * q)), h = Math.max(8, Math.round(view.h * q)), sc = view.scale * q;
       const ps = segs.map(s => ({
         ax: (s.ax - view.cx) * sc + w / 2, ay: (s.ay - view.cy) * sc + h / 2, bx: (s.bx - view.cx) * sc + w / 2, by: (s.by - view.cy) * sc + h / 2,
-        r0: Math.max(0.35, s.r0 * sc), r1: Math.max(0.35, s.r1 * sc), z0: Math.max(0.35, s.z0 * sc), z1: Math.max(0.35, s.z1 * sc), armor: s.p.armor, skin: s.p.skin, group: s.group
+        r0: Math.max(0.35, s.r0 * sc), r1: Math.max(0.35, s.r1 * sc), z0: Math.max(0.35, s.z0 * sc), z1: Math.max(0.35, s.z1 * sc), armor: s.p.armor, skin: s.p.skin, group: s.group,
+        gut: s.p.gut, muscle: s.parent >= 0 ? s.p.muscle : 0, nerve: s.p.nerve, gonad: s.p.gonad, store: s.p.store, act: s.act || 0
       }));
       const groups = new Map();
       for (const p of ps) { if (!groups.has(p.group)) groups.set(p.group, []); groups.get(p.group).push(p); }
@@ -128,19 +129,22 @@
     // Full picture: shadow, organs, skin, surface structures.
     draw(ctx, segs, view, opt) {
       opt = opt || {};
-      let skin = null; this.used = 'cpu';
+      // quality > 1 draws the body larger and scales it down: a small body keeps its shading instead of turning into an outline
+      const q = opt.quality || 1, organs = opt.internals !== false; let skin = null, src = null; this.used = 'cpu';
       if (opt.gpu !== false && A.gpu) {
-        if (!this.gpuSkin) this.gpuSkin = new A.gpu.GpuSkin();
-        if (this.gpuSkin.ok && segs.length <= A.gpu.MAXS) { skin = this.gpuSkin.render(this.layout(segs, view, 1), view.w, view.h, this.colors(opt.hue == null ? 170 : opt.hue)); if (skin) this.used = 'gpu'; }
+        const g = this.gpuSkin = A.gpu.shared();
+        if (g.ok && segs.length <= A.gpu.MAXS) { skin = g.render(this.layout(segs, view, q), Math.max(8, Math.round(view.w * q)), Math.max(8, Math.round(view.h * q)), this.colors(opt.hue == null ? 170 : opt.hue), organs); if (skin) { this.used = 'gpu'; src = g.region; } }
       }
-      if (!skin) { const img = this.field(segs, view, opt); this.canvas.getContext('2d').putImageData(img, 0, 0); skin = this.canvas; }
+      if (!skin) { const img = this.field(segs, view, opt); this.canvas.getContext('2d').putImageData(img, 0, 0); skin = this.canvas; src = [0, 0, this.w, this.h]; }
+      const blit = (dx, dy) => ctx.drawImage(skin, src[0], src[1], src[2], src[3], dx, dy, view.w, view.h);
       const T = (x, y) => [(x - view.cx) * view.scale + view.w / 2, (y - view.cy) * view.scale + view.h / 2], sc = view.scale;
       ctx.save();
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
-      if (opt.shadow) { ctx.save(); ctx.globalAlpha = 0.45; ctx.filter = 'brightness(0) blur(' + Math.max(2, sc * 0.35) + 'px)'; ctx.drawImage(skin, sc * 0.35, sc * 0.5, view.w, view.h); ctx.restore(); }
-      if (opt.glow !== false) { ctx.save(); ctx.globalAlpha = 0.35; ctx.globalCompositeOperation = 'lighter'; ctx.filter = 'blur(' + Math.max(3, sc * 0.5) + 'px)'; ctx.drawImage(skin, 0, 0, view.w, view.h); ctx.restore(); }
-      if (opt.internals !== false) this.organs(ctx, segs, T, sc, opt);
-      ctx.drawImage(skin, 0, 0, view.w, view.h);
+      if (opt.shadow) { ctx.save(); ctx.globalAlpha = 0.45; ctx.filter = 'brightness(0) blur(' + Math.max(2, sc * 0.35) + 'px)'; blit(sc * 0.35, sc * 0.5); ctx.restore(); }
+      if (opt.glow !== false) { ctx.save(); ctx.globalAlpha = 0.35; ctx.globalCompositeOperation = 'lighter'; ctx.filter = 'blur(' + Math.max(3, sc * 0.5) + 'px)'; blit(0, 0); ctx.restore(); }
+      // on the GPU the organs are part of the body picture; only the eyes are drawn here, under the skin
+      if (organs) this.organs(ctx, segs, T, sc, this.used === 'gpu' ? Object.assign({}, opt, { eyesOnly: true }) : opt);
+      blit(0, 0);
       this.surface(ctx, segs, T, sc, opt);
       ctx.restore();
     }
@@ -157,7 +161,8 @@
         const p = s.p, [ax, ay] = T(s.ax, s.ay), [bx, by] = T(s.bx, s.by), ang = Math.atan2(by - ay, bx - ax), L = Math.hypot(bx - ax, by - ay);
         const rm = (s.r0 + s.r1) / 2 * sc, mx = (ax + bx) / 2, my = (ay + by) / 2, nx = -Math.sin(ang), ny = Math.cos(ang);
         // muscle: two antagonist bands, the working side lights up
-        if (p.muscle > 0.05 && s.parent >= 0 && rm > 1.2) {
+        const eo = opt.eyesOnly;
+        if (!eo && p.muscle > 0.05 && s.parent >= 0 && rm > 1.2) {
           const act = s.act || 0;
           for (const side of [-1, 1]) for (let fb = 0; fb < 4; fb++) {
             const on = Math.max(0, side * act), o = side * (0.42 + 0.13 * fb), k0 = s.r0 * sc * o, k1 = s.r1 * sc * o;
@@ -165,10 +170,10 @@
             ctx.beginPath(); ctx.moveTo(ax + nx * k0, ay + ny * k0); ctx.lineTo(bx + nx * k1, by + ny * k1); ctx.stroke();
           }
         }
-        if (p.gut > 0.05) { blob(mx, my, L * 0.62 + rm * 0.2, rm * (0.25 + 0.4 * p.gut), ang, COL.gut, 0.75); blob(mx, my, L * 0.3, rm * 0.3 * p.gut, ang, COL.gutCore, 0.6);
+        if (!eo && p.gut > 0.05) { blob(mx, my, L * 0.62 + rm * 0.2, rm * (0.25 + 0.4 * p.gut), ang, COL.gut, 0.75); blob(mx, my, L * 0.3, rm * 0.3 * p.gut, ang, COL.gutCore, 0.6);
           for (let k = 0; k < 7; k++) { const u = hash(s.id * 41 + k * 3) - 0.5, v = hash(s.id * 23 + k * 19) - 0.5; ctx.fillStyle = k % 2 ? 'rgba(90,60,20,.45)' : 'rgba(255,245,200,.5)'; ctx.beginPath(); ctx.arc(mx + Math.cos(ang) * u * L - Math.sin(ang) * v * rm * 0.6 * p.gut, my + Math.sin(ang) * u * L + Math.cos(ang) * v * rm * 0.6 * p.gut, Math.max(0.5, rm * 0.06), 0, TAU); ctx.fill(); } }
-        if (p.store > 0.1) for (let k = 0; k < 3; k++) { const u = hash(s.id * 31 + k * 7), v = hash(s.id * 17 + k * 13) - 0.5; blob(ax + (bx - ax) * u + nx * v * rm, ay + (by - ay) * u + ny * v * rm, rm * 0.22 * p.store + 0.5, rm * 0.22 * p.store + 0.5, 0, COL.store, 0.7); }
-        if (p.gonad > 0.1) for (let k = 0; k < 5; k++) { const u = 0.3 + 0.4 * hash(s.id * 53 + k * 11), v = (hash(s.id * 29 + k * 5) - 0.5) * 1.1; blob(ax + (bx - ax) * u + nx * v * rm, ay + (by - ay) * u + ny * v * rm, rm * 0.2 * p.gonad + 0.5, rm * 0.2 * p.gonad + 0.5, 0, COL.gonad, 0.75); }
+        if (!eo && p.store > 0.1) for (let k = 0; k < 3; k++) { const u = hash(s.id * 31 + k * 7), v = hash(s.id * 17 + k * 13) - 0.5; blob(ax + (bx - ax) * u + nx * v * rm, ay + (by - ay) * u + ny * v * rm, rm * 0.22 * p.store + 0.5, rm * 0.22 * p.store + 0.5, 0, COL.store, 0.7); }
+        if (!eo && p.gonad > 0.1) for (let k = 0; k < 5; k++) { const u = 0.3 + 0.4 * hash(s.id * 53 + k * 11), v = (hash(s.id * 29 + k * 5) - 0.5) * 1.1; blob(ax + (bx - ax) * u + nx * v * rm, ay + (by - ay) * u + ny * v * rm, rm * 0.2 * p.gonad + 0.5, rm * 0.2 * p.gonad + 0.5, 0, COL.gonad, 0.75); }
         if (p.eye > 0.1) {
           const ux = Math.cos(ang), uy = Math.sin(ang), re = s.r0 * sc + (s.r1 - s.r0) * sc * 0.45, er = Math.max(1, re * 0.17 * (0.5 + p.eye));
           for (const side of s.axial ? [-1, 1] : [0]) {
@@ -177,7 +182,7 @@
             ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, er * 1.5, 0, TAU); ctx.fill();
           }
         }
-        if (p.nerve > 0.05 && rm > 0.8) {
+        if (!eo && p.nerve > 0.05 && rm > 0.8) {
           ctx.strokeStyle = 'rgba(' + COL.nerve + ',' + (0.25 + 0.55 * p.nerve) + ')'; ctx.lineWidth = Math.max(0.6, rm * 0.10 * (0.5 + p.nerve));
           ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
           blob(ax, ay, rm * 0.2 * (0.4 + p.nerve), rm * 0.2 * (0.4 + p.nerve), 0, COL.nerve, 0.8);

@@ -3,7 +3,8 @@
 (function () {
   'use strict';
   const A = ALIFE2, $ = id => document.getElementById(id), cv = $('world'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
-  const zc = $('zoom'), zx = zc.getContext('2d'), zoomR = new A.render.Renderer(), thumbR = new A.render.Renderer(), pool = new Map();
+  const zc = $('zoom'), zx = zc.getContext('2d'), zoomR = new A.render.Renderer(), thumbR = new A.render.Renderer(), bodyR = new A.render.Renderer();
+  let gpuOn = new URLSearchParams(location.search).get('gfx') !== 'cpu';
   const q = new URLSearchParams(location.search), KEY = 'alife2_world_v1';
   let field = null, fimg = null, sand = null, motes = null, frameNo = 0; const trails = new WeakMap();
   let w, view, paused = false, sel = null, shown = null, follow = false, loaded = window.ALIFE2_LOAD || null, lastPanels = 0, lastSave = 0;
@@ -26,7 +27,7 @@
     const p = A.development.develop(g, { maxSegs: w.maxSegs }), d = A.development.describe(p), c = canvas.getContext('2d');
     const sc = Math.min((canvas.width - 10) / (d.length + 0.6), (canvas.height - 10) / (d.width + 0.6), 160);
     c.fillStyle = '#07121d'; c.fillRect(0, 0, canvas.width, canvas.height);
-    (R || thumbR).draw(c, p.segs, { cx: (d.bbox[0] + d.bbox[2]) / 2, cy: (d.bbox[1] + d.bbox[3]) / 2, scale: sc, w: canvas.width, h: canvas.height }, { gpu: false, hue: g.hue, glow: false });
+    (R || thumbR).draw(c, p.segs, { cx: (d.bbox[0] + d.bbox[2]) / 2, cy: (d.bbox[1] + d.bbox[3]) / 2, scale: sc, w: canvas.width, h: canvas.height }, { gpu: gpuOn, quality: 3, hue: g.hue, glow: false });
   }
   function card(parent, g, caption, onclick, on) {
     const f = document.createElement('figure'), c = document.createElement('canvas'), t = document.createElement('figcaption');
@@ -132,10 +133,10 @@
         ctx.lineCap = 'round';
         for (const [wd, col] of [[2.6, 'hsla(' + o.g.hue + ',40%,80%,.16)'], [1.5, 'hsla(' + o.g.hue + ',35%,82%,.5)'], [0.8, 'hsla(' + (o.g.hue + 25) + ',45%,60%,.9)']]) { ctx.strokeStyle = col; ctx.beginPath(); for (const s of b.segs) { ctx.lineWidth = Math.max(1.6, (s.r0 + s.r1) * sc * wd); const xa = mx + (s.ax - mxw) * sc; ctx.moveTo(xa, Y(s.ay)); ctx.lineTo(xa + (s.bx - s.ax) * sc + 0.01, Y(s.by)); } ctx.stroke(); }
       } else {
-        let size = 32; while (size < Math.max(px, py) + 18 && size < 512) size *= 2;
-        if (!pool.has(size)) pool.set(size, new A.render.Renderer());
+        // each body gets its own small picture, drawn larger than shown when the body is small
+        const size = Math.ceil(Math.max(px, py) + 18), ss = Math.max(1, Math.min(4, Math.floor(440 / size)));
         ctx.save(); ctx.translate(Math.round(mx - size / 2), Math.round(my - size / 2));
-        pool.get(size).draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: false, hue: o.g.hue, glow: sc > 18, shadow: o.cy >= w.yBottom, time: b.t, drive: b.cmd.drive, bristles: sc > 20, internals: sc > 9, pads: o.cy >= w.yBottom });
+        bodyR.draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: gpuOn, quality: gpuOn ? ss : Math.min(2, ss), hue: o.g.hue, glow: sc > 18, shadow: o.cy >= w.yBottom, time: b.t, drive: b.cmd.drive, bristles: sc > 20, internals: sc > 6, pads: o.cy >= w.yBottom });
         ctx.restore();
       }
       if (o === sel) { ctx.strokeStyle = '#eafff4'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(mx, my, Math.max(px, py) / 2 + 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
