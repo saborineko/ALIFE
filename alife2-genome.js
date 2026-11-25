@@ -20,6 +20,7 @@
     const f = () => { s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
     f.gauss = () => { let u = 0; for (let i = 0; i < 6; i++) u += f(); return (u - 3) / Math.sqrt(0.5); };
     f.int = n => Math.floor(f() * n);
+    f.state = v => { if (v != null) s = v >>> 0; return s >>> 0; }; // read or restore, for saving a world
     return f;
   }
 

@@ -139,3 +139,22 @@ test('with nothing to eat, everything starves; founders live and breed on what t
   assert.ok(w.bodies.length > 0 && w.counts.births > 10, 'births ' + w.counts.births);
   assert.ok(w.bodies.some(o => o.g.origin === 'evolved' && o.g.mutations > 0));
 });
+
+test('genealogy: every living body traces back to a founder, and the record of each ancestor holds its genome', () => {
+  const w = new A.engine.World({ seed: 2 }); w.seedWith(A.genome.primordial(2));
+  for (let i = 0; i < 30 * 200; i++) w.step();
+  assert.ok(w.bodies.some(o => o.gen > 0));
+  for (const o of w.bodies) { const chain = w.ancestors(o.id); assert.strictEqual(chain[0].id, o.id); assert.strictEqual(chain.length, o.gen + 1); assert.strictEqual(chain[chain.length - 1].parent, 0); for (const n of chain) assert.ok(n.g && n.g.parts.length); }
+  w.prune(); assert.ok(w.tree.size >= w.bodies.length);
+});
+
+test('a saved world comes back with the same bodies, reserves, genealogy and record', () => {
+  const w = new A.engine.World({ seed: 4 }); w.seedWith(A.genome.primordial(4));
+  for (let i = 0; i < 30 * 120; i++) w.step();
+  const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save())));
+  assert.strictEqual(w2.bodies.length, w.bodies.length); assert.strictEqual(w2.tree.size, w.tree.size); assert.strictEqual(w2.events.length, w.events.length);
+  const sum = x => x.bodies.reduce((a, o) => a + o.E, 0); assert.ok(Math.abs(sum(w) - sum(w2)) < 1e-9);
+  assert.deepStrictEqual(w2.bodies.map(o => [o.id, o.gen, o.line, o.stage]), w.bodies.map(o => [o.id, o.gen, o.line, o.stage]));
+  for (let i = 0; i < 300; i++) w2.step(); assert.ok(w2.bodies.length > 0);
+  assert.throws(() => A.engine.World.restore({ format: 'alife16' }));
+});

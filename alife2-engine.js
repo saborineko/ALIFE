@@ -34,6 +34,7 @@
       this.bodies = []; this.yBottom = this.H * (1 - this.benthic);
       this.patch = Array.from({ length: this.patches }, () => ({ x: this.rand() * this.W, y: this.rand() * this.yBottom, a: this.rand() * TAU }));
       this.counts = { births: 0, starved: 0, aged: 0, broken: 0, blocked: 0, eaten: 0 };
+      this.tree = new Map(); this.events = []; this.history = []; this.firsts = {}; this.pruned = 0;
     }
     seedWith(genome, n) { for (let i = 0; i < (n || this.founders); i++) this.spawn(A.genome.copy(genome), this.rand() * this.W, this.rand() * this.H, 1, null); }
 
@@ -45,6 +46,12 @@
       o.eggCost = C.eggFixed + baby.buildCost + C.eggReserve * baby.Emax; o.eggE = C.eggReserve * baby.Emax;
       this.form(o, x, y, this.rand() * TAU);
       o.E = parent ? Math.min(o.prof.Emax, parent.eggE) : o.prof.Emax * 0.6;
+      // genealogy: what kind of body this is, and whether that differs from its parent's
+      o.kind = [o.full.segs, o.full.mouths.length, o.full.eye > 0 ? 1 : 0, this.motile(g) ? 1 : 0].join('/');
+      const pn = parent ? this.tree.get(parent.id) : null;
+      this.tree.set(o.id, { id: o.id, parent: o.parent, line: o.line, gen: o.gen, born: this.t, died: null, cause: null, kind: o.kind, V: o.full.V, hue: g.hue, kids: 0, changed: !pn || pn.kind !== o.kind, g });
+      if (pn) pn.kids++;
+      this.note(o);
       this.bodies.push(o); return o;
     }
     // (re)build the body for its current stage, keeping place
@@ -57,6 +64,26 @@
       // a body with no working joint cannot do anything but drift: move it with the water instead of simulating it
       o.passive = !o.b.segs.some(q => q.id > 0 && q.tauMax > 0 && q.p.amp > 0.02);
     }
+    motile(g) { const p = A.development.develop(g, { maxSegs: this.maxSegs }); return p.segs.some(q => q.id > 0 && q.p.amp > 0.02 && q.p.muscle > 0.02); }
+    log(text, id) { this.events.push({ t: Math.round(this.t), text, id }); if (this.events.length > 400) this.events.shift(); }
+    // things that happen for the first time in this world (observation only; nothing is rewarded)
+    note(o) {
+      const F = this.firsts, f = o.full, once = (k, text) => { if (!F[k]) { F[k] = o.id; this.log(text, o.id); } };
+      if (o.gen === 0) return;
+      if (f.segs > 1) once('multi', '初の多体節（' + f.segs + ' 体節）');
+      if (f.mouths.length > 1) once('mouths', '初の複数の口（' + f.mouths.length + ' 個）');
+      if (f.eye > 0) once('eye', '初の眼');
+      if (o.kind.endsWith('/1')) once('motile', '初の動く関節');
+      if (f.segs > (F.maxSegs || 1)) { if (f.segs >= (F.maxSegs || 1) * 1.5 + 1) this.log('体節数の最大を更新：' + f.segs, o.id); F.maxSegs = f.segs; }
+      if (f.V > (F.maxV || 0.5) * 1.5) { F.maxV = f.V; this.log('体積の最大を更新：' + f.V.toFixed(2), o.id); }
+    }
+    // keep only the living and their ancestors: that is the genealogy that still matters
+    prune() {
+      const keep = new Set();
+      for (const o of this.bodies) { let n = this.tree.get(o.id); while (n && !keep.has(n.id)) { keep.add(n.id); n = this.tree.get(n.parent); } }
+      for (const id of this.tree.keys()) if (!keep.has(id)) { this.tree.delete(id); this.pruned++; }
+    }
+    ancestors(id) { const out = []; let n = this.tree.get(id); while (n) { out.push(n); n = this.tree.get(n.parent); } return out; }
     cellAt(x, y) { const c = Math.floor(((x % this.W) + this.W) % this.W / this.cell), r = clamp(Math.floor(y / this.cell), 0, this.rows - 1); return r * this.cols + c; }
     flowAt(x, y) {
       if (y >= this.yBottom) return [0, 0];
@@ -175,14 +202,42 @@
       if (this.bodies.some(o => o.dead)) {
         for (const o of this.bodies) if (o.dead) {
           this.counts[o.dead]++;
+          const node = this.tree.get(o.id); if (node) { node.died = this.t; node.cause = o.dead; node.life = { eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, stage: o.stage }; }
           let e = C.carrion * (o.prof.buildCost * 0.5 + Math.max(0, o.E) + o.G);
           while (e > 0.05) { const size = 0.25 + this.rand() * 0.25, pe = Math.min(e, this.grainEnergy * size ** 3); this.addFood(o.cx + this.rand.gauss() * 0.5, o.cy + this.rand.gauss() * 0.5, size, pe, o.cy >= this.yBottom, this.grainLife); e -= pe; }
         }
         this.bodies = this.bodies.filter(o => !o.dead);
       }
       this.t += dt; this.tick++;
+      if (this.tick % 900 === 0) {
+        this.prune(); const c = this.census(); this.history.push(c); if (this.history.length > 1500) this.history.splice(0, 300);
+        const lines = new Set(this.bodies.map(o => o.line)); for (const k of this.liveLines || []) if (!lines.has(k)) this.log('系統 ' + k + ' が絶滅');
+        this.liveLines = lines;
+      }
     }
 
+    save() {
+      return {
+        format: 'alife2-world-1', opt: Object.fromEntries(Object.keys(DEFAULTS).map(k => [k, this[k]])), t: this.t, tick: this.tick, nextId: this.nextId, rng: this.rand.state(),
+        nut: Array.from(this.nut, v => Math.round(v * 1e4) / 1e4), food: this.food.filter(f => f.e > 0).map(f => [+f.x.toFixed(2), +f.y.toFixed(2), f.size, +f.e.toFixed(4), f.fixed ? 1 : 0, +(f.die - this.t).toFixed(1)]),
+        patch: this.patch, counts: this.counts, events: this.events, history: this.history, firsts: this.firsts, pruned: this.pruned, tree: [...this.tree.values()],
+        bodies: this.bodies.map(o => { const r = o.b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born }; })
+      };
+    }
+    // Rebuilds bodies from their genomes at the saved place, size and reserves. Joint angles restart from rest.
+    static restore(d) {
+      if (!d || d.format !== 'alife2-world-1') throw new Error('not an ALIFE 2.0 world');
+      const w = new World(d.opt); w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); w.patch = d.patch; w.counts = d.counts; w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0;
+      for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: w.t + f[5] });
+      const nodes = new Map(d.tree.map(n => [n.id, n]));
+      for (const s of d.bodies) {
+        const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind };
+        const baby = A.organs.profile(A.development.develop(o.g, { stage: o.g.birth, maxSegs: w.maxSegs })), C = A.organs.C;
+        o.full = A.organs.profile(A.development.develop(o.g, { maxSegs: w.maxSegs })); o.life = s.life; o.eggCost = C.eggFixed + baby.buildCost + C.eggReserve * baby.Emax; o.eggE = C.eggReserve * baby.Emax;
+        w.form(o, s.x, s.y, s.angle); o.E = s.E; w.bodies.push(o);
+      }
+      w.tree = nodes; w.nextId = d.nextId; w.rand.state(d.rng); return w;
+    }
     census() {
       const n = this.bodies.length, mean = f => n ? this.bodies.reduce((a, o) => a + f(o), 0) / n : 0;
       const adultSegs = o => o.full.segs;
