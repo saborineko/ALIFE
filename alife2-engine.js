@@ -21,7 +21,8 @@
     grainSizes: [0.15, 0.3, 0.6, 1.2], grainShare: [0.2, 0.3, 0.3, 0.2], grainEnergy: 40, grainLife: 90,
     patches: 4, patchRadius: 12,
     bottomRate: 25, bottomSize: [0.15, 0.3, 0.6], bottomLife: 150,
-    flow: 0.35, sink: 0.12, jitter: 0.25, mutation: 0.7, founders: 20, maxSegs: 64
+    flow: 0.35, sink: 0.12, jitter: 0.25, mutation: 0.7, founders: 20, maxSegs: 64,
+    noCilia: 0                            // control experiment: cilia genes cannot be expressed in this world
   };
 
   class World {
@@ -39,7 +40,8 @@
     seedWith(genome, n) { for (let i = 0; i < (n || this.founders); i++) this.spawn(A.genome.copy(genome), this.rand() * this.W, this.rand() * this.H, 1, null); }
 
     spawn(g, x, y, stage, parent) {
-      const o = { id: this.nextId++, g, stage, age: 0, G: 0, egg: 0, grow: 0, dead: false, noise: 0, wander: this.rand() * TAU, path: 0, eaten: 0, absorbed: 0, kids: 0,
+      if (this.noCilia) for (const p of g.parts) p.cilia = 0;
+      const o = { id: this.nextId++, g, stage, tax: 0, taxN: 0, sx: x, sy: y, age: 0, G: 0, egg: 0, grow: 0, dead: false, noise: 0, wander: this.rand() * TAU, path: 0, eaten: 0, absorbed: 0, kids: 0,
         parent: parent ? parent.id : 0, line: parent ? parent.line : this.nextId - 1, gen: parent ? parent.gen + 1 : 0, born: this.t };
       const C = A.organs.C, baby = A.organs.profile(A.development.develop(g, { stage: g.birth, maxSegs: this.maxSegs }));
       o.full = A.organs.profile(A.development.develop(g, { maxSegs: this.maxSegs })); o.life = o.full.life * (0.85 + 0.3 * this.rand());
@@ -145,6 +147,9 @@
       }
       const m = Math.hypot(sx, sy), k = m / (m + 0.2) / (m + 1e-9), ahead = (sx * fx + sy * fy) * k, left = (-sx * fy + sy * fx) * k;
       o.noise += (this.rand.gauss() - o.noise * 0.3) * 0.3; o.wander += this.rand.gauss() * 0.15;
+      // taxis: over the last interval, how much of its own movement went towards the food it perceived then
+      if (o.seen && Math.abs(o.cx - o.sx) < 5) { const fl = this.flowAt(o.cx, o.cy), mx = o.cx - o.sx - fl[0] * o.sdt, my = o.cy - o.sy - fl[1] * o.sdt, d = Math.hypot(mx, my); if (d > 0.01) { o.tax += (mx * o.seen[0] + my * o.seen[1]) / d; o.taxN++; } }
+      o.seen = m > 1e-6 ? [sx / m, sy / m] : null; o.sx = o.cx; o.sy = o.cy; o.sdt = 5 * this.dt;
       const inp = [1, ahead, left, 1 - o.E / o.prof.Emax, o.noise], w = o.g.brain, out = [0, 0, 0];
       for (let j = 0; j < 3; j++) for (let i = 0; i < 5; i++) out[j] += w[j * 5 + i] * inp[i];
       const toFood = Math.atan2(-left, -ahead), g = m > 1e-6 ? sig(out[2] * 2 + 1) : 0; // angle in the root's own frame
@@ -259,7 +264,9 @@
         t: Math.round(this.t), n, lines: lines.size, gen: mean(o => o.gen), segMean: n ? segs.reduce((a, b) => a + b, 0) / n : 0, segMax: n ? Math.max(...segs) : 0,
         multi: n ? segs.filter(s => s > 1).length / n : 0, volume: mean(o => o.prof.V), speed: mean(o => o.age > 5 ? o.path / o.age : 0),
         mouthShare: mean(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), eyes: mean(o => o.prof.eye > 0 ? 1 : 0),
-        bottom: mean(o => o.cy >= this.yBottom ? 1 : 0), food: this.food.length, nutrient: this.nut.reduce((a, b) => a + b, 0) / this.nut.length, ...this.counts
+        bottom: mean(o => o.cy >= this.yBottom ? 1 : 0), cilia: mean(o => o.full.cilia > 0.05 ? 1 : 0), mouths: mean(o => o.full.mouths.length), sense: mean(o => o.full.sense),
+        taxis: (() => { const l = this.bodies.filter(o => o.taxN >= 20); return l.length ? l.reduce((a, o) => a + o.tax / o.taxN, 0) / l.length : 0; })(), taxisN: this.bodies.filter(o => o.taxN >= 20).length,
+        turnGain: mean(o => Math.abs(o.g.brain[7])), sessileMulti: mean(o => o.full.mouths.length >= 3 && (o.age > 5 ? o.path / o.age : 0) < 0.01 ? 1 : 0), food: this.food.length, nutrient: this.nut.reduce((a, b) => a + b, 0) / this.nut.length, ...this.counts
       };
     }
   }

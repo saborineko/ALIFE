@@ -172,3 +172,17 @@ test('cilia push against water: they move a jointless body, need water, and cost
   assert.ok(more.body.ciliaUse > some.body.ciliaUse && some.body.ciliaUse > 0);
   const a = A.organs.profile(blob(0)), b = A.organs.profile(blob(0.9)); assert.ok(b.basal > a.basal);
 });
+
+test('taxis index: about zero for a body that swims without steering, positive for one that turns to food', () => {
+  const run = brain => { const w = new A.engine.World({ seed: 9, founders: 0, cap: 0 }); for (let i = 0; i < 600; i++) w.step();
+    const g = A.genome.primordial(1); g.parts[0].cilia = 0.5; g.parts[0].beat = -1; g.parts[0].nerve = 0.5; g.brain = brain;
+    for (let i = 0; i < 16; i++) { const p = w.patch[i % 4]; w.spawn(A.genome.copy(g), p.x + w.rand.gauss() * 4, p.y + w.rand.gauss() * 4, 1, null); }
+    for (let i = 0; i < 30 * 120; i++) w.step(); return w.census().taxis; };
+  const blind = run([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), a = run([2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]), b = run([2, 0, 0, 0, 0, 0, 0, -2, 0, 0, 0, 0, 0, 0, 0]);
+  assert.ok(Math.abs(blind) < 0.15, 'unsteered ' + blind); assert.ok(Math.max(a, b) > 0.25 && Math.max(a, b) > Math.abs(blind) + 0.2, 'steered ' + a + ' / ' + b);
+});
+
+test('control world: with cilia disabled no body can express them', () => {
+  const w = new A.engine.World({ seed: 1, noCilia: 1, founders: 0 }); const g = A.genome.primordial(1); g.parts[0].cilia = 0.8;
+  const o = w.spawn(g, 50, 30, 1, null); assert.strictEqual(o.full.cilia, 0); assert.strictEqual(o.passive, true);
+});
