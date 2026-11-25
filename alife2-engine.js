@@ -251,7 +251,9 @@
         let c = P.com(b);
         if (c[0] < 0 || c[0] >= this.W) { const s = c[0] < 0 ? this.W : -this.W; for (let k = 0; k < b.np; k++) b.x[k] += s; c[0] += s; P.pose(b); }
         if (c[1] < 2 || c[1] > this.H - 2) { const push = (c[1] < 2 ? 2 - c[1] : this.H - 2 - c[1]) * 0.5; for (let k = 0; k < b.np; k++) { b.y[k] += push; b.vy[k] *= 0.5; } c[1] += push; P.pose(b); }
-        o.path += Math.sqrt((c[0] - o.cx) * (c[0] - o.cx) + (c[1] - o.cy) * (c[1] - o.cy)) < 5 ? Math.sqrt((c[0] - o.cx - fl[0] * dt) * (c[0] - o.cx - fl[0] * dt) + (c[1] - o.cy - fl[1] * dt) * (c[1] - o.cy - fl[1] * dt)) : 0; o.cx = c[0]; o.cy = c[1];
+        // own travel: displacement with the water's drift removed. A body resting on a bottom is not carried by the water,
+        // so nothing is removed there; a body with nothing to move itself with has travelled nowhere by itself.
+        { const jx = c[0] - o.cx, jy = c[1] - o.cy, ux = ground ? 0 : fl[0] * dt, uy = ground ? 0 : fl[1] * dt; if (!o.passive && jx * jx + jy * jy < 25) o.path += Math.sqrt((jx - ux) * (jx - ux) + (jy - uy) * (jy - uy)); o.cx = c[0]; o.cy = c[1]; }
         // income: skin
         for (let i = 0; i < b.segs.length; i++) {
           const a = pr.absorb[i]; if (a <= 0) continue;
