@@ -125,12 +125,12 @@
       if (!o.passive) {
         let t = trails.get(o); if (!t) trails.set(o, t = []);
         if (frameNo % 3 === 0 && !paused) { t.push([o.cx, o.cy]); if (t.length > 22) t.shift(); }
-        if (t.length > 2 && sc > 5) { ctx.lineWidth = Math.max(1, Math.min(px, py) * 0.25); for (let i = 1; i < t.length; i++) { if (Math.abs(t[i][0] - t[i - 1][0]) > 5) continue; ctx.strokeStyle = 'hsla(' + o.g.hue + ',60%,75%,' + 0.16 * i / t.length + ')'; ctx.beginPath(); ctx.moveTo(X(t[i - 1][0]), Y(t[i - 1][1])); ctx.lineTo(X(t[i][0]), Y(t[i][1])); ctx.stroke(); } }
+        if (t.length > 2 && sc > 5) { ctx.lineWidth = Math.max(1, Math.min(px, py) * 0.25); for (let i = 1; i < t.length; i++) { let dx = t[i][0] - t[i - 1][0]; dx -= Math.round(dx / w.W) * w.W; const xa = X(t[i - 1][0]); /* second point is placed from the first, so a step never spans the seam */ ctx.strokeStyle = 'hsla(' + o.g.hue + ',60%,75%,' + 0.16 * i / t.length + ')'; ctx.beginPath(); ctx.moveTo(xa, Y(t[i - 1][1])); ctx.lineTo(xa + dx * sc, Y(t[i][1])); ctx.stroke(); } }
       }
       if (mx < -px || my < -py || mx > W + px || my > H + py) continue;
       if (Math.max(px, py) < 9) { // far away: still a body with a shape and a heading, not a dot
         ctx.lineCap = 'round';
-        for (const [wd, col] of [[2.6, 'hsla(' + o.g.hue + ',40%,80%,.16)'], [1.5, 'hsla(' + o.g.hue + ',35%,82%,.5)'], [0.8, 'hsla(' + (o.g.hue + 25) + ',45%,60%,.9)']]) { ctx.strokeStyle = col; ctx.beginPath(); for (const s of b.segs) { ctx.lineWidth = Math.max(1.6, (s.r0 + s.r1) * sc * wd); ctx.moveTo(X(s.ax), Y(s.ay)); ctx.lineTo(X(s.bx) + 0.01, Y(s.by)); } ctx.stroke(); }
+        for (const [wd, col] of [[2.6, 'hsla(' + o.g.hue + ',40%,80%,.16)'], [1.5, 'hsla(' + o.g.hue + ',35%,82%,.5)'], [0.8, 'hsla(' + (o.g.hue + 25) + ',45%,60%,.9)']]) { ctx.strokeStyle = col; ctx.beginPath(); for (const s of b.segs) { ctx.lineWidth = Math.max(1.6, (s.r0 + s.r1) * sc * wd); const xa = mx + (s.ax - mxw) * sc; ctx.moveTo(xa, Y(s.ay)); ctx.lineTo(xa + (s.bx - s.ax) * sc + 0.01, Y(s.by)); } ctx.stroke(); }
       } else {
         let size = 32; while (size < Math.max(px, py) + 18 && size < 512) size *= 2;
         if (!pool.has(size)) pool.set(size, new A.render.Renderer());
