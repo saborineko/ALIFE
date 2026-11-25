@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ALIFE 2.0 形態実験室</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;background:#0a131c;color:#dfede9;font:15px system-ui,sans-serif}
+main{max-width:1360px;margin:auto;padding:16px}
+a{color:#94d4cb}h1{margin:8px 0;font-size:clamp(22px,4vw,34px)}
+p,small{color:#a8bdc5;line-height:1.6}
+.eyebrow{font-size:11px;letter-spacing:.18em;color:#90bcb9}
+.layout{display:grid;grid-template-columns:minmax(290px,1fr) minmax(0,1.9fr);gap:14px;align-items:start}
+.panel,details{border:1px solid #304653;background:#111f29;border-radius:12px;padding:12px;margin-bottom:10px}
+.preview{position:sticky;top:8px}
+canvas{width:100%;height:auto;display:block;border:1px solid #34515c;border-radius:8px;background:#07121d}
+button,select,input[type=number]{background:#203640;color:#e6f3ed;border:1px solid #42616c;border-radius:6px;padding:7px 9px;font:inherit}
+button{cursor:pointer}button.primary{background:#286756;border-color:#65ae99}button:hover{background:#305764}
+button.on{background:#3b7a68;border-color:#9fe0c9}
+input[type=range]{width:100%;accent-color:#78bfa9}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+.sliders{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin-top:8px}
+.sliders label{display:grid;grid-template-columns:1fr auto;gap:2px;font-size:12px;color:#bfd2d5}
+.sliders input{grid-column:1/-1}
+output{color:#f4e3a6;font-variant-numeric:tabular-nums}
+summary{cursor:pointer;font-weight:600}
+.note{white-space:pre-line;font-size:12px;color:#bdd1d2;line-height:1.6;margin:8px 0}
+.warning{border-left:3px solid #cda96c;padding-left:10px}
+.legend span{display:inline-block;margin-right:12px;font-size:12px}.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px}
+@media(max-width:820px){.layout{display:flex;flex-direction:column}.preview{position:static;order:-1;width:100%}main{padding:10px}}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">ALIFE 2.0 / BODY ENGINE / PHASE 1</div>
+<h1>形態実験室 2.0</h1>
+<p><a href="./index.html">← ALIFE 23 の世界</a>　｜　<a href="./morphology-lab.html">旧・形態実験室</a>　｜　独立した実験環境。ALIFE 23 の保存データには一切触れない。</p>
+<div class="layout">
+<div class="settings">
+  <section class="panel">
+    <b>診断用サンプル（人工試験遺伝子）</b>
+    <div id="samples" class="controls"></div>
+    <div class="note warning">ここで作る身体はすべて人工的に設定した試験遺伝子で、自然進化の結果ではない。5系統は同じ遺伝子形式・同じ発生・物理・描画コードから生成され、違いは数値だけ。</div>
+    <div class="controls">
+      <button id="mutate">突然変異</button><button id="mutate10">×10</button>
+      <button id="export">遺伝子JSON書き出し</button><button id="reset">設計値へ戻す</button>
+    </div>
+    <div id="origin" class="note"></div>
+  </section>
+  <div id="groups"></div>
+</div>
+<div class="preview">
+  <section class="panel">
+    <div class="controls">
+      <label>表示 <select id="mode"><option value="design">設計図</option><option value="body">発生した身体</option><option value="live" selected>実際の運動</option><option value="gallery">5系統一覧</option></select></label>
+      <label>環境 <select id="env"><option value="fluid">水中（遊泳）</option><option value="ground">底面（接地）</option><option value="vacuum">真空（抵抗なし）</option></select></label>
+      <label><input id="internals" type="checkbox" checked>内部器官</label>
+      <label><input id="skeleton" type="checkbox">骨格重ね</label>
+      <button id="pause">一時停止</button>
+    </div>
+    <canvas id="specimen" width="1120" height="760"></canvas>
+    <div class="legend note"><span><i style="background:#be8cff"></i>神経</span><span><i style="background:#ecd660"></i>消化器</span><span><i style="background:#ff6060"></i>筋肉（収縮側が発光）</span><span><i style="background:#ff96cd"></i>生殖器</span><span><i style="background:#fff0be"></i>接地パッド</span></div>
+    <div class="sliders">
+      <label><span>発生・成熟段階</span><output id="stageOut">1.00</output><input id="stage" type="range" min="0" max="1" step="0.01" value="1"></label>
+      <label><span>運動の強さ（指令）</span><output id="driveOut">1.00</output><input id="drive" type="range" min="0" max="1" step="0.05" value="1"></label>
+      <label><span>旋回（指令）</span><output id="turnOut">0.00</output><input id="turn" type="range" min="-1" max="1" step="0.05" value="0"></label>
+      <label><span>進行方向（放射型の指令・度）</span><output id="headingOut">0</output><input id="heading" type="range" min="-180" max="180" step="5" value="0"></label>
+    </div>
+    <div id="stats" class="note"></div>
+    <small>運動は速度を直接与えていない。筋肉が関節に加えるトルクと、水の抵抗・底面の摩擦だけから生じる。真空環境では同じ筋活動でも重心は動かない。消化器・眼・口は現段階では構造のみで、機能（採食・視覚）は Phase 2 で接続する。</small>
+  </section>
+</div>
+</div>
+</main>
+<script src="./alife2-genome.js"></script>
+<script src="./alife2-development.js"></script>
+<script src="./alife2-neural.js"></script>
+<script src="./alife2-physics.js"></script>
+<script src="./alife2-render.js"></script>
+<script src="./alife2-bodyplan.js"></script>
+<script src="./alife2-lab.js"></script>
+</body>
+</html>

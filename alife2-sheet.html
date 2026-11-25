@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ALIFE 2.0 形態シート</title>
+<style>
+:root{color-scheme:dark}body{margin:0;background:#0a131c;color:#dfede9;font:14px system-ui,sans-serif}
+main{max-width:1400px;margin:auto;padding:16px}a{color:#94d4cb}h2{font-size:16px;margin:18px 0 6px}
+p{color:#a8bdc5}canvas{width:100%;height:auto;display:block;border:1px solid #34515c;border-radius:8px;margin-bottom:6px}
+</style>
+</head>
+<body>
+<main>
+<h1>ALIFE 2.0 形態シート</h1>
+<p><a href="./alife2-lab.html">← 形態実験室 2.0</a>　すべて人工試験遺伝子。同じ発生・描画コードで、数値だけを変えた結果を並べる。自然進化の結果ではない。</p>
+<div id="rows"></div>
+</main>
+<script src="./alife2-genome.js"></script>
+<script src="./alife2-development.js"></script>
+<script src="./alife2-neural.js"></script>
+<script src="./alife2-physics.js"></script>
+<script src="./alife2-render.js"></script>
+<script src="./alife2-bodyplan.js"></script>
+<script>
+(function () {
+  const A = ALIFE2, S = id => A.bodyplan.SAMPLES.find(q => q.id === id).params, R = new A.render.Renderer();
+  const sweep = (id, key, vals, label) => ({ title: label, cells: vals.map(v => ({ g: A.bodyplan.design(Object.assign({}, S(id), { [key]: v })), cap: key + ' = ' + v })) });
+  const rows = [
+    sweep('tail', 'tail', [0, 0.5, 1, 1.5, 2.3, 3], '尾の長さを連続的に変える（長尾遊泳型）'),
+    sweep('armored', 'limbs', [0, 2, 4, 6, 8, 10], '付属肢の対数を変える（体節・外骨格型）'),
+    sweep('limbed', 'limbJoints', [1, 2, 3, 4, 6, 8], '付属肢の関節数を変える（多関節付属肢型）'),
+    sweep('radial', 'limbs', [3, 4, 5, 6, 8, 12], '放射対称の次数を変える（放射状触手型）'),
+    sweep('soft', 'swell', [-0.3, 0, 0.4, 0.85, 1.2, 1.6], '胴体のふくらみを変える（軟体遊泳型）'),
+    { title: '発生・成熟段階（体節・外骨格型）：芽から成体へ', cells: [0, 0.15, 0.3, 0.5, 0.75, 1].map(s => ({ g: A.bodyplan.design(S('armored')), stage: s, cap: 'stage ' + s, fixed: true })) },
+    ...['soft', 'limbed', 'radial'].map((id, k) => ({ title: '突然変異（淘汰なし・各 8 回）：' + A.bodyplan.SAMPLES.find(q => q.id === id).name, cells: [0, 1, 2, 3, 4, 5].map(i => { let g = A.bodyplan.design(S(id)); const r = A.genome.rng(100 + k * 10 + i); if (i) for (let j = 0; j < 8; j++) g = A.genome.mutate(g, r); return { g, cap: i ? '変異体 ' + i : '元の設計' }; }) }))
+  ];
+  for (const row of rows) {
+    const h = document.createElement('h2'); h.textContent = row.title; const cv = document.createElement('canvas'); cv.width = 1380; cv.height = 250;
+    document.getElementById('rows').append(h, cv);
+    const ctx = cv.getContext('2d'), w = cv.width / row.cells.length, hh = cv.height;
+    const plans = row.cells.map(c => A.development.develop(c.g, { stage: c.stage == null ? 1 : c.stage })), ds = plans.map(A.development.describe);
+    const full = row.cells[0].fixed ? A.development.describe(A.development.develop(row.cells[0].g)) : null;
+    const scAll = Math.min(...ds.map(d => Math.min((w - 24) / (d.length + 1), (hh - 50) / (d.width + 1))));
+    row.cells.forEach((c, i) => {
+      const d = ds[i], sc = full ? Math.min((w - 24) / (full.length + 1), (hh - 50) / (full.width + 1)) : scAll;
+      const v = { cx: (d.bbox[0] + d.bbox[2]) / 2, cy: (d.bbox[1] + d.bbox[3]) / 2, scale: sc, w: Math.round(w), h: hh };
+      ctx.save(); ctx.translate(i * w, 0); ctx.beginPath(); ctx.rect(0, 0, w, hh); ctx.clip();
+      const g = ctx.createRadialGradient(w / 2, hh / 2, 0, w / 2, hh / 2, w * 0.8); g.addColorStop(0, '#12283a'); g.addColorStop(1, '#050a12'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, hh);
+      R.draw(ctx, plans[i].segs, v, { hue: c.g.hue });
+      ctx.fillStyle = '#e8f5f0'; ctx.font = '12px system-ui'; ctx.fillText(c.cap + '  （体節 ' + d.segments + '）', 8, hh - 10);
+      ctx.strokeStyle = '#2b414c'; ctx.strokeRect(0.5, 0.5, w - 1, hh - 1); ctx.restore();
+    });
+  }
+  document.body.dataset.ready = '1';
+})();
+</script>
+</body>
+</html>
