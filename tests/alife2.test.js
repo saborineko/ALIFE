@@ -209,3 +209,30 @@ test('a mapped world: regions differ, bodies and food cross between them, and it
   const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); assert.strictEqual(w2.bodies.length, w.bodies.length); assert.strictEqual(w2.regions.length, 4);
   for (let i = 0; i < 60; i++) w2.step(); assert.ok(w2.bodies.length > 0);
 });
+
+test('local nerve circuit: unwired bodies are untouched; a wired segment tastes, signals, changes its cilia, and pays for it', () => {
+  const mk = o => { const g = A.genome.primordial(1); Object.assign(g.parts[0], { cilia: 0.5, beat: -1, nerve: 0.5 }, o); return g; };
+  const world = (numb) => { const w = new A.engine.World({ seed: 6, founders: 0, cap: 0, grainRate: 0, bottomRate: 0, numb: numb ? 1 : 0 }); for (let i = 0; i < w.nut.length; i++) w.nut[i] = (i % w.cols) < w.cols / 2 ? 0.9 : 0.1; return w; };
+  const w = world(false), plain = w.spawn(mk({}), 40, 30, 1, null), rich = w.spawn(mk({ nC: 3, mCil: -1 }), 40, 50, 1, null), poor = w.spawn(mk({ nC: 3, mCil: -1 }), 120, 50, 1, null);
+  for (let i = 0; i < 20; i++) w.step();
+  assert.strictEqual(plain.b.hasCircuit, false); assert.strictEqual(plain.b.segs[0].a, 0); assert.strictEqual(plain.b.segs[0].cd, 1); assert.strictEqual(plain.b.nerveUse, 0);
+  assert.ok(rich.b.segs[0].a > 0.5 && rich.b.segs[0].cd < 0.5, 'rich water: signal up, cilia down ' + rich.b.segs[0].a);
+  assert.ok(poor.b.segs[0].a < -0.5 && poor.b.segs[0].cd > 1.5, 'thin water: signal down, cilia up ' + poor.b.segs[0].a);
+  assert.ok(rich.b.nerveUse > 0 && rich.prof.basal > plain.prof.basal, 'wiring and activity cost energy');
+  // the same body with its taste cut does the same thing wherever it is
+  const n = world(true), a = n.spawn(mk({ nC: 3, mCil: -1 }), 40, 50, 1, null), b = n.spawn(mk({ nC: 3, mCil: -1 }), 120, 50, 1, null);
+  for (let i = 0; i < 20; i++) n.step();
+  assert.ok(Math.abs(a.b.segs[0].a - b.b.segs[0].a) < 1e-9 && Math.abs(a.b.segs[0].a) < 1e-9);
+  // a signal that carries the past is part of the individual: it survives saving
+  const s = w.spawn(mk({ nC: 3, mCil: -1, leak: 0.05 }), 40, 70, 1, null); for (let i = 0; i < 30; i++) w.step();
+  const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), s2 = w2.bodies.find(o => o.id === s.id);
+  assert.ok(Math.abs(s2.b.segs[0].a - s.b.segs[0].a) < 1e-4 && Math.abs(s.b.segs[0].a) > 0.1);
+});
+
+test('a sense that adapts reports change, not level', () => {
+  const g = A.genome.primordial(1); Object.assign(g.parts[0], { cilia: 0.5, nerve: 0.5, adapt: 1, nC: 4 });
+  const b = P.build(develop(g)), taste = new Float64Array(4);
+  taste[0] = 0.8; for (let i = 0; i < 300; i++) A.neural.local(b, taste, 0);
+  assert.ok(Math.abs(b.segs[0].a) < 0.05, 'steady rich water: silent ' + b.segs[0].a);
+  taste[0] = 0.5; A.neural.local(b, taste, 0); assert.ok(b.segs[0].a < -0.5, 'it got worse: ' + b.segs[0].a);
+});

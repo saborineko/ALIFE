@@ -48,7 +48,19 @@
     gonad: [0, 1, 0, 'n'], nerve: [0, 1, 0.2, 'n'], store: [0, 1, 0, 'n'],
     vessel: [0, 1, 0, 'n'],        // transport tissue: carries supply further from the gut
     cilia: [0, 1, 0, 'n'],         // beating hairs on the skin: push water along the body
-    beat: [-1, 1, 1, 'n']          // which way, and how hard, they beat (+ pushes the body towards its base end)
+    beat: [-1, 1, 1, 'n'],         // which way, and how hard, they beat (+ pushes the body towards its base end)
+    // local nerve circuit of this kind of segment. Every segment built from the part gets its own copy:
+    // signal <- signal + leak * (tanh(nC*taste + nP*parent's signal + nK*children's signal + nH*hunger + nB) - signal)
+    nC: [-4, 4, 0, 'n'],           // from its own sense of dissolved food where it is (scaled by nerve tissue)
+    nP: [-4, 4, 0, 'n'],           // from the segment it grows from
+    nK: [-4, 4, 0, 'n'],           // from the segments growing from it
+    nH: [-4, 4, 0, 'n'],           // from the body's hunger
+    nB: [-2, 2, 0, 'n'],           // resting level
+    leak: [0.02, 1, 1, 'n'],       // 1 = the signal is made afresh each moment (reflex); lower = it carries the past
+    mCil: [-1.5, 1.5, 0, 'n'],     // signal -> how hard this segment's cilia beat
+    mTurn: [-1.5, 1.5, 0, 'n'],    // signal -> this segment's cilia beat unevenly, side to side (it turns)
+    mJoint: [-1, 1, 0, 'n'],       // signal -> bend of this segment's joint
+    adapt: [0, 1, 0, 'n']          // 0 = the sense reports how rich the water is; 1 = it adapts and reports only change
   };
   const LINK_FIELDS = {
     at: [0, 1, 1, 'n'],            // where along the parent

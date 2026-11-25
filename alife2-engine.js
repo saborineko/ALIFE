@@ -23,6 +23,7 @@
     bottomRate: 25, bottomSize: [0.15, 0.3, 0.6], bottomLife: 150,
     flow: 0.35, sink: 0.12, jitter: 0.25, mutation: 0.7, founders: 20, maxSegs: 64,
     map: '',                              // '' = the original world (open water over a bottom strip); 'coast' = regions side by side
+    numb: 0,                              // control experiment: no segment in this world can taste dissolved food
     blind: 0,                             // control experiment: nothing in this world is told where food is
     rigid: 1,                             // 0 = never use the rigid-body shortcut (control experiment)
     jostleEvery: 1,                       // 1 = every drifting grain is jostled every step. Larger values are faster but starve stationary feeders (measured: -15% at 4)
@@ -57,6 +58,7 @@
       this.patch = Array.from({ length: this.patches }, () => ({ x: this.rand() * this.W, y: this.rand() * this.yBottom, a: this.rand() * TAU }));
       if (M) this.buildMap(M);
       this.counts = { births: 0, starved: 0, aged: 0, broken: 0, blocked: 0, eaten: 0 };
+      this.taste = new Float64Array(256);
       this.tree = new Map(); this.events = []; this.history = []; this.firsts = {}; this.pruned = 0; this.clades = new Map();
     }
     buildMap(M) {
@@ -105,7 +107,7 @@
       A.physics.pose(o.b); o.cx = x; o.cy = y; o.work0 = 0;
       // a body with no working joint cannot do anything but drift: move it with the water instead of simulating it
       if (!this.rigid) o.b.rigid = false; // control experiment: solve every body with the jointed solver
-      o.passive = !o.b.hasCilia && !o.b.segs.some(q => q.id > 0 && q.tauMax > 0 && q.p.amp > 0.02); o.cil0 = 0;
+      o.passive = !o.b.hasCilia && o.b.rigid; o.cil0 = 0; o.nerve0 = 0; o.b.nerveUse = 0; if (o.sig) { for (let i = 0; i < o.b.segs.length && i < o.sig.length; i++) o.b.segs[i].a = o.sig[i]; o.sig = null; }
     }
     // counts for taxis only if it went somewhere by itself: at least 2 units while perceiving food, at 0.02 units/s or more over its life
     traveller(o) { return o.taxLen >= 2 && o.age > 5 && o.path / o.age >= 0.02; }
@@ -130,6 +132,12 @@
       for (const id of this.tree.keys()) if (!keep.has(id)) { this.tree.delete(id); this.pruned++; }
     }
     ancestors(id) { const out = []; let n = this.tree.get(id); while (n) { out.push(n); n = this.tree.get(n.parent); } return out; }
+    // dissolved food at a point, interpolated between cell centres (so a body can, in principle, tell one side from the other)
+    nutAt(x, y) {
+      const c = this.cell, fx = x / c - 0.5, fy = clamp(y / c - 0.5, 0, this.rows - 1), x0 = Math.floor(fx), y0 = Math.min(this.rows - 2, Math.floor(fy)), tx = fx - x0, ty = fy - y0, n = this.cols, N = this.nut;
+      const a = ((x0 % n) + n) % n, b = (a + 1) % n, r0 = Math.max(0, y0) * n, r1 = Math.max(0, y0 + 1) * n;
+      return (N[r0 + a] * (1 - tx) + N[r0 + b] * tx) * (1 - ty) + (N[r1 + a] * (1 - tx) + N[r1 + b] * tx) * ty;
+    }
     cellAt(x, y) { const c = Math.floor(((x % this.W) + this.W) % this.W / this.cell), r = clamp(Math.floor(y / this.cell), 0, this.rows - 1); return r * this.cols + c; }
     flowAt(x, y) {
       if (this.regions) { const k = this.flow * this.hFlow[this.cellAt(x, clamp(y, 0, this.H - 0.01))]; return [k * Math.sin(TAU * (y / this.H * 1.5 + this.t / 180)), 0.5 * k * Math.sin(TAU * (x / 160 * 2 + this.t / 130))]; }
@@ -245,6 +253,11 @@
         const ground = this.regions ? this.hGround[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))] === 1 : o.cy >= this.yBottom, fl = this.flowAt(o.cx, o.cy);
         b.env.ground = ground; b.env.flowX = fl[0]; b.env.flowY = fl[1]; if (this.regions) b.env.gravity = 4 * this.hWeight[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))];
         if ((this.tick + o.id) % 5 === 0) this.sense(o);
+        if (b.hasCircuit && !o.passive) { // each wired segment tastes the water where it is; the circuit does the rest
+          const taste = this.taste, cut = o.numb || this.numb, segs = b.segs;
+          for (let i = 0; i < segs.length; i++) taste[i] = cut || !segs[i].circ ? 0.5 : this.nutAt((segs[i].ax + segs[i].bx) * 0.5, (segs[i].ay + segs[i].by) * 0.5) / this.nutrientCap;
+          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax) * dt;
+        }
         if (o.passive) { if (!ground) for (let k = 0; k < b.np; k++) { b.x[k] += fl[0] * dt; b.y[k] += fl[1] * dt; } P.pose(b); }
         else P.step(b, dt, this.substeps);
         if (!P.finite(b)) { o.dead = 'broken'; continue; }
@@ -271,7 +284,7 @@
         }
         const dg = Math.min(o.G, pr.digest * dt); o.G -= dg; o.E += dg * pr.eta;
         // spending
-        o.E -= pr.basal * dt + C.work * (b.work - o.work0) + C.ciliaWork * (b.ciliaUse - o.cil0); o.work0 = b.work; o.cil0 = b.ciliaUse;
+        o.E -= pr.basal * dt + C.work * (b.work - o.work0) + C.ciliaWork * (b.ciliaUse - o.cil0) + C.spike * (b.nerveUse - o.nerve0); o.work0 = b.work; o.cil0 = b.ciliaUse; o.nerve0 = b.nerveUse;
         if (o.E > pr.Emax) o.E = pr.Emax;
         o.age += dt;
         if (o.E <= 0) { o.dead = 'starved'; continue; }
@@ -323,7 +336,7 @@
         format: 'alife2-world-1', opt: Object.fromEntries(Object.keys(DEFAULTS).map(k => [k, this[k]])), t: this.t, tick: this.tick, nextId: this.nextId, rng: this.rand.state(),
         nut: Array.from(this.nut, v => Math.round(v * 1e4) / 1e4), food: this.food.filter(f => f.e > 0).map(f => [+f.x.toFixed(2), +f.y.toFixed(2), f.size, +f.e.toFixed(4), f.fixed ? 1 : 0, +(f.die - this.t).toFixed(1)]),
         patch: this.patch, counts: this.counts, events: this.events, history: this.history, firsts: this.firsts, pruned: this.pruned, tree: [...this.tree.values()], clades: [...this.clades.values()], cladesDropped: this.cladesDropped || 0,
-        bodies: this.bodies.map(o => { const r = o.b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born }; })
+        bodies: this.bodies.map(o => { const r = o.b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, sig: o.b.hasCircuit ? o.b.segs.map(q => +q.a.toFixed(5)) : undefined }; })
       };
     }
     // Rebuilds bodies from their genomes at the saved place, size and reserves. Joint angles restart from rest.
@@ -333,7 +346,7 @@
       for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: w.t + f[5] });
       const nodes = new Map(d.tree.map(n => [n.id, n]));
       for (const s of d.bodies) {
-        const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade };
+        const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade, sig: s.sig || null, home: 0 };
         const baby = A.organs.profile(A.development.develop(o.g, { stage: o.g.birth, maxSegs: w.maxSegs })), C = A.organs.C;
         o.full = A.organs.profile(A.development.develop(o.g, { maxSegs: w.maxSegs })); o.life = s.life; o.eggCost = C.eggFixed + baby.buildCost + C.eggReserve * baby.Emax; o.eggE = C.eggReserve * baby.Emax;
         w.form(o, s.x, s.y, s.angle); o.E = s.E; w.bodies.push(o);
@@ -349,6 +362,8 @@
         multi: n ? segs.filter(s => s > 1).length / n : 0, volume: mean(o => o.prof.V), speed: mean(o => o.age > 5 ? o.path / o.age : 0),
         mouthShare: mean(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), eyes: mean(o => o.prof.eye > 0 ? 1 : 0),
         bottom: mean(o => this.isGround(o.cx, o.cy) ? 1 : 0),
+        // nerve circuits: share of bodies that are wired at all, mean wiring, and share whose taste reaches cilia or a joint
+        wired: mean(o => o.full.wiring > 0.2 ? 1 : 0), wiring: mean(o => o.full.wiring), tasteWired: mean(o => o.g.parts.some(p => Math.abs(p.nC) > 0.2 && (Math.abs(p.mCil) > 0.1 || Math.abs(p.mJoint) > 0.1)) ? 1 : 0),
         // per region: who lives there, what they are like, and how many were born elsewhere
         regions: this.regions ? this.regions.map(q => { const l = this.bodies.filter(o => this.regionAt(o.cx) === q.id), m = f => l.length ? l.reduce((a, o) => a + f(o), 0) / l.length : 0; return { name: q.name, n: l.length, seg: m(o => o.full.segs), cilia: m(o => o.full.cilia > 0.05 ? 1 : 0), speed: m(o => o.age > 5 ? o.path / o.age : 0), sessile: m(o => o.full.mouths.length >= 3 && (o.age > 5 ? o.path / o.age : 0) < 0.01 ? 1 : 0), volume: m(o => o.prof.V), mouth: m(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), immigrants: m(o => o.home !== q.id ? 1 : 0), lines: new Set(l.map(o => o.line)).size }; }) : null, cilia: mean(o => o.full.cilia > 0.05 ? 1 : 0), mouths: mean(o => o.full.mouths.length), sense: mean(o => o.full.sense),
         // taxis: of the distance bodies moved by themselves while perceiving food, the fraction that went towards it.

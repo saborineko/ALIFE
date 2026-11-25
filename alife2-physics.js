@@ -49,6 +49,7 @@
         id: i, parent: q.parent, p: q.p, part: q.part, len: q.len, r0: q.r0, r1: q.r1, z0: q.z0, z1: q.z1, rest: q.angle, mir: q.mir,
         phase: q.phase, az: q.az, axial: q.axial, chainRoot: q.chainRoot, group: q.group, idx: q.idx, tip: q.tip, leaf: q.leaf,
         b: i + 1, aw: null, target: q.angle, press: 0, act: 0, theta: q.angle, osc: 0, dir: 1,
+        a: 0, cd: 1, ct: 0, m: null, kids: q.kids || [], circ: A.neural.wiring(q.p) > 1e-6, // local nerve signal, its effect on this segment's cilia, and whether the segment is wired at all
         mass: Math.max(1e-4, K.density * PI * rm * zm * q.len * (1 + K.armorDensity * q.p.armor)),
         sideArea: q.len * (q.z0 + q.z1), wetArea: PI * (rm + zm) * q.len,
         formArea: Math.abs(PI * q.r0 * q.z0 - PI * q.r1 * q.z1) + (q.leaf ? PI * q.r1 * q.z1 : 0) + (i === 0 ? PI * q.r0 * q.z0 : 0),
@@ -94,9 +95,9 @@
       s.padRef = ref.id;
       s.padCap = s.pad ? K.padStress * s.p.grip * (0.2 + ref.p.muscle) * ref.r0 * ref.r0 * ref.z0 : 0;
     }
-    b.hasCilia = b.segs.some(q => q.cil !== 0); b.ciliaUse = 0;
+    b.hasCilia = b.segs.some(q => q.cil !== 0); b.ciliaUse = 0; b.hasCircuit = b.segs.some(q => q.circ);
     // A body with no working joint keeps its shape: it is solved as one rigid body (same forces, far less work).
-    b.rigid = !b.segs.some(q => q.id > 0 && q.tauMax > 0 && q.p.amp > 0.02);
+    b.rigid = !b.segs.some(q => q.id > 0 && q.tauMax > 0 && (q.p.amp > 0.02 || Math.abs(q.p.mJoint || 0) > 0.02));
     if (b.rigid) {
       const c = com(b); b.loc = new Float64Array(2 * np); b.th = 0; b.om = 0; b.inertia = 1e-9;
       for (let k = 0; k < np; k++) { b.loc[2 * k] = b.x[k] - c[0]; b.loc[2 * k + 1] = b.y[k] - c[1]; b.inertia += b.m[k] * (b.loc[2 * k] ** 2 + b.loc[2 * k + 1] ** 2); }
@@ -174,9 +175,9 @@
     // cilia: the skin pushes water backwards along the segment and is pushed forwards. Needs water.
     if (env.fluid > 0 && b.hasCilia) for (const s of segs) {
       if (!s.cil) continue;
-      const f = -K.cilia * s.cil * b.cmd.drive * env.fluid * 0.5, t = K.cilia * Math.abs(s.cil) * b.cmd.turn * env.fluid * 0.35;
+      const f = -K.cilia * s.cil * b.cmd.drive * s.cd * env.fluid * 0.5, t = K.cilia * Math.abs(s.cil) * (b.cmd.turn + s.ct) * env.fluid * 0.35;
       b.fx[s.b] += f * s.dx - t * s.dy; b.fy[s.b] += f * s.dy + t * s.dx; forceA(b, s, f * s.dx + t * s.dy, f * s.dy - t * s.dx);
-      b.ciliaUse += Math.abs(s.cil) * (Math.abs(b.cmd.drive) + 0.35 * Math.abs(b.cmd.turn)) * dt;
+      b.ciliaUse += Math.abs(s.cil) * (Math.abs(b.cmd.drive) * s.cd + 0.35 * Math.abs(b.cmd.turn + s.ct)) * dt;
     }
     // ground: pressed pads grip, whatever the pads cannot carry drags on the belly
     if (env.ground) {
@@ -248,10 +249,10 @@
             const px = e ? s.bx : s.ax, py = e ? s.by : s.ay, rx = vx - om * (py - cy) - fwx, ry = vy + om * (px - cx) - fwy, vt = rx * dx + ry * dy, vn = -rx * dy + ry * dx;
             const at = kt * (vt < 0 ? -vt : vt) + kv, an = kn * (vn < 0 ? -vn : vn) + 2 * kv, ft = -(at < me ? at : me) * vt, fn = -(an < me ? an : me) * vn;
             let fx = ft * dx - fn * dy, fy = ft * dy + fn * dx;
-            if (s.cil) { const f = -K.cilia * s.cil * drive * fluid * 0.5, t = K.cilia * (s.cil < 0 ? -s.cil : s.cil) * turn * fluid * 0.35 * (e ? -1 : 1); fx += f * dx + t * dy; fy += f * dy - t * dx; }
+            if (s.cil) { const f = -K.cilia * s.cil * drive * s.cd * fluid * 0.5, t = K.cilia * (s.cil < 0 ? -s.cil : s.cil) * (turn + s.ct) * fluid * 0.35 * (e ? -1 : 1); fx += f * dx + t * dy; fy += f * dy - t * dx; }
             Fx += fx; Fy += fy; T += (px - cx) * fy - (py - cy) * fx;
           }
-          if (s.cil) b.ciliaUse += (s.cil < 0 ? -s.cil : s.cil) * ((drive < 0 ? -drive : drive) + 0.35 * (turn < 0 ? -turn : turn)) * h;
+          if (s.cil) b.ciliaUse += (s.cil < 0 ? -s.cil : s.cil) * ((drive < 0 ? -drive : drive) * s.cd + 0.35 * Math.abs(turn + s.ct)) * h;
         }
         s.vbx = vx - om * (s.by - cy); s.vby = vy + om * (s.bx - cx);
       }
