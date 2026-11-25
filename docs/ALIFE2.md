@@ -4,6 +4,7 @@
 
 - ブランチ: `alife2-body-engine`
 - 入口: `alife2-lab.html`（形態実験室 2.0）、`alife2-sheet.html`（形態シート）、`alife2.html`（生態系・実験版）
+- 形態可能性探索: `alife2-explorer.html`（[saborineko/alife#1](https://github.com/saborineko/alife/pull/1)。淘汰なしで変異と発生だけから作れる身体を探す。人工探索個体であり自然進化ではない）
 - 進化試験: `node tools/alife2-evolve.js <seed> <秒> <out.json>`、生活様式の収支: `node tools/alife2-lifestyle.js`、定着試験: `node tools/alife2-invade.js`
 - テスト: `node --test tests/alife2.test.js`
 - ALIFE 23（`index.html` / `alife23-*.js` / `morphology-lab.*`）には一切手を入れていない。保存データにも触れない。
@@ -395,6 +396,10 @@ NOVA3 から引き継ぐ教訓（ユーザーより）：
 | 他個体との競争・協力 | より複雑な情報処理 | 未定 |
 
 神経のコスト：組織としての維持費は既にある（神経 0.04、眼 0.10 /体積/秒）。**回路の複雑さ（結合の数）と神経活動には費用が無い**（現在の脳の 15 個の重みは無料）。局所回路の導入時に両方へ費用を付け、知能の利益と費用を淘汰に委ねる。
+
+### 由来の表示
+`primordial`（始祖）／`evolved`（始祖から淘汰の下で生まれた子孫だけ）／`artificial`・`artificial-mutated`（設計・探索した個体）／`evolved-from-artificial`（人工個体を世界に入れた後に生まれた子孫）。
+人工個体の系統は、何世代たっても `evolved` にはならない。
 
 ## 6. 未解決の問題（正直な一覧）
 

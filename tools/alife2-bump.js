@@ -14,7 +14,7 @@ fs.writeFileSync(vf, `// ALIFE 2.0 build number. Written by tools/alife2-bump.js
 `);
 for (const f of fs.readdirSync(root).filter(f => /^alife2.*\.html$/.test(f))) {
   let s = fs.readFileSync(path.join(root, f), 'utf8');
-  s = s.replace(/<script src="\.\/(alife2-[a-z]+\.js)(\?v=\d+)?"><\/script>/g, (m, name) => `<script src="./${name}?v=${n}"></script>`);
+  s = s.replace(/<script src="\.\/(alife2-[a-z-]+\.js)(\?v=\d+)?"><\/script>/g, (m, name) => `<script src="./${name}?v=${n}"></script>`);
   if (!s.includes('alife2-version.js')) s = s.replace(/<script src="\.\/alife2-genome\.js/, `<script src="./alife2-version.js?v=${n}"></script>\n<script src="./alife2-genome.js`);
   fs.writeFileSync(path.join(root, f), s);
 }

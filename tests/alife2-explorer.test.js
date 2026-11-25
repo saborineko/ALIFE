@@ -14,3 +14,10 @@ test('explored genome is accepted by physics, ecology and world save/restore',()
  for(let i=0;i<90;i++)w.step();
  assert.ok(Number.isFinite(specimen.E));assert.ok(A.engine.World.restore(w.save()).bodies.length>0);
 });
+test('descendants of an explored genome are never labelled as natural evolution',()=>{
+ const x=new A.explorer.Explorer({seed:42,depth:50});for(let i=0;i<60;i++)x.one();
+ const q=x.list().find(q=>q.shape.segments>2),{w,specimen}=A.explorer.makeWorld(q.genome,42,true);w.mutation=0.7;specimen.E=specimen.prof.Emax;
+ for(let i=0;i<30*400&&specimen.kids===0&&!specimen.dead;i++)w.step();
+ const kids=w.bodies.filter(o=>o.parent===specimen.id);assert.ok(kids.length>0);assert.ok(kids.every(k=>k.g.origin==='evolved-from-artificial'));
+ assert.ok(w.bodies.filter(o=>o.gen>0&&o.line!==specimen.line).every(o=>o.g.origin==='evolved'));
+});

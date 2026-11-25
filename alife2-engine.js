@@ -214,7 +214,9 @@
         }
       }
       for (const o of born) {
-        const g = this.rand() < this.mutation ? A.genome.mutate(o.g, this.rand) : A.genome.copy(o.g); g.origin = 'evolved';
+        const g = this.rand() < this.mutation ? A.genome.mutate(o.g, this.rand) : A.genome.copy(o.g);
+        // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
+        g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
         const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1; this.spawn(g, o.cx + Math.cos(a) * d, clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), g.birth, o); this.counts.births++;
       }
       if (this.bodies.some(o => o.dead)) {
