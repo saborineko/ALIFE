@@ -32,13 +32,14 @@
   // Maps: a world can be one continuous place whose regions differ in what they offer.
   // Regions are stretches of x (the world joins left to right). Nothing separates them: bodies and food cross freely.
   //   ground  : there is a bottom to touch and drag on        flow    : strength of the current
+  //   weight  : how hard a body presses on that bottom (1 = full; water carries most of a body's weight)
   //   jitter  : how much drifting grains are jostled          regrow  : dissolved food, relative
   //   grains  : rate (energy/s), sizes and energy shares, patches (0 = spread evenly), settle (per second; 1 = appear fixed)
   const MAPS = {
     coast: { W: 480, H: 160, cap: 1600, founders: 60, regions: [
       { name: '外洋', x1: 190, ground: 0, flow: 1, jitter: 1, regrow: 1, grains: { rate: 60, sizes: [0.15, 0.3, 0.6, 1.2], share: [0.2, 0.3, 0.3, 0.2], patches: 5, radius: 12, settle: 0 } },
-      { name: '流れのある海底', x1: 300, ground: 1, flow: 0.6, jitter: 1, regrow: 0.6, grains: { rate: 25, sizes: [0.15, 0.3, 0.6], share: [0.34, 0.33, 0.33], patches: 0, settle: 0.02 } },
-      { name: '浅瀬', x1: 380, ground: 1, flow: 0.15, jitter: 0.3, regrow: 0.4, grains: { rate: 18, sizes: [0.3, 0.6], share: [0.5, 0.5], patches: 0, settle: 1 } },
+      { name: '流れのある海底', x1: 300, ground: 1, weight: 0.35, flow: 0.6, jitter: 1, regrow: 0.6, grains: { rate: 25, sizes: [0.15, 0.3, 0.6], share: [0.34, 0.33, 0.33], patches: 0, settle: 0.02 } },
+      { name: '浅瀬', x1: 380, ground: 1, weight: 0.12, flow: 0.15, jitter: 0.3, regrow: 0.4, grains: { rate: 18, sizes: [0.3, 0.6], share: [0.5, 0.5], patches: 0, settle: 1 } },
       { name: '大粒の海', x1: 480, ground: 0, flow: 0.7, jitter: 0.5, regrow: 0.5, grains: { rate: 40, sizes: [0.6, 1.2, 2.0], share: [0.3, 0.4, 0.3], patches: 3, radius: 16, settle: 0 } }
     ] }
   };
@@ -61,10 +62,10 @@
     buildMap(M) {
       this.yBottom = this.H + 1; this.patch = []; // the strip world's bottom line does not exist here
       const n = this.cols * this.rows, R = this.regions = M.regions.map((q, i) => Object.assign({ id: i, x0: i ? M.regions[i - 1].x1 : 0, debt: 0, patch: [] }, q));
-      this.hGround = new Uint8Array(n); this.hFlow = new Float32Array(n); this.hJit = new Float32Array(n); this.hRegrow = new Float32Array(n); this.hSettle = new Float32Array(n); this.hReg = new Uint8Array(n);
+      this.hGround = new Uint8Array(n); this.hFlow = new Float32Array(n); this.hJit = new Float32Array(n); this.hRegrow = new Float32Array(n); this.hSettle = new Float32Array(n); this.hReg = new Uint8Array(n); this.hWeight = new Float32Array(n);
       for (let c = 0; c < this.cols; c++) {
         const x = (c + 0.5) * this.cell, q = R[this.regionAt(x)], edge = Math.min(x - q.x0, q.x1 - x), nb = R[(q.id + (x - q.x0 < q.x1 - x ? R.length - 1 : 1)) % R.length], k = clamp(0.5 + edge / 16, 0.5, 1); // blend over 8 units each side of a border
-        for (let r = 0; r < this.rows; r++) { const i = r * this.cols + c; this.hReg[i] = q.id; this.hGround[i] = q.ground; this.hSettle[i] = q.grains.settle; this.hFlow[i] = q.flow * k + nb.flow * (1 - k); this.hJit[i] = q.jitter * k + nb.jitter * (1 - k); this.hRegrow[i] = q.regrow * k + nb.regrow * (1 - k); }
+        for (let r = 0; r < this.rows; r++) { const i = r * this.cols + c; this.hReg[i] = q.id; this.hGround[i] = q.ground; this.hWeight[i] = q.weight == null ? 1 : q.weight; this.hSettle[i] = q.grains.settle; this.hFlow[i] = q.flow * k + nb.flow * (1 - k); this.hJit[i] = q.jitter * k + nb.jitter * (1 - k); this.hRegrow[i] = q.regrow * k + nb.regrow * (1 - k); }
       }
       for (const q of R) for (let i = 0; i < q.grains.patches; i++) q.patch.push({ x: q.x0 + q.grains.radius + this.rand() * (q.x1 - q.x0 - 2 * q.grains.radius), y: 8 + this.rand() * (this.H - 16), a: this.rand() * TAU });
     }
@@ -242,7 +243,7 @@
       for (const o of this.bodies) {
         const b = o.b, pr = o.prof;
         const ground = this.regions ? this.hGround[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))] === 1 : o.cy >= this.yBottom, fl = this.flowAt(o.cx, o.cy);
-        b.env.ground = ground; b.env.flowX = fl[0]; b.env.flowY = fl[1];
+        b.env.ground = ground; b.env.flowX = fl[0]; b.env.flowY = fl[1]; if (this.regions) b.env.gravity = 4 * this.hWeight[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))];
         if ((this.tick + o.id) % 5 === 0) this.sense(o);
         if (o.passive) { if (!ground) for (let k = 0; k < b.np; k++) { b.x[k] += fl[0] * dt; b.y[k] += fl[1] * dt; } P.pose(b); }
         else P.step(b, dt, this.substeps);
