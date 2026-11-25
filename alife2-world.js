@@ -5,6 +5,7 @@
   const A = ALIFE2, $ = id => document.getElementById(id), cv = $('world'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
   const zc = $('zoom'), zx = zc.getContext('2d'), zoomR = new A.render.Renderer(), thumbR = new A.render.Renderer(), pool = new Map();
   const q = new URLSearchParams(location.search), KEY = 'alife2_world_v1';
+  let field = null, fimg = null, sand = null, motes = null, frameNo = 0; const trails = new WeakMap();
   let w, view, paused = false, sel = null, shown = null, follow = false, loaded = window.ALIFE2_LOAD || null, lastPanels = 0, lastSave = 0;
 
   function start(world) {
@@ -80,30 +81,66 @@
 
   function draw() {
     if (follow && sel && !sel.dead) { view.cx += (sel.cx - view.cx) * 0.15; view.cy += (sel.cy - view.cy) * 0.15; }
-    ctx.fillStyle = '#050a12'; ctx.fillRect(0, 0, W, H);
-    const c = w.cell * view.scale;
-    for (let r = 0; r < w.rows; r++) for (let k = 0; k < w.cols; k++) {
-      const x = sx(k * w.cell), y = sy(r * w.cell); if (x > W || y > H || x + c < 0 || y + c < 0) continue;
-      const n = w.nut[r * w.cols + k], bottom = r * w.cell >= w.yBottom;
-      ctx.fillStyle = bottom ? 'rgb(' + Math.round(20 + 18 * n) + ',' + Math.round(26 + 26 * n) + ',' + Math.round(22 + 14 * n) + ')' : 'rgb(' + Math.round(8 + 10 * n) + ',' + Math.round(20 + 34 * n) + ',' + Math.round(34 + 44 * n) + ')';
-      ctx.fillRect(x, y, c + 1, c + 1);
+    view.cx = ((view.cx % w.W) + w.W) % w.W;
+    const wrapX = x => { let d = x - view.cx; if (d > w.W / 2) d -= w.W; else if (d < -w.W / 2) d += w.W; return d; };
+    const X = x => wrapX(x) * view.scale + W / 2, Y = y => (y - view.cy) * view.scale + H / 2, sc = view.scale;
+    ctx.fillStyle = '#03070d'; ctx.fillRect(0, 0, W, H);
+    // dissolved food as a smooth field (the world joins left to right, so it is tiled)
+    if (!field || field.width !== w.cols) { field = Object.assign(document.createElement('canvas'), { width: w.cols, height: w.rows }); fimg = field.getContext('2d').createImageData(w.cols, w.rows); }
+    for (let i = 0; i < w.nut.length; i++) { const n = Math.min(1, w.nut[i]), bottom = Math.floor(i / w.cols) * w.cell >= w.yBottom, j = i * 4; fimg.data[j] = bottom ? 30 + 26 * n : 6 + 14 * n; fimg.data[j + 1] = bottom ? 30 + 30 * n : 22 + 46 * n; fimg.data[j + 2] = bottom ? 24 + 14 * n : 38 + 60 * n; fimg.data[j + 3] = 255; }
+    field.getContext('2d').putImageData(fimg, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    const y0w = Y(0), hw = w.H * sc, ww = w.W * sc, x0w = (-view.cx) * sc + W / 2;
+    for (const k of [-1, 0, 1]) ctx.drawImage(field, x0w + k * ww - 0.5, y0w, ww + 1, hw);
+    // light from above in open water, sediment on the bottom
+    const yb = Y(w.yBottom), lg = ctx.createLinearGradient(0, y0w, 0, yb); lg.addColorStop(0, 'rgba(120,200,240,.16)'); lg.addColorStop(0.5, 'rgba(60,130,190,.04)'); lg.addColorStop(1, 'rgba(0,10,20,.18)');
+    ctx.fillStyle = lg; ctx.fillRect(0, Math.max(0, y0w), W, Math.min(H, yb) - Math.max(0, y0w));
+    if (yb < H) {
+      if (!sand) { sand = document.createElement('canvas'); sand.width = sand.height = 256; const d = sand.getContext('2d'); for (let i = 0; i < 2600; i++) { const v = Math.random(); d.fillStyle = v > 0.5 ? 'rgba(210,200,150,' + 0.05 * v + ')' : 'rgba(0,0,0,' + 0.16 * (1 - v) + ')'; d.beginPath(); d.arc(Math.random() * 256, Math.random() * 256, 0.6 + Math.random() * 2.4, 0, 6.3); d.fill(); } }
+      const pat = ctx.createPattern(sand, 'repeat'), k = sc / 7; pat.setTransform(new DOMMatrix([k, 0, 0, k, x0w, y0w]));
+      ctx.fillStyle = pat; ctx.fillRect(0, yb, W, Math.min(H, Y(w.H)) - yb);
+      const bg = ctx.createLinearGradient(0, yb - 10, 0, yb + 16); bg.addColorStop(0, 'rgba(190,210,150,0)'); bg.addColorStop(0.45, 'rgba(190,210,150,.22)'); bg.addColorStop(1, 'rgba(190,210,150,0)'); ctx.fillStyle = bg; ctx.fillRect(0, yb - 10, W, 26);
     }
-    for (const f of w.food) { const x = sx(f.x), y = sy(f.y); if (x < 0 || y < 0 || x > W || y > H) continue; const r = Math.max(0.7, f.size * 0.5 * view.scale); ctx.fillStyle = f.fixed ? 'rgba(190,220,120,.75)' : 'rgba(150,235,170,.75)'; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.3); ctx.fill(); }
+    if (y0w > 0) { ctx.fillStyle = '#02050a'; ctx.fillRect(0, 0, W, y0w); } if (Y(w.H) < H) { ctx.fillStyle = '#02050a'; ctx.fillRect(0, Y(w.H), W, H - Y(w.H)); }
+    // motes carried by the real current: where they streak, the water is moving
+    if (!motes || motes.w !== w) { motes = Array.from({ length: 420 }, () => ({ x: Math.random() * w.W, y: Math.random() * w.H, a: 0.25 + Math.random() * 0.5 })); motes.w = w; }
+    const adv = paused ? 0 : Number($('speed').value) * w.dt; ctx.lineCap = 'round';
+    for (const m of motes) {
+      const [vx, vy] = w.flowAt(m.x, m.y); m.x = ((m.x + vx * adv) % w.W + w.W) % w.W; m.y += vy * adv; if (m.y < 0 || m.y > w.yBottom) { m.y = Math.random() * w.yBottom; m.x = Math.random() * w.W; }
+      const x = X(m.x), y = Y(m.y); if (x < -20 || x > W + 20 || y < -20 || y > H + 20) continue;
+      const l = Math.min(26, 2.2 * sc); ctx.strokeStyle = 'rgba(170,215,240,' + 0.22 * m.a + ')'; ctx.lineWidth = Math.max(0.8, 0.05 * sc); ctx.beginPath(); ctx.moveTo(x - vx * l, y - vy * l); ctx.lineTo(x + 0.01, y); ctx.stroke();
+    }
+    // food grains: soft, and quieter than the living things
+    for (const pass of [0, 1]) {
+      ctx.fillStyle = pass ? 'rgba(214,196,120,.6)' : 'rgba(120,214,178,.55)'; ctx.beginPath();
+      for (const f of w.food) { if (!!f.fixed !== !!pass) continue; const x = X(f.x), y = Y(f.y); if (x < -4 || y < -4 || x > W + 4 || y > H + 4) continue; const r = f.size * 0.42 * sc; if (r < 0.9) ctx.rect(x - 0.6, y - 0.6, 1.2, 1.2); else { ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, 6.3); } }
+      ctx.fill();
+      if (sc > 9) { ctx.fillStyle = pass ? 'rgba(255,240,180,.10)' : 'rgba(170,255,220,.10)'; ctx.beginPath(); for (const f of w.food) { if (!!f.fixed !== !!pass) continue; const x = X(f.x), y = Y(f.y); if (x < -9 || y < -9 || x > W + 9 || y > H + 9) continue; const r = f.size * 0.95 * sc; ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, 6.3); } ctx.fill(); }
+    }
+    frameNo++;
     for (const o of w.bodies) {
       const b = o.b; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
       for (const s of b.segs) { const r = Math.max(s.r0, s.r1); x0 = Math.min(x0, s.ax - r, s.bx - r); x1 = Math.max(x1, s.ax + r, s.bx + r); y0 = Math.min(y0, s.ay - r, s.by - r); y1 = Math.max(y1, s.ay + r, s.by + r); }
-      const px = (x1 - x0) * view.scale, py = (y1 - y0) * view.scale, mx = sx((x0 + x1) / 2), my = sy((y0 + y1) / 2);
+      const mxw = (x0 + x1) / 2, shift = wrapX(mxw) - (mxw - view.cx), px = (x1 - x0) * sc, py = (y1 - y0) * sc, mx = X(mxw), my = Y((y0 + y1) / 2);
+      // wake: where a self-propelled body has just been (its own movement, not the drift)
+      if (!o.passive) {
+        let t = trails.get(o); if (!t) trails.set(o, t = []);
+        if (frameNo % 3 === 0 && !paused) { t.push([o.cx, o.cy]); if (t.length > 22) t.shift(); }
+        if (t.length > 2 && sc > 5) { ctx.lineWidth = Math.max(1, Math.min(px, py) * 0.25); for (let i = 1; i < t.length; i++) { if (Math.abs(t[i][0] - t[i - 1][0]) > 5) continue; ctx.strokeStyle = 'hsla(' + o.g.hue + ',60%,75%,' + 0.16 * i / t.length + ')'; ctx.beginPath(); ctx.moveTo(X(t[i - 1][0]), Y(t[i - 1][1])); ctx.lineTo(X(t[i][0]), Y(t[i][1])); ctx.stroke(); } }
+      }
       if (mx < -px || my < -py || mx > W + px || my > H + py) continue;
-      if (Math.max(px, py) < 7 && !(b.hasCilia && Math.max(px, py) > 4)) { ctx.fillStyle = 'hsl(' + o.g.hue + ',55%,65%)'; ctx.beginPath(); ctx.arc(mx, my, Math.max(1.5, Math.max(px, py) / 2), 0, 6.3); ctx.fill(); }
-      else {
-        let size = 32; while (size < Math.max(px, py) + 14 && size < 512) size *= 2;
+      if (Math.max(px, py) < 9) { // far away: still a body with a shape and a heading, not a dot
+        ctx.lineCap = 'round';
+        for (const [wd, col] of [[2.6, 'hsla(' + o.g.hue + ',40%,80%,.16)'], [1.5, 'hsla(' + o.g.hue + ',35%,82%,.5)'], [0.8, 'hsla(' + (o.g.hue + 25) + ',45%,60%,.9)']]) { ctx.strokeStyle = col; ctx.beginPath(); for (const s of b.segs) { ctx.lineWidth = Math.max(1.6, (s.r0 + s.r1) * sc * wd); ctx.moveTo(X(s.ax), Y(s.ay)); ctx.lineTo(X(s.bx) + 0.01, Y(s.by)); } ctx.stroke(); }
+      } else {
+        let size = 32; while (size < Math.max(px, py) + 18 && size < 512) size *= 2;
         if (!pool.has(size)) pool.set(size, new A.render.Renderer());
         ctx.save(); ctx.translate(Math.round(mx - size / 2), Math.round(my - size / 2));
-        pool.get(size).draw(ctx, b.segs, { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, scale: view.scale, w: size, h: size }, { gpu: false, hue: o.g.hue, glow: false, time: b.t, drive: b.cmd.drive, bristles: view.scale > 20, internals: view.scale > 12 });
+        pool.get(size).draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: false, hue: o.g.hue, glow: sc > 18, shadow: o.cy >= w.yBottom, time: b.t, drive: b.cmd.drive, bristles: sc > 20, internals: sc > 9, pads: o.cy >= w.yBottom });
         ctx.restore();
       }
-      if (o === sel) { ctx.strokeStyle = '#eafff4'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(mx, my, Math.max(px, py) / 2 + 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
+      if (o === sel) { ctx.strokeStyle = '#eafff4'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(mx, my, Math.max(px, py) / 2 + 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
     }
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, W * 0.75); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,4,10,.5)'); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
     if (shown && shown.members != null) { // a body plan that arose here, living or extinct
       const c = shown, inc = c.eaten + c.absorbed; thumb(zc, c.g, zoomR);
       $('info').textContent = '体制の記録（始まりの個体 #' + c.id + ' の遺伝子から発生させた成体）\n' + kindText(c.kind) + ' / 成体の体積 ' + c.V.toFixed(2) + ' / 系統 ' + c.line
@@ -142,7 +179,7 @@
   cv.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, moved: false }; });
   cv.addEventListener('pointermove', e => { if (!drag) return; const k = W / cv.clientWidth; if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 3) { drag.moved = true; follow = false; $('follow').textContent = '追跡'; } view.cx -= (e.clientX - drag.x) * k / view.scale; view.cy -= (e.clientY - drag.y) * k / view.scale; drag.x = e.clientX; drag.y = e.clientY; });
   cv.addEventListener('pointerup', e => {
-    if (drag && !drag.moved) { const r = cv.getBoundingClientRect(), k = W / r.width, x = ((e.clientX - r.left) * k - W / 2) / view.scale + view.cx, y = ((e.clientY - r.top) * k - H / 2) / view.scale + view.cy; let best = null, bd = 1e9; for (const o of w.bodies) { const d = Math.hypot(o.cx - x, o.cy - y); if (d < bd) { bd = d; best = o; } } select(bd < 6 + 20 / view.scale ? best : null); }
+    if (drag && !drag.moved) { const r = cv.getBoundingClientRect(), k = W / r.width, x = ((e.clientX - r.left) * k - W / 2) / view.scale + view.cx, y = ((e.clientY - r.top) * k - H / 2) / view.scale + view.cy; let best = null, bd = 1e9; for (const o of w.bodies) { let dx = o.cx - x; dx -= Math.round(dx / w.W) * w.W; const d = Math.hypot(dx, o.cy - y); if (d < bd) { bd = d; best = o; } } select(bd < 6 + 20 / view.scale ? best : null); }
     drag = null;
   });
   const pick = f => { if (!w.bodies.length) return; select(w.bodies.reduce((a, b) => (f(b) > f(a) ? b : a))); follow = true; $('follow').textContent = '追跡中'; view.scale = Math.max(view.scale, 30); };

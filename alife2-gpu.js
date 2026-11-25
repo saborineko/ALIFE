@@ -66,14 +66,15 @@ void main(){
   float gr = noise(vec2(U, V) * 0.42), mid = noise(vec2(U, V) * 0.9 + 3.), fine = noise(vec2(U, V) * 1.9 + 9.);
   float ring = 0.5 + 0.5 * sin(U * 6.283 / max(2.6, R * 0.16));
   float tex = 0.70 + 0.34 * gr + 0.14 * mid + 0.12 * fine + (0.10 + 0.14 * a) * ring * thick;
-  float cut = exp(-(e - 0.9) * (e - 0.9) * 0.9), gap = exp(-(e - 3.2) * (e - 3.2) * 0.35);
+  float small = R < 14. ? 0.3 + 0.05 * R : 1.;
+  float cut = small * exp(-(e - 0.9) * (e - 0.9) * 0.9), gap = small * exp(-(e - 3.2) * (e - 3.2) * 0.35);
   float speck = smoothstep(0.80, 0.95, fine) * thick * 0.5;
   // thin-film sheen on the cuticle, strongest at grazing angles
   vec3 film = 0.5 + 0.5 * cos(6.283 * (vec3(0., 0.33, 0.67) + n.z * 1.4 + U * 0.004 + gr * 0.25));
   vec3 base = mix(uBody, uArm, a);
-  float edge = rim * 0.6 + cut * 0.4 + speck;
+  float edge = rim * 0.6 * small + cut * 0.4 + speck;
   vec3 col = base * (0.20 + 0.58 * diff + 0.12 * fill) * tex + uDeep * 0.20 * back + uRim * edge + film * rim * (0.22 + 0.25 * a) + sp;
-  float al = (0.05 + 0.34 * k + 0.40 * a) * (0.35 + 0.65 * thick) * (0.65 + 0.7 * gr) * (1. - 0.45 * gap) + rim * 0.55 + cut * 0.42 + sp + speck * 0.6;
+  float al = (0.05 + 0.34 * k + 0.40 * a) * (0.35 + 0.65 * thick) * (0.65 + 0.7 * gr) * (1. - 0.45 * gap) + rim * (0.2 + 0.35 * small) + cut * 0.42 + sp * small + speck * 0.6 + (1. - small) * 0.22 * thick;
   al = min(al, 0.96) * cov;
   o = vec4(col * al, al);
 }`;

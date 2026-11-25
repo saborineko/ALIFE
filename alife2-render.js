@@ -113,12 +113,13 @@
         // body-fixed texture: cytoplasm granules and fine rings around the body
         const gr = noise(U[i] * 0.42, V[i] * 0.42), fine = noise(U[i] * 1.3 + 9, V[i] * 1.3), ring = 0.5 + 0.5 * Math.sin(U[i] * 6.283 / Math.max(2.6, R[i] * 0.16));
         const tex = 0.72 + 0.4 * gr + 0.16 * fine + (0.10 + 0.14 * a) * ring * thick;
-        const cut = Math.exp(-(e - 0.9) * (e - 0.9) * 0.9), gap = Math.exp(-(e - 3.2) * (e - 3.2) * 0.35);
+        const small = R[i] < 14 ? 0.3 + 0.05 * R[i] : 1; // a thin body gets a thin cuticle, not a drawn outline
+        const cut = small * Math.exp(-(e - 0.9) * (e - 0.9) * 0.9), gap = small * Math.exp(-(e - 3.2) * (e - 3.2) * 0.35);
         const lit = (0.22 + 0.60 * diff) * tex, bl = 0.20 * back, speck = fine > 0.86 ? (fine - 0.86) * 3 * thick : 0;
         let r = body[0] + (arm[0] - body[0]) * a, g = body[1] + (arm[1] - body[1]) * a, b = body[2] + (arm[2] - body[2]) * a;
-        const edge = rim * 0.6 + cut * 0.4 + speck;
+        const edge = rim * 0.6 * small + cut * 0.4 + speck;
         r = r * lit + deep[0] * bl + rimC[0] * edge + sp; g = g * lit + deep[1] * bl + rimC[1] * edge + sp; b = b * lit + deep[2] * bl + rimC[2] * edge + sp;
-        let al = (0.05 + 0.34 * k + 0.40 * a) * (0.35 + 0.65 * thick) * (0.65 + 0.7 * gr) * (1 - 0.45 * gap) + rim * 0.55 + cut * 0.42 + sp + speck * 0.6; al = (al > 0.96 ? 0.96 : al) * cov;
+        let al = (0.05 + 0.34 * k + 0.40 * a) * (0.35 + 0.65 * thick) * (0.65 + 0.7 * gr) * (1 - 0.45 * gap) + rim * (0.2 + 0.35 * small) + cut * 0.42 + sp * small + speck * 0.6 + (1 - small) * 0.22 * thick; al = (al > 0.96 ? 0.96 : al) * cov;
         const j = i * 4; d[j] = r * 255; d[j + 1] = g * 255; d[j + 2] = b * 255; d[j + 3] = al * 255;
       }
       return this.img;
@@ -226,12 +227,12 @@
           }
         }
         if (p.mouth > 0.1 && s.tip && r1 > 1.5) {
-          const mr = r1 * (0.18 + 0.3 * p.mouth), far = Math.min(r1 * 0.55, L * 0.5), x = bx + ux * far, y = by + uy * far;
-          ctx.fillStyle = 'rgba(8,6,14,.8)'; ctx.beginPath(); ctx.ellipse(x, y, mr * 0.6, mr, ang, 0, TAU); ctx.fill();
-          ctx.strokeStyle = 'rgba(255,170,150,.6)'; ctx.lineWidth = Math.max(0.6, mr * 0.16); ctx.stroke();
+          const mr = r1 * (0.14 + 0.22 * p.mouth), far = Math.min(r1 * 0.6, L * 0.5), x = bx + ux * far, y = by + uy * far;
+          const g = ctx.createRadialGradient(x, y, 0, x, y, mr * 1.25); g.addColorStop(0, 'rgba(6,3,10,.9)'); g.addColorStop(0.55, 'rgba(30,10,20,.7)'); g.addColorStop(0.8, 'rgba(255,170,150,.35)'); g.addColorStop(1, 'rgba(255,170,150,0)');
+          ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y, mr * 0.8, mr * 1.25, ang, 0, TAU); ctx.fill();
         }
         if (s.pad && opt.pads !== false && r1 * 2 > 1) {
-          ctx.fillStyle = 'rgba(255,240,190,' + (0.15 + 0.6 * (s.press || 0)) + ')'; ctx.beginPath(); ctx.arc(bx, by, Math.max(1.3, r1 * 1.5), 0, TAU); ctx.fill();
+          ctx.fillStyle = 'rgba(255,240,190,' + (0.12 + 0.5 * (s.press || 0)) + ')'; ctx.beginPath(); ctx.arc(bx, by, Math.max(1.2, r1 * 0.7), 0, TAU); ctx.fill();
         }
       }
       ctx.restore();
