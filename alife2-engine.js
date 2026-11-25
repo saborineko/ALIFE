@@ -23,6 +23,7 @@
     bottomRate: 25, bottomSize: [0.15, 0.3, 0.6], bottomLife: 150,
     flow: 0.35, sink: 0.12, jitter: 0.25, mutation: 0.7, founders: 20, maxSegs: 64,
     blind: 0,                             // control experiment: nothing in this world is told where food is
+    rigid: 1,                             // 0 = never use the rigid-body shortcut (control experiment)
     jostleEvery: 1,                       // 1 = every drifting grain is jostled every step. Larger values are faster but starve stationary feeders (measured: -15% at 4)
     noCilia: 0                            // control experiment: cilia genes cannot be expressed in this world
   };
@@ -71,6 +72,7 @@
       const c = A.physics.com(o.b); for (let k = 0; k < o.b.np; k++) { o.b.x[k] += x - c[0]; o.b.y[k] += y - c[1]; }
       A.physics.pose(o.b); o.cx = x; o.cy = y; o.work0 = 0;
       // a body with no working joint cannot do anything but drift: move it with the water instead of simulating it
+      if (!this.rigid) o.b.rigid = false; // control experiment: solve every body with the jointed solver
       o.passive = !o.b.hasCilia && !o.b.segs.some(q => q.id > 0 && q.tauMax > 0 && q.p.amp > 0.02); o.cil0 = 0;
     }
     // counts for taxis only if it went somewhere by itself: at least 2 units while perceiving food, at 0.02 units/s or more over its life
