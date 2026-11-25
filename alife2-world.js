@@ -27,7 +27,7 @@
   function start(world) {
     if (world) w = world;
     else {
-      w = new A.engine.World({ seed: Number($('seed').value) || 1 });
+      w = new A.engine.World({ seed: Number($('seed').value) || 1, map: $('map').value });
       if (loaded) for (const k of loaded.top) for (let i = 0; i < Math.max(1, Math.round(k.count / 4)); i++) w.spawn(A.genome.sanitize(A.genome.copy(k.genome)), w.rand() * w.W, w.rand() * w.H, 1, null); // older result files lack newer genes
       else w.seedWith(A.genome.primordial(w.seed));
     }
@@ -57,6 +57,7 @@
       + '\n成体の体節数：平均 ' + c0.segMean.toFixed(2) + '・最大 ' + c0.segMax + ' / 多体節 ' + (c0.multi * 100).toFixed(0) + '%'
       + '\n平均体積 ' + c0.volume.toFixed(2) + ' / 自力移動 ' + c0.speed.toFixed(3) + ' u/s / 口から ' + (c0.mouthShare * 100).toFixed(0) + '% / 眼 ' + (c0.eyes * 100).toFixed(0) + '% / 底面 ' + (c0.bottom * 100).toFixed(0) + '%'
       + '\n溶存栄養 ' + c0.nutrient.toFixed(2) + ' / 粒 ' + c0.food + ' / 出生 ' + c0.births + ' / 餓死 ' + c0.starved + ' / 老衰 ' + c0.aged + ' / 上限で不成立 ' + c0.blocked
+      + (c0.regions ? '\n' + c0.regions.map(q => q.name + '：' + q.n + '匹・体節 ' + q.seg.toFixed(1) + '・繊毛 ' + (q.cilia * 100).toFixed(0) + '%・口から ' + (q.mouth * 100).toFixed(0) + '%・他の海域生まれ ' + (q.immigrants * 100).toFixed(0) + '%').join('\n') : '')
       + '\n系譜に残る個体 ' + w.tree.size + '（子孫が絶えて除いた ' + w.pruned + '）';
     chart(c0);
     // atlas of living body plans
@@ -105,14 +106,14 @@
     ctx.fillStyle = '#03070d'; ctx.fillRect(0, 0, W, H);
     // dissolved food as a smooth field (the world joins left to right, so it is tiled)
     if (!field || field.width !== w.cols) { field = Object.assign(document.createElement('canvas'), { width: w.cols, height: w.rows }); fimg = field.getContext('2d').createImageData(w.cols, w.rows); }
-    for (let i = 0; i < w.nut.length; i++) { const n = Math.min(1, w.nut[i]), bottom = Math.floor(i / w.cols) * w.cell >= w.yBottom, j = i * 4; fimg.data[j] = bottom ? 30 + 26 * n : 6 + 14 * n; fimg.data[j + 1] = bottom ? 30 + 30 * n : 22 + 46 * n; fimg.data[j + 2] = bottom ? 24 + 14 * n : 38 + 60 * n; fimg.data[j + 3] = 255; }
+    for (let i = 0; i < w.nut.length; i++) { const n = Math.min(1, w.nut[i]), bottom = w.regions ? w.hGround[i] === 1 : Math.floor(i / w.cols) * w.cell >= w.yBottom, j = i * 4; fimg.data[j] = bottom ? 30 + 26 * n : 6 + 14 * n; fimg.data[j + 1] = bottom ? 30 + 30 * n : 22 + 46 * n; fimg.data[j + 2] = bottom ? 24 + 14 * n : 38 + 60 * n; fimg.data[j + 3] = 255; }
     field.getContext('2d').putImageData(fimg, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
     const y0w = Y(0), hw = w.H * sc, ww = w.W * sc, x0w = (-view.cx) * sc + W / 2;
     for (const k of [-1, 0, 1]) ctx.drawImage(field, x0w + k * ww - 0.5, y0w, ww + 1, hw);
     // light from above in open water, sediment on the bottom
-    const yb = Y(w.yBottom), lg = ctx.createLinearGradient(0, y0w, 0, yb); lg.addColorStop(0, 'rgba(120,200,240,.16)'); lg.addColorStop(0.5, 'rgba(60,130,190,.04)'); lg.addColorStop(1, 'rgba(0,10,20,.18)');
+    const yb = Y(Math.min(w.yBottom, w.H)), lg = ctx.createLinearGradient(0, y0w, 0, yb); lg.addColorStop(0, 'rgba(120,200,240,.16)'); lg.addColorStop(0.5, 'rgba(60,130,190,.04)'); lg.addColorStop(1, 'rgba(0,10,20,.18)');
     ctx.fillStyle = lg; ctx.fillRect(0, Math.max(0, y0w), W, Math.min(H, yb) - Math.max(0, y0w));
-    if (yb < H) {
+    if (yb < H && !w.regions) {
       if (!sand) { sand = document.createElement('canvas'); sand.width = sand.height = 256; const d = sand.getContext('2d'); for (let i = 0; i < 2600; i++) { const v = Math.random(); d.fillStyle = v > 0.5 ? 'rgba(210,200,150,' + 0.05 * v + ')' : 'rgba(0,0,0,' + 0.16 * (1 - v) + ')'; d.beginPath(); d.arc(Math.random() * 256, Math.random() * 256, 0.6 + Math.random() * 2.4, 0, 6.3); d.fill(); } }
       const pat = ctx.createPattern(sand, 'repeat'), k = sc / 7; pat.setTransform(new DOMMatrix([k, 0, 0, k, x0w, y0w]));
       ctx.fillStyle = pat; ctx.fillRect(0, yb, W, Math.min(H, Y(w.H)) - yb);
@@ -123,7 +124,7 @@
     if (!motes || motes.w !== w) { motes = Array.from({ length: 420 }, () => ({ x: Math.random() * w.W, y: Math.random() * w.H, a: 0.25 + Math.random() * 0.5 })); motes.w = w; }
     const adv = paused ? 0 : Number($('speed').value) * w.dt; ctx.lineCap = 'round';
     for (const m of motes) {
-      const [vx, vy] = w.flowAt(m.x, m.y); m.x = ((m.x + vx * adv) % w.W + w.W) % w.W; m.y += vy * adv; if (m.y < 0 || m.y > w.yBottom) { m.y = Math.random() * w.yBottom; m.x = Math.random() * w.W; }
+      const [vx, vy] = w.flowAt(m.x, m.y); m.x = ((m.x + vx * adv) % w.W + w.W) % w.W; m.y += vy * adv; if (m.y < 0 || m.y > Math.min(w.yBottom, w.H)) { m.y = Math.random() * Math.min(w.yBottom, w.H); m.x = Math.random() * w.W; }
       const x = X(m.x), y = Y(m.y); if (x < -20 || x > W + 20 || y < -20 || y > H + 20) continue;
       const l = Math.min(26, 2.2 * sc); ctx.strokeStyle = 'rgba(170,215,240,' + 0.22 * m.a + ')'; ctx.lineWidth = Math.max(0.8, 0.05 * sc); ctx.beginPath(); ctx.moveTo(x - vx * l, y - vy * l); ctx.lineTo(x + 0.01, y); ctx.stroke();
     }
@@ -162,10 +163,15 @@
         // each body gets its own small picture, drawn larger than shown when the body is small
         const size = Math.ceil(Math.max(px, py) + 18), ss = Math.max(1, Math.min(4, Math.floor(440 / size)));
         ctx.save(); ctx.translate(Math.round(mx - size / 2), Math.round(my - size / 2));
-        bodyR.draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: gpuOn, quality: gpuOn ? ss : Math.min(2, ss), hue: o.g.hue, glow: sc > 18, shadow: o.cy >= w.yBottom, time: b.t, clock: w.t, gut: o.G / Math.max(1e-6, o.prof.gutCap), speed: o._v || 0, fill: o.E / o.prof.Emax, drive: b.cmd.drive, bristles: sc > 20, internals: sc > 6, pads: o.cy >= w.yBottom });
+        bodyR.draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: gpuOn, quality: gpuOn ? ss : Math.min(2, ss), hue: o.g.hue, glow: sc > 18, shadow: w.isGround(o.cx, o.cy), time: b.t, clock: w.t, gut: o.G / Math.max(1e-6, o.prof.gutCap), speed: o._v || 0, fill: o.E / o.prof.Emax, drive: b.cmd.drive, bristles: sc > 20, internals: sc > 6, pads: w.isGround(o.cx, o.cy) });
         ctx.restore();
       }
       if (o === sel) { ctx.strokeStyle = '#eafff4'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(mx, my, Math.max(px, py) / 2 + 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
+    }
+    if (w.regions) { // region names along the top, and the borders between regions
+      ctx.font = '13px system-ui'; ctx.textAlign = 'center';
+      for (const q of w.regions) { const xm = X((q.x0 + q.x1) / 2), xb = X(q.x1 % w.W); ctx.fillStyle = 'rgba(235,245,240,.75)'; ctx.fillText(q.name, xm, Math.max(16, y0w + 16)); ctx.strokeStyle = 'rgba(200,225,235,.14)'; ctx.setLineDash([3, 6]); ctx.beginPath(); ctx.moveTo(xb, Math.max(0, y0w)); ctx.lineTo(xb, Math.min(H, Y(w.H))); ctx.stroke(); ctx.setLineDash([]); }
+      ctx.textAlign = 'start';
     }
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, W * 0.75); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,4,10,.5)'); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
     if (shown && shown.members != null) { // a body plan that arose here, living or extinct
@@ -218,7 +224,7 @@
   $('biggest').onclick = () => pick(o => o.prof.V, '最大の身体'); $('mover').onclick = () => pick(speedOf, '最も動く個体');
   $('oldest').onclick = () => { const count = new Map(); for (const o of w.bodies) for (const n of w.ancestors(o.id)) count.set(n.id, (count.get(n.id) || 0) + 1); pick(o => count.get(o.id) || 0, '最多の子孫'); rule = o => w.ancestors(o.id).length ? w.bodies.filter(b => w.ancestors(b.id).some(n => n.id === o.id)).length : 0; };
   $('follow').onclick = () => { follow = !follow && !!sel; $('follow').textContent = follow ? '追跡中' : '追跡'; if (follow) view.scale = Math.max(view.scale, 30); };
-  $('restart').onclick = () => start(); $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
+  $('restart').onclick = () => start(); $('map').onchange = () => start(); $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; };
   $('founder').onchange = () => { if ($('founder').value === 'file') $('file').click(); else { loaded = null; start(); } };
   $('file').onchange = async e => { loaded = JSON.parse(await e.target.files[0].text()); start(); };
@@ -231,6 +237,7 @@
   $('rank').onchange = $('lostFilter').onchange = () => { lastPanels = 0; };
 
   if (q.get('seed')) $('seed').value = q.get('seed');
+  if (q.get('map')) $('map').value = q.get('map');
   (async () => {
     if (!loaded && q.get('load')) loaded = await (await fetch(q.get('load'))).json().catch(() => null);
     start();

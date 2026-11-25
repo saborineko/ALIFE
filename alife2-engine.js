@@ -22,24 +22,54 @@
     patches: 4, patchRadius: 12,
     bottomRate: 25, bottomSize: [0.15, 0.3, 0.6], bottomLife: 150,
     flow: 0.35, sink: 0.12, jitter: 0.25, mutation: 0.7, founders: 20, maxSegs: 64,
+    map: '',                              // '' = the original world (open water over a bottom strip); 'coast' = regions side by side
     blind: 0,                             // control experiment: nothing in this world is told where food is
     rigid: 1,                             // 0 = never use the rigid-body shortcut (control experiment)
     jostleEvery: 1,                       // 1 = every drifting grain is jostled every step. Larger values are faster but starve stationary feeders (measured: -15% at 4)
     noCilia: 0                            // control experiment: cilia genes cannot be expressed in this world
   };
 
+  // Maps: a world can be one continuous place whose regions differ in what they offer.
+  // Regions are stretches of x (the world joins left to right). Nothing separates them: bodies and food cross freely.
+  //   ground  : there is a bottom to touch and drag on        flow    : strength of the current
+  //   jitter  : how much drifting grains are jostled          regrow  : dissolved food, relative
+  //   grains  : rate (energy/s), sizes and energy shares, patches (0 = spread evenly), settle (per second; 1 = appear fixed)
+  const MAPS = {
+    coast: { W: 480, H: 160, cap: 1600, founders: 60, regions: [
+      { name: '外洋', x1: 190, ground: 0, flow: 1, jitter: 1, regrow: 1, grains: { rate: 60, sizes: [0.15, 0.3, 0.6, 1.2], share: [0.2, 0.3, 0.3, 0.2], patches: 5, radius: 12, settle: 0 } },
+      { name: '流れのある海底', x1: 300, ground: 1, flow: 0.6, jitter: 1, regrow: 0.6, grains: { rate: 25, sizes: [0.15, 0.3, 0.6], share: [0.34, 0.33, 0.33], patches: 0, settle: 0.02 } },
+      { name: '浅瀬', x1: 380, ground: 1, flow: 0.15, jitter: 0.3, regrow: 0.4, grains: { rate: 18, sizes: [0.3, 0.6], share: [0.5, 0.5], patches: 0, settle: 1 } },
+      { name: '大粒の海', x1: 480, ground: 0, flow: 0.7, jitter: 0.5, regrow: 0.5, grains: { rate: 40, sizes: [0.6, 1.2, 2.0], share: [0.3, 0.4, 0.3], patches: 3, radius: 16, settle: 0 } }
+    ] }
+  };
+
   class World {
     constructor(opt) {
       Object.assign(this, DEFAULTS, opt || {});
+      const M = this.map ? MAPS[this.map] : null;
+      if (M) { this.W = M.W; this.H = M.H; if (!opt || opt.cap == null) this.cap = M.cap; if (!opt || opt.founders == null) this.founders = M.founders; }
       this.rand = A.genome.rng(this.seed); this.t = 0; this.tick = 0; this.nextId = 1;
       this.cols = Math.ceil(this.W / this.cell); this.rows = Math.ceil(this.H / this.cell);
       this.nut = new Float32Array(this.cols * this.rows).fill(this.nutrientStart); this.nut2 = new Float32Array(this.nut.length);
       this.food = []; this.grid = Array.from({ length: this.cols * this.rows }, () => []);
       this.bodies = []; this.yBottom = this.H * (1 - this.benthic);
       this.patch = Array.from({ length: this.patches }, () => ({ x: this.rand() * this.W, y: this.rand() * this.yBottom, a: this.rand() * TAU }));
+      if (M) this.buildMap(M);
       this.counts = { births: 0, starved: 0, aged: 0, broken: 0, blocked: 0, eaten: 0 };
       this.tree = new Map(); this.events = []; this.history = []; this.firsts = {}; this.pruned = 0; this.clades = new Map();
     }
+    buildMap(M) {
+      this.yBottom = this.H + 1; this.patch = []; // the strip world's bottom line does not exist here
+      const n = this.cols * this.rows, R = this.regions = M.regions.map((q, i) => Object.assign({ id: i, x0: i ? M.regions[i - 1].x1 : 0, debt: 0, patch: [] }, q));
+      this.hGround = new Uint8Array(n); this.hFlow = new Float32Array(n); this.hJit = new Float32Array(n); this.hRegrow = new Float32Array(n); this.hSettle = new Float32Array(n); this.hReg = new Uint8Array(n);
+      for (let c = 0; c < this.cols; c++) {
+        const x = (c + 0.5) * this.cell, q = R[this.regionAt(x)], edge = Math.min(x - q.x0, q.x1 - x), nb = R[(q.id + (x - q.x0 < q.x1 - x ? R.length - 1 : 1)) % R.length], k = clamp(0.5 + edge / 16, 0.5, 1); // blend over 8 units each side of a border
+        for (let r = 0; r < this.rows; r++) { const i = r * this.cols + c; this.hReg[i] = q.id; this.hGround[i] = q.ground; this.hSettle[i] = q.grains.settle; this.hFlow[i] = q.flow * k + nb.flow * (1 - k); this.hJit[i] = q.jitter * k + nb.jitter * (1 - k); this.hRegrow[i] = q.regrow * k + nb.regrow * (1 - k); }
+      }
+      for (const q of R) for (let i = 0; i < q.grains.patches; i++) q.patch.push({ x: q.x0 + q.grains.radius + this.rand() * (q.x1 - q.x0 - 2 * q.grains.radius), y: 8 + this.rand() * (this.H - 16), a: this.rand() * TAU });
+    }
+    regionAt(x) { x = ((x % this.W) + this.W) % this.W; const R = this.regions; for (let i = 0; i < R.length; i++) if (x < R[i].x1) return i; return R.length - 1; }
+    isGround(x, y) { return this.regions ? this.hGround[this.cellAt(x, clamp(y, 0, this.H - 0.01))] === 1 : y >= this.yBottom; }
     seedWith(genome, n) { for (let i = 0; i < (n || this.founders); i++) this.spawn(A.genome.copy(genome), this.rand() * this.W, this.rand() * this.H, 1, null); }
 
     spawn(g, x, y, stage, parent) {
@@ -52,6 +82,7 @@
       this.form(o, x, y, this.rand() * TAU);
       o.E = parent ? Math.min(o.prof.Emax, parent.eggE) : o.prof.Emax * 0.6;
       // genealogy: what kind of body this is, and whether that differs from its parent's
+      o.home = this.regions ? this.regionAt(x) : 0; // the region it was born in
       o.kind = [o.full.segs, o.full.mouths.length, o.full.eye > 0 ? 1 : 0, this.motile(g) ? 1 : 0, o.full.cilia > 0.05 ? 1 : 0].join('/');
       const pn = parent ? this.tree.get(parent.id) : null;
       this.tree.set(o.id, { id: o.id, parent: o.parent, line: o.line, gen: o.gen, born: this.t, died: null, cause: null, kind: o.kind, V: o.full.V, hue: g.hue, kids: 0, changed: !pn || pn.kind !== o.kind, g });
@@ -100,6 +131,7 @@
     ancestors(id) { const out = []; let n = this.tree.get(id); while (n) { out.push(n); n = this.tree.get(n.parent); } return out; }
     cellAt(x, y) { const c = Math.floor(((x % this.W) + this.W) % this.W / this.cell), r = clamp(Math.floor(y / this.cell), 0, this.rows - 1); return r * this.cols + c; }
     flowAt(x, y) {
+      if (this.regions) { const k = this.flow * this.hFlow[this.cellAt(x, clamp(y, 0, this.H - 0.01))]; return [k * Math.sin(TAU * (y / this.H * 1.5 + this.t / 180)), 0.5 * k * Math.sin(TAU * (x / 160 * 2 + this.t / 130))]; }
       if (y >= this.yBottom) return [0, 0];
       const f = this.flow, k = clamp((this.yBottom - y) / 8, 0, 1);
       return [f * k * Math.sin(TAU * (y / this.yBottom * 1.5 + this.t / 180)), f * 0.5 * k * Math.sin(TAU * (x / this.W * 2 + this.t / 130))];
@@ -113,6 +145,7 @@
 
     stepFood(dt) {
       const r = this.rand;
+      if (this.regions) return this.stepFoodMap(dt);
       // drifting grains appear inside moving patches
       this.grainDebt = (this.grainDebt || 0) + this.grainRate * dt;
       while (this.grainDebt > 0) {
@@ -143,6 +176,42 @@
       }
     }
 
+    // Food in a mapped world: each region is supplied in its own way; grains then drift, are jostled and settle by the rules of wherever they are.
+    stepFoodMap(dt) {
+      const r = this.rand;
+      for (const q of this.regions) {
+        const g = q.grains; q.debt += g.rate * dt;
+        while (q.debt > 0) {
+          const size = g.sizes[this.pick(g.sizes, g.share)], e = this.grainEnergy * size * size * size; let x, y;
+          if (q.patch.length) { const p = q.patch[r.int(q.patch.length)], a = r() * TAU, d = Math.sqrt(r()) * g.radius; x = p.x + Math.cos(a) * d; y = p.y + Math.sin(a) * d; }
+          else { x = q.x0 + r() * (q.x1 - q.x0); y = 1 + r() * (this.H - 2); }
+          const fixed = g.settle >= 1; this.addFood(x, y, size, e, fixed, fixed ? this.bottomLife : this.grainLife); q.debt -= e;
+        }
+        for (const p of q.patch) { p.a += (r() - 0.5) * 0.3; p.x = clamp(p.x + Math.cos(p.a) * 0.6 * dt, q.x0 + g.radius, q.x1 - g.radius); p.y = clamp(p.y + Math.sin(p.a) * 0.6 * dt, 8, this.H - 8); }
+      }
+      for (const c of this.grid) c.length = 0;
+      let n = 0; const sq = Math.sqrt(dt);
+      for (let i = 0; i < this.food.length; i++) {
+        const f = this.food[i];
+        if (f.e <= 0 || f.die < this.t) continue;
+        let ci = this.cellAt(f.x, f.y);
+        if (!f.fixed) {
+          const [vx, vy] = this.flowAt(f.x, f.y), jit = this.jitter * this.hJit[ci] * sq;
+          f.x = ((f.x + vx * dt + (r() + r() + r() - 1.5) * 2 * jit) % this.W + this.W) % this.W; f.y = clamp(f.y + vy * dt + (r() + r() + r() - 1.5) * 2 * jit, 0.5, this.H - 0.5);
+          ci = this.cellAt(f.x, f.y); const st = this.hSettle[ci]; if (st > 0 && r() < st * dt) f.fixed = true;
+        }
+        this.food[n++] = f; this.grid[ci].push(f);
+      }
+      this.food.length = n;
+      if (this.tick % 6 === 0) {
+        const { nut, nut2, cols, rows } = this, k = this.nutrientDiffuse, g = this.nutrientRegrow * dt * 6;
+        for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+          const i = y * cols + x, l = y * cols + (x + cols - 1) % cols, rr = y * cols + (x + 1) % cols, u = y ? i - cols : i, d = y < rows - 1 ? i + cols : i;
+          nut2[i] = nut[i] + k * (nut[l] + nut[rr] + nut[u] + nut[d] - 4 * nut[i]) + g * this.hRegrow[i] * (this.nutrientCap - nut[i]);
+        }
+        this.nut = nut2; this.nut2 = nut;
+      }
+    }
     sense(o) {
       const b = o.b, root = b.segs[0], R = o.prof.sense, fx = -root.dx, fy = -root.dy, hx = root.ax, hy = root.ay;
       const edible = o.prof.gape * 1.3;
@@ -172,7 +241,7 @@
       const born = [];
       for (const o of this.bodies) {
         const b = o.b, pr = o.prof;
-        const ground = o.cy >= this.yBottom, fl = this.flowAt(o.cx, o.cy);
+        const ground = this.regions ? this.hGround[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))] === 1 : o.cy >= this.yBottom, fl = this.flowAt(o.cx, o.cy);
         b.env.ground = ground; b.env.flowX = fl[0]; b.env.flowY = fl[1];
         if ((this.tick + o.id) % 5 === 0) this.sense(o);
         if (o.passive) { if (!ground) for (let k = 0; k < b.np; k++) { b.x[k] += fl[0] * dt; b.y[k] += fl[1] * dt; } P.pose(b); }
@@ -232,7 +301,7 @@
           }
           const node = this.tree.get(o.id); if (node) { node.died = this.t; node.cause = o.dead; node.life = { eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, stage: o.stage }; }
           let e = C.carrion * (o.prof.buildCost * 0.5 + Math.max(0, o.E) + o.G);
-          while (e > 0.05) { const size = 0.25 + this.rand() * 0.25, pe = Math.min(e, this.grainEnergy * size ** 3); this.addFood(o.cx + this.rand.gauss() * 0.5, o.cy + this.rand.gauss() * 0.5, size, pe, o.cy >= this.yBottom, this.grainLife); e -= pe; }
+          while (e > 0.05) { const size = 0.25 + this.rand() * 0.25, pe = Math.min(e, this.grainEnergy * size ** 3); this.addFood(o.cx + this.rand.gauss() * 0.5, o.cy + this.rand.gauss() * 0.5, size, pe, this.isGround(o.cx, o.cy), this.grainLife); e -= pe; }
         }
         this.bodies = this.bodies.filter(o => !o.dead);
       }
@@ -276,7 +345,9 @@
         t: Math.round(this.t), n, lines: lines.size, gen: mean(o => o.gen), segMean: n ? segs.reduce((a, b) => a + b, 0) / n : 0, segMax: n ? Math.max(...segs) : 0,
         multi: n ? segs.filter(s => s > 1).length / n : 0, volume: mean(o => o.prof.V), speed: mean(o => o.age > 5 ? o.path / o.age : 0),
         mouthShare: mean(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), eyes: mean(o => o.prof.eye > 0 ? 1 : 0),
-        bottom: mean(o => o.cy >= this.yBottom ? 1 : 0), cilia: mean(o => o.full.cilia > 0.05 ? 1 : 0), mouths: mean(o => o.full.mouths.length), sense: mean(o => o.full.sense),
+        bottom: mean(o => this.isGround(o.cx, o.cy) ? 1 : 0),
+        // per region: who lives there, what they are like, and how many were born elsewhere
+        regions: this.regions ? this.regions.map(q => { const l = this.bodies.filter(o => this.regionAt(o.cx) === q.id), m = f => l.length ? l.reduce((a, o) => a + f(o), 0) / l.length : 0; return { name: q.name, n: l.length, seg: m(o => o.full.segs), cilia: m(o => o.full.cilia > 0.05 ? 1 : 0), speed: m(o => o.age > 5 ? o.path / o.age : 0), sessile: m(o => o.full.mouths.length >= 3 && (o.age > 5 ? o.path / o.age : 0) < 0.01 ? 1 : 0), volume: m(o => o.prof.V), mouth: m(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), immigrants: m(o => o.home !== q.id ? 1 : 0), lines: new Set(l.map(o => o.line)).size }; }) : null, cilia: mean(o => o.full.cilia > 0.05 ? 1 : 0), mouths: mean(o => o.full.mouths.length), sense: mean(o => o.full.sense),
         // taxis: of the distance bodies moved by themselves while perceiving food, the fraction that went towards it.
         // Weighted by distance, and only bodies that really travelled count: a body that merely trembles says nothing.
         taxis: (() => { const l = this.bodies.filter(o => this.traveller(o)); const len = l.reduce((a, o) => a + o.taxLen, 0); return len ? l.reduce((a, o) => a + o.taxDot, 0) / len : 0; })(), taxisN: this.bodies.filter(o => this.traveller(o)).length,

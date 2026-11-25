@@ -196,3 +196,16 @@ test('control world: with cilia disabled no body can express them', () => {
   const w = new A.engine.World({ seed: 1, noCilia: 1, founders: 0 }); const g = A.genome.primordial(1); g.parts[0].cilia = 0.8;
   const o = w.spawn(g, 50, 30, 1, null); assert.strictEqual(o.full.cilia, 0); assert.strictEqual(o.passive, true);
 });
+
+test('a mapped world: regions differ, bodies and food cross between them, and it saves and restores', () => {
+  const run = () => { const w = new A.engine.World({ seed: 3, map: 'coast' }); w.seedWith(A.genome.primordial(3)); for (let i = 0; i < 30 * 120; i++) w.step(); return w; };
+  const w = run(), c = w.census();
+  assert.strictEqual(c.regions.length, 4); assert.strictEqual(c.regions.reduce((a, q) => a + q.n, 0), c.n); assert.ok(c.n > 20);
+  assert.ok(w.isGround(250, 80) && !w.isGround(50, 80));                                   // seabed has a bottom, open ocean has none
+  assert.ok(Math.hypot(...w.flowAt(50, 40)) > Math.hypot(...w.flowAt(340, 40)) * 2 || Math.hypot(...w.flowAt(50, 90)) > Math.hypot(...w.flowAt(340, 90)) * 2); // ocean flows more than shallows
+  const sizeIn = id => w.food.filter(f => w.regionAt(f.x) === id).reduce((a, f) => Math.max(a, f.size), 0);
+  assert.ok(sizeIn(3) >= 1.2 && w.food.some(f => f.fixed && w.regionAt(f.x) === 2));          // big grains in the big-grain sea, fixed grains in the shallows
+  assert.deepStrictEqual(run().census().n, c.n);                                             // same seed, same world
+  const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); assert.strictEqual(w2.bodies.length, w.bodies.length); assert.strictEqual(w2.regions.length, 4);
+  for (let i = 0; i < 60; i++) w2.step(); assert.ok(w2.bodies.length > 0);
+});
