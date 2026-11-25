@@ -23,6 +23,7 @@
     bottomRate: 25, bottomSize: [0.15, 0.3, 0.6], bottomLife: 150,
     flow: 0.35, sink: 0.12, jitter: 0.25, mutation: 0.7, founders: 20, maxSegs: 64,
     blind: 0,                             // control experiment: nothing in this world is told where food is
+    jostleEvery: 1,                       // 1 = every drifting grain is jostled every step. Larger values are faster but starve stationary feeders (measured: -15% at 4)
     noCilia: 0                            // control experiment: cilia genes cannot be expressed in this world
   };
 
@@ -122,11 +123,11 @@
       for (const p of this.patch) { p.a += (r() - 0.5) * 0.3; p.x = ((p.x + Math.cos(p.a) * 0.6 * dt) % this.W + this.W) % this.W; p.y = clamp(p.y + Math.sin(p.a) * 0.6 * dt, 6, this.yBottom - 6); }
       for (const c of this.grid) c.length = 0;
       // drifting grains are jostled in turns, a quarter of them each step for four steps' worth: the same spreading, a quarter of the work
-      let n = 0; const ph = this.tick & 3, dt4 = dt * 4, jit = this.jitter * Math.sqrt(dt4);
+      const every = this.jostleEvery; let n = 0; const ph = this.tick % every, dt4 = dt * every, jit = this.jitter * Math.sqrt(dt4);
       for (let i = 0; i < this.food.length; i++) {
         const f = this.food[i];
         if (f.e <= 0 || f.die < this.t) continue;
-        if (!f.fixed && (i & 3) === ph) { const [vx, vy] = this.flowAt(f.x, f.y); f.x = ((f.x + vx * dt4 + (r() + r() + r() - 1.5) * 2 * jit) % this.W + this.W) % this.W; f.y = clamp(f.y + (vy + this.sink) * dt4 + (r() + r() + r() - 1.5) * 2 * jit, 0.5, this.H - 0.5); if (f.y >= this.yBottom) f.fixed = true; }
+        if (!f.fixed && i % every === ph) { const [vx, vy] = this.flowAt(f.x, f.y); f.x = ((f.x + vx * dt4 + (r() + r() + r() - 1.5) * 2 * jit) % this.W + this.W) % this.W; f.y = clamp(f.y + (vy + this.sink) * dt4 + (r() + r() + r() - 1.5) * 2 * jit, 0.5, this.H - 0.5); if (f.y >= this.yBottom) f.fixed = true; }
         this.food[n++] = f; this.grid[this.cellAt(f.x, f.y)].push(f);
       }
       this.food.length = n;
