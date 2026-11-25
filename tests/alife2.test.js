@@ -146,15 +146,29 @@ test('genealogy: every living body traces back to a founder, and the record of e
   assert.ok(w.bodies.some(o => o.gen > 0));
   for (const o of w.bodies) { const chain = w.ancestors(o.id); assert.strictEqual(chain[0].id, o.id); assert.strictEqual(chain.length, o.gen + 1); assert.strictEqual(chain[chain.length - 1].parent, 0); for (const n of chain) assert.ok(n.g && n.g.parts.length); }
   w.prune(); assert.ok(w.tree.size >= w.bodies.length);
+  // body plans that died out are still on record, with a genome that can be grown again
+  for (let i = 0; i < 30 * 400; i++) w.step();
+  const lost = [...w.clades.values()].filter(c => c.ended != null); assert.ok(lost.length > 0);
+  for (const c of lost) { assert.strictEqual(c.alive, 0); assert.ok(c.members >= 1 && c.ended >= c.born); assert.strictEqual(Object.values(c.causes).reduce((a, b) => a + b, 0), c.members); assert.ok(develop(c.g).segs.length >= 1); }
+  assert.strictEqual([...w.clades.values()].reduce((a, c) => a + c.alive, 0), w.bodies.length);
 });
 
 test('a saved world comes back with the same bodies, reserves, genealogy and record', () => {
   const w = new A.engine.World({ seed: 4 }); w.seedWith(A.genome.primordial(4));
   for (let i = 0; i < 30 * 120; i++) w.step();
   const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save())));
-  assert.strictEqual(w2.bodies.length, w.bodies.length); assert.strictEqual(w2.tree.size, w.tree.size); assert.strictEqual(w2.events.length, w.events.length);
+  assert.strictEqual(w2.bodies.length, w.bodies.length); assert.strictEqual(w2.tree.size, w.tree.size); assert.strictEqual(w2.events.length, w.events.length); assert.strictEqual(w2.clades.size, w.clades.size);
   const sum = x => x.bodies.reduce((a, o) => a + o.E, 0); assert.ok(Math.abs(sum(w) - sum(w2)) < 1e-9);
   assert.deepStrictEqual(w2.bodies.map(o => [o.id, o.gen, o.line, o.stage]), w.bodies.map(o => [o.id, o.gen, o.line, o.stage]));
   for (let i = 0; i < 300; i++) w2.step(); assert.ok(w2.bodies.length > 0);
   assert.throws(() => A.engine.World.restore({ format: 'alife16' }));
+});
+
+test('cilia push against water: they move a jointless body, need water, and cost energy', () => {
+  const blob = c => develop(A.genome.create({ parts: [A.genome.part({ len: 0.5, r0: 0.5, r1: 0.5, muscle: 0, cilia: c })] }));
+  const go = (c, env) => P.trial(blob(c), { env, seconds: 5, warm: 1 });
+  const none = go(0, {}), some = go(0.4, {}), more = go(0.9, {}), dry = go(0.9, { fluid: 0 });
+  assert.ok(none.distance < 1e-9); assert.ok(some.speed > 0.1, 'speed ' + some.speed); assert.ok(more.speed > some.speed * 1.2); assert.ok(dry.distance < 1e-9);
+  assert.ok(more.body.ciliaUse > some.body.ciliaUse && some.body.ciliaUse > 0);
+  const a = A.organs.profile(blob(0)), b = A.organs.profile(blob(0.9)); assert.ok(b.basal > a.basal);
 });

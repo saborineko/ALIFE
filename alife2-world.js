@@ -31,7 +31,8 @@
     const f = document.createElement('figure'), c = document.createElement('canvas'), t = document.createElement('figcaption');
     c.width = 96; c.height = 72; thumb(c, g); t.textContent = caption; f.append(c, t); f.onclick = onclick; if (on) f.classList.add('on'); parent.append(f);
   }
-  const kindText = k => { const [s, m, e, v] = k.split('/'); return s + '体節 口' + m + (e === '1' ? ' 眼' : '') + (v === '1' ? ' 動' : ''); };
+  const kindText = k => { const [s, m, e, v, c] = k.split('/'); return s + '体節 口' + m + (e === '1' ? ' 眼' : '') + (v === '1' ? ' 関節' : '') + (c === '1' ? ' 繊毛' : ''); };
+  const CAUSE = { starved: '餓死', aged: '老衰', broken: '物理破綻' };
 
   function panels() {
     const c0 = w.census();
@@ -54,6 +55,13 @@
     $('top').onclick = e => { const m = (window.getSelection().anchorNode || {}).textContent; };
     $('events').textContent = w.events.length ? w.events.slice().reverse().map(e => e.t + ' 秒  ' + e.text + (e.id ? '（#' + e.id + '）' : '')).join('\n') : 'まだ何も起きていない';
     ancestry();
+    // extinct body plans
+    const f = $('lostFilter').value, all = [...w.clades.values()].filter(c => c.ended != null);
+    let list = all.filter(c => { const k = c.kind.split('/'); return f === 'moved' ? k[3] === '1' || k[4] === '1' : f === 'eye' ? k[2] === '1' : true; });
+    list.sort(f === 'recent' ? (a, b) => b.ended - a.ended : (a, b) => b.members - a.members);
+    $('lost').textContent = '';
+    for (const c of list.slice(0, 12)) card($('lost'), c.g, c.members + '匹 ' + (c.genMax - c.gen0 + 1) + '世代\n' + kindText(c.kind), () => { shown = c; }, shown === c);
+    $('lostNote').textContent = '体制の記録 ' + w.clades.size + '（うち絶滅 ' + all.length + '、該当 ' + list.length + '）' + (w.cladesDropped ? ' / 容量のため省いた2匹以下の記録 ' + w.cladesDropped : '');
   }
   function ancestry() {
     const box = $('ancestry'); box.textContent = '';
@@ -86,25 +94,32 @@
       for (const s of b.segs) { const r = Math.max(s.r0, s.r1); x0 = Math.min(x0, s.ax - r, s.bx - r); x1 = Math.max(x1, s.ax + r, s.bx + r); y0 = Math.min(y0, s.ay - r, s.by - r); y1 = Math.max(y1, s.ay + r, s.by + r); }
       const px = (x1 - x0) * view.scale, py = (y1 - y0) * view.scale, mx = sx((x0 + x1) / 2), my = sy((y0 + y1) / 2);
       if (mx < -px || my < -py || mx > W + px || my > H + py) continue;
-      if (Math.max(px, py) < 7) { ctx.fillStyle = 'hsl(' + o.g.hue + ',55%,65%)'; ctx.beginPath(); ctx.arc(mx, my, Math.max(1.5, Math.max(px, py) / 2), 0, 6.3); ctx.fill(); }
+      if (Math.max(px, py) < 7 && !(b.hasCilia && Math.max(px, py) > 4)) { ctx.fillStyle = 'hsl(' + o.g.hue + ',55%,65%)'; ctx.beginPath(); ctx.arc(mx, my, Math.max(1.5, Math.max(px, py) / 2), 0, 6.3); ctx.fill(); }
       else {
         let size = 32; while (size < Math.max(px, py) + 14 && size < 512) size *= 2;
         if (!pool.has(size)) pool.set(size, new A.render.Renderer());
         ctx.save(); ctx.translate(Math.round(mx - size / 2), Math.round(my - size / 2));
-        pool.get(size).draw(ctx, b.segs, { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, scale: view.scale, w: size, h: size }, { gpu: false, hue: o.g.hue, glow: false, bristles: view.scale > 20, internals: view.scale > 12 });
+        pool.get(size).draw(ctx, b.segs, { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, scale: view.scale, w: size, h: size }, { gpu: false, hue: o.g.hue, glow: false, time: b.t, drive: b.cmd.drive, bristles: view.scale > 20, internals: view.scale > 12 });
         ctx.restore();
       }
       if (o === sel) { ctx.strokeStyle = '#eafff4'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(mx, my, Math.max(px, py) / 2 + 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
     }
-    if (shown) { // an ancestor, drawn from its recorded genome
+    if (shown && shown.members != null) { // a body plan that arose here, living or extinct
+      const c = shown, inc = c.eaten + c.absorbed; thumb(zc, c.g, zoomR);
+      $('info').textContent = '体制の記録（始まりの個体 #' + c.id + ' の遺伝子から発生させた成体）\n' + kindText(c.kind) + ' / 成体の体積 ' + c.V.toFixed(2) + ' / 系統 ' + c.line
+        + '\n出現 ' + Math.round(c.born) + ' 秒' + (c.ended != null ? ' → 絶滅 ' + Math.round(c.ended) + ' 秒（' + Math.round(c.ended - c.born) + ' 秒間）' : ' / 存続中（' + c.alive + '匹）')
+        + '\n個体数 ' + c.members + ' / 世代 ' + c.gen0 + '〜' + c.genMax + ' / 産んだ子 ' + c.kids
+        + '\n死因：' + (Object.entries(c.causes).map(([k, v]) => (CAUSE[k] || k) + ' ' + v).join('・') || '—')
+        + (c.dead ? '\n死んだ個体の平均：寿命 ' + (c.lived / c.dead).toFixed(0) + ' 秒 / 収入のうち口から ' + (inc ? c.eaten / inc * 100 : 0).toFixed(0) + '% / 自力移動 ' + (c.path / Math.max(1, c.lived)).toFixed(3) + ' u/s' : '');
+    } else if (shown) { // an ancestor, drawn from its recorded genome
       thumb(zc, shown.g, zoomR);
-      $('info').textContent = '祖先 #' + shown.id + '（記録された遺伝子から発生させた成体）\n系統 ' + shown.line + ' / 世代 ' + shown.gen + ' / 出生 ' + Math.round(shown.born) + ' 秒' + (shown.died != null ? ' / 死亡 ' + Math.round(shown.died) + ' 秒（' + ({ starved: '餓死', aged: '老衰', broken: '物理破綻' }[shown.cause] || shown.cause) + '）' : ' / 生存中')
+      $('info').textContent = '祖先 #' + shown.id + '（記録された遺伝子から発生させた成体）\n系統 ' + shown.line + ' / 世代 ' + shown.gen + ' / 出生 ' + Math.round(shown.born) + ' 秒' + (shown.died != null ? ' / 死亡 ' + Math.round(shown.died) + ' 秒（' + (CAUSE[shown.cause] || shown.cause) + '）' : ' / 生存中')
         + '\n体制 ' + kindText(shown.kind) + ' / 成体の体積 ' + shown.V.toFixed(2) + ' / 子 ' + shown.kids + ' / 変異 ' + shown.g.mutations + ' 回'
         + (shown.life ? '\n生涯：口から ' + shown.life.eaten.toFixed(2) + '・体表から ' + shown.life.absorbed.toFixed(2) + ' / 自力移動 ' + shown.life.path.toFixed(1) + ' u' : '');
     } else if (sel && !sel.dead) {
       const d = A.development.describe(sel.plan), sc = Math.min((zc.width - 30) / (d.length + 1), (zc.height - 30) / (d.width + 1), 120), cm = A.physics.com(sel.b);
       zx.fillStyle = '#07121d'; zx.fillRect(0, 0, zc.width, zc.height);
-      zoomR.draw(zx, sel.b.segs, { cx: cm[0], cy: cm[1], scale: sc, w: zc.width, h: zc.height }, { hue: sel.g.hue, glow: false });
+      zoomR.draw(zx, sel.b.segs, { cx: cm[0], cy: cm[1], scale: sc, w: zc.width, h: zc.height }, { hue: sel.g.hue, glow: false, time: sel.b.t, drive: sel.b.cmd.drive });
       const p = sel.prof, inc = sel.eaten + sel.absorbed;
       $('info').textContent = '#' + sel.id + ' / 由来 ' + sel.g.origin + ' / 系統 ' + sel.line + ' / 世代 ' + sel.gen + ' / 変異 ' + sel.g.mutations + ' 回\n齢 ' + sel.age.toFixed(0) + ' / ' + sel.life.toFixed(0) + ' 秒 / 成熟段階 ' + sel.stage.toFixed(2) + ' / 子 ' + sel.kids + ' / 出生時の大きさ ' + sel.g.birth.toFixed(2)
         + '\n体節 ' + sel.b.segs.length + '（成体 ' + sel.full.segs + '）/ 体積 ' + p.V.toFixed(2) + ' / 口 ' + p.mouths.length + ' / 部品 ' + sel.g.parts.length + ' 種・規則 ' + sel.g.links.length + ' 本'
@@ -144,7 +159,7 @@
   $('loadFile').onchange = async e => { try { start(A.engine.World.restore(JSON.parse(await e.target.files[0].text()))); $('saveNote').textContent = '読み込んだ（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '読み込めない：' + err.message; } };
   $('resume').onclick = () => { try { const d = localStorage.getItem(KEY); if (!d) { $('saveNote').textContent = '自動保存は無い。'; return; } start(A.engine.World.restore(JSON.parse(d))); $('saveNote').textContent = '自動保存から再開（' + Math.round(w.t) + ' 秒時点）。'; } catch (err) { $('saveNote').textContent = '再開できない：' + err.message; } };
   $('csv').onclick = () => { const rows = ['id,parent,line,generation,born,died,cause,segments,mouths,eye,working_joint,adult_volume,children,mutations']; for (const n of w.tree.values()) rows.push([n.id, n.parent, n.line, n.gen, Math.round(n.born), n.died == null ? '' : Math.round(n.died), n.cause || '', ...n.kind.split('/'), n.V.toFixed(3), n.kids, n.g.mutations].join(',')); download('alife2-lineage-t' + Math.round(w.t) + '.csv', rows.join('\n'), 'text/csv'); };
-  $('rank').onchange = () => { lastPanels = 0; };
+  $('rank').onchange = $('lostFilter').onchange = () => { lastPanels = 0; };
 
   if (q.get('seed')) $('seed').value = q.get('seed');
   (async () => {

@@ -25,6 +25,7 @@
     passive: 0.25, limit: 8,
     cn: 1.1, cf: 0.03, cform: 0.4, visc: 0.03,
     hold: 0.15,                         // cost of holding tension without moving
+    cilia: 0.14,                        // thrust per unit of ciliated surface
     padStress: 9000, muFoot: 1.3, muBelly: 0.55, slip: 0.05,
     substeps: 8, iters: 6
   };
@@ -52,6 +53,7 @@
         sideArea: q.len * (q.z0 + q.z1), wetArea: PI * (rm + zm) * q.len,
         formArea: Math.abs(PI * q.r0 * q.z0 - PI * q.r1 * q.z1) + (q.leaf ? PI * q.r1 * q.z1 : 0) + (i === 0 ? PI * q.r0 * q.z0 : 0),
         tauMax: K.muscleStress * q.p.muscle * q.r0 * q.r0 * q.z0 * (q.supply == null ? 1 : q.supply),
+        cil: (q.p.cilia || 0) * PI * (rm + zm) * q.len * (q.p.beat == null ? 1 : q.p.beat),
         pad: q.leaf && q.p.grip > 0.05, ax: 0, ay: 0, bx: 0, by: 0, dx: 1, dy: 0
       };
       if (i === 0) { seg.aw = [[0, 1, 0]]; place(0, q.ax, q.ay); }
@@ -92,6 +94,7 @@
       s.padRef = ref.id;
       s.padCap = s.pad ? K.padStress * s.p.grip * (0.2 + ref.p.muscle) * ref.r0 * ref.r0 * ref.z0 : 0;
     }
+    b.hasCilia = b.segs.some(q => q.cil !== 0); b.ciliaUse = 0;
     b.start = com(b);
     return b;
   }
@@ -156,6 +159,13 @@
         if (e) { b.fx[s.b] += fx; b.fy[s.b] += fy; } else forceA(b, s, fx, fy);
         b.heat -= (fx * vx + fy * vy) * dt;
       }
+    }
+    // cilia: the skin pushes water backwards along the segment and is pushed forwards. Needs water.
+    if (env.fluid > 0 && b.hasCilia) for (const s of segs) {
+      if (!s.cil) continue;
+      const f = -K.cilia * s.cil * b.cmd.drive * env.fluid * 0.5, t = K.cilia * Math.abs(s.cil) * b.cmd.turn * env.fluid * 0.35;
+      b.fx[s.b] += f * s.dx - t * s.dy; b.fy[s.b] += f * s.dy + t * s.dx; forceA(b, s, f * s.dx + t * s.dy, f * s.dy - t * s.dx);
+      b.ciliaUse += Math.abs(s.cil) * (Math.abs(b.cmd.drive) + 0.35 * Math.abs(b.cmd.turn)) * dt;
     }
     // ground: pressed pads grip, whatever the pads cannot carry drags on the belly
     if (env.ground) {

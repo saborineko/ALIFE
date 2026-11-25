@@ -46,7 +46,9 @@
     gripPhase: [-PI, PI, 0, 'a'],  // when in the stroke the pad is pressed down
     mouth: [0, 1, 0, 'n'], eye: [0, 1, 0, 'n'], gut: [0, 1, 0, 'n'],
     gonad: [0, 1, 0, 'n'], nerve: [0, 1, 0.2, 'n'], store: [0, 1, 0, 'n'],
-    vessel: [0, 1, 0, 'n']         // transport tissue: carries supply further from the gut
+    vessel: [0, 1, 0, 'n'],        // transport tissue: carries supply further from the gut
+    cilia: [0, 1, 0, 'n'],         // beating hairs on the skin: push water along the body
+    beat: [-1, 1, 1, 'n']          // which way, and how hard, they beat (+ pushes the body towards its base end)
   };
   const LINK_FIELDS = {
     at: [0, 1, 1, 'n'],            // where along the parent

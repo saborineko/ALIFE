@@ -45,6 +45,7 @@
     ['stiff', '支持組織の硬さ', 0, 1, .05, .4, '組織'],
     ['skin', '外皮の厚さ', 0, 1, .05, .3, '組織'],
     ['armor', '外骨格', 0, 1, .05, 0, '組織'],
+    ['cilia', '繊毛（胴体）', 0, 1, .05, 0, '組織'],
     ['gut', '消化器', 0, 1, .05, .6, '器官'],
     ['nerve', '神経・感覚毛', 0, 1, .05, .5, '器官'],
     ['gonad', '生殖器', 0, 1, .05, .3, '器官'],
@@ -72,7 +73,7 @@
       amp: p.limbAmp, lag: -p.limbLag * D, skew: p.skew, nerve: p.nerve * 0.8, grip: p.grip, gripPhase: p.gripPhase * D
     }, extra));
     if (p.radial >= 0.5) {
-      const disc = P(Object.assign({}, tissue, { len: p.width * 0.12, r0: r, r1: r, depth: p.depth, armor: p.armor, mouth: p.jaw, gut: p.gut, gonad: p.gonad, nerve: p.nerve, eye: 0 }));
+      const disc = P(Object.assign({}, tissue, { cilia: p.cilia, len: p.width * 0.12, r0: r, r1: r, depth: p.depth, armor: p.armor, mouth: p.jaw, gut: p.gut, gonad: p.gonad, nerve: p.nerve, eye: 0 }));
       const arm = limbPart({ steer: 1, eye: 0 });
       L({ from: disc, to: arm, at: 0.5, off: 0.8, angle: 0, sym: 'radial', n: Math.max(3, Math.round(p.limbs)), symPhase: p.gait * D });
       if (joints > 1) L({ from: arm, to: arm, at: 1, angle: p.limbCurl * D, repeat: joints - 1, scale: p.limbTaper });
@@ -83,7 +84,7 @@
     const body = link({ scale: p.taper, swell: p.swell, repeat: Math.max(1, R) }), sLast = R ? chainScale(body, R, R) : 1;
     const endR = hasTail && R ? r * chainScale(body, n, R) : r * sLast * (hasTail ? 0.8 : 0.5);
     const lag = -TAU * p.waves / (n + (hasTail ? ts : 0));
-    const trunk = P(Object.assign({}, tissue, { len: p.length / n, r0: r, r1: endR / sLast, depth: p.depth, armor: p.armor, amp: p.wave, lag, gut: p.gut, gonad: p.gonad, nerve: p.nerve, store: 0.2 }));
+    const trunk = P(Object.assign({}, tissue, { cilia: p.cilia, len: p.length / n, r0: r, r1: endR / sLast, depth: p.depth, armor: p.armor, amp: p.wave, lag, gut: p.gut, gonad: p.gonad, nerve: p.nerve, store: 0.2 }));
     if (R) L({ from: trunk, to: trunk, at: 1, angle: 0, repeat: R, scale: p.taper, swell: p.swell });
     if (p.head > 0.02) {
       const hr = r * Math.min(1.3, 0.62 + 0.45 * p.head);

@@ -191,6 +191,17 @@
       for (const s of segs) {
         const p = s.p, [ax, ay] = T(s.ax, s.ay), [bx, by] = T(s.bx, s.by), ang = Math.atan2(by - ay, bx - ax), L = Math.hypot(bx - ax, by - ay);
         const ux = Math.cos(ang), uy = Math.sin(ang), nx = -uy, ny = ux, r0 = s.r0 * sc, r1 = s.r1 * sc;
+        // cilia: rows of beating hairs. The wave runs at the rate, and in the direction, they actually beat.
+        if (p.cilia > 0.05 && L > 2 && r0 + r1 > 3) {
+          const n = Math.min(60, Math.max(4, Math.round(L / 2.4 * (0.4 + p.cilia)))), beat = p.beat == null ? 1 : p.beat, ph = (opt.time || 0) * 14 * beat * (opt.drive == null ? 1 : opt.drive);
+          ctx.lineWidth = 0.8; ctx.strokeStyle = 'rgba(225,245,255,' + (0.25 + 0.4 * p.cilia) + ')'; ctx.beginPath();
+          for (let k = 0; k < n; k++) for (const side of [-1, 1]) {
+            const u = (k + 0.5) / n, r = r0 + (r1 - r0) * u, len = 2.5 + r * 0.42, wv = Math.sin(ph - u * n * 0.55 + (side > 0 ? 0 : 1.3));
+            const lean = side * (1.15 - 0.55 * wv * Math.sign(beat || 1)), x = ax + ux * L * u + nx * side * r * 0.98, y = ay + uy * L * u + ny * side * r * 0.98, a1 = ang + lean, a2 = a1 - side * 0.5 * wv;
+            ctx.moveTo(x, y); ctx.quadraticCurveTo(x + Math.cos(a1) * len * 0.55, y + Math.sin(a1) * len * 0.55, x + Math.cos(a1) * len * 0.55 + Math.cos(a2) * len * 0.5, y + Math.sin(a1) * len * 0.55 + Math.sin(a2) * len * 0.5);
+          }
+          ctx.stroke();
+        }
         // sensory bristles: as many as the part has nerve
         if (p.nerve > 0.25 && L > 3 && opt.bristles !== false) {
           const n = Math.min(14, Math.round(L / 5 * p.nerve)); ctx.lineWidth = 0.5;
