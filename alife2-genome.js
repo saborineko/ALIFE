@@ -44,7 +44,8 @@
     grip: [0, 1, 0, 'n'],          // contact pad at the free tip (substrate friction)
     gripPhase: [-PI, PI, 0, 'a'],  // when in the stroke the pad is pressed down
     mouth: [0, 1, 0, 'n'], eye: [0, 1, 0, 'n'], gut: [0, 1, 0, 'n'],
-    gonad: [0, 1, 0, 'n'], nerve: [0, 1, 0.2, 'n'], store: [0, 1, 0, 'n']
+    gonad: [0, 1, 0, 'n'], nerve: [0, 1, 0.2, 'n'], store: [0, 1, 0, 'n'],
+    vessel: [0, 1, 0, 'n']         // transport tissue: carries supply further from the gut
   };
   const LINK_FIELDS = {
     at: [0, 1, 1, 'n'],            // where along the parent
@@ -56,6 +57,8 @@
     symPhase: [-PI, PI, 0, 'a'],   // rhythm offset between symmetric copies
     axPhase: [-PI, PI, 0, 'a']     // rhythm offset per parent chain index (metachronal wave)
   };
+  // brain: 3 outputs (drive, turn, steer-to-food) x 5 inputs (1, food ahead, food left, hunger, wander)
+  const BRAIN_IN = 5, BRAIN_OUT = 3;
   const MAX_PARTS = 12, MAX_LINKS = 24, MAX_REPEAT = 28;
 
   function part(o) { const p = {}; for (const k in PART_FIELDS) p[k] = PART_FIELDS[k][2]; return Object.assign(p, o || {}); }
@@ -92,6 +95,9 @@
     g.root = clamp(g.root | 0, 0, g.parts.length - 1);
     g.hue = ((g.hue % 360) + 360) % 360;
     g.freq = clamp(Number.isFinite(g.freq) ? g.freq : 1, 0.2, 4);
+    g.birth = clamp(Number.isFinite(g.birth) ? g.birth : 0.3, 0.2, 0.9); // how developed offspring are when released (bigger young cost more each)
+    if (!Array.isArray(g.brain) || g.brain.length !== BRAIN_IN * BRAIN_OUT) g.brain = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    g.brain = g.brain.map(v => clamp(Number.isFinite(v) ? v : 0, -4, 4));
     return g;
   }
 
@@ -102,7 +108,7 @@
   // The smallest possible life: one blob with a mouth and a gut. Starting point for evolution.
   function primordial(seed) {
     const r = rng(seed || 1);
-    return create({ origin: 'primordial', hue: r() * 360, parts: [part({ len: 0.5, r0: 0.5, r1: 0.5, mouth: 0.4, gut: 0.5, gonad: 0.3 })] });
+    return create({ origin: 'primordial', hue: r() * 360, parts: [part({ len: 0.5, r0: 0.5, r1: 0.5, muscle: 0, skin: 0.2, mouth: 0.4, gut: 0.5, gonad: 0.3 })] });
   }
 
   // Mutation acts on the grammar, never on a finished body.
@@ -137,6 +143,8 @@
     if (r() < 0.02 * s && g.links.length > 1) g.links.splice(r.int(g.links.length), 1);
     g.hue += r.gauss() * 6 * s;
     g.freq += r.gauss() * 0.05 * s;
+    if (r() < 0.2) g.birth += r.gauss() * 0.06 * s;
+    for (let i = 0; i < g.brain.length; i++) if (r() < 0.2) g.brain[i] += r.gauss() * 0.35 * s;
     g.mutations = (g.mutations || 0) + 1;
     if (g.origin === 'artificial') g.origin = 'artificial-mutated';
     return sanitize(g);
@@ -152,9 +160,10 @@
       if (r() < 0.5) { x.repeat = y.repeat; x.sym = y.sym; x.n = y.n; }
     }
     if (r() < 0.5) g.hue = b.hue;
+    for (let i = 0; i < g.brain.length; i++) if (r() < 0.5) g.brain[i] = b.brain[i];
     return sanitize(g);
   }
 
-  A.genome = { PART_FIELDS, LINK_FIELDS, MAX_PARTS, MAX_LINKS, part, link, create, primordial, sanitize, mutate, crossover, chainScale, rng, copy, clamp, wrapPi };
+  A.genome = { BRAIN_IN, BRAIN_OUT, PART_FIELDS, LINK_FIELDS, MAX_PARTS, MAX_LINKS, part, link, create, primordial, sanitize, mutate, crossover, chainScale, rng, copy, clamp, wrapPi };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

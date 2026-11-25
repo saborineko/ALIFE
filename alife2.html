@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ALIFE 2.0 生態系（実験版）</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;background:#0a131c;color:#dfede9;font:14px system-ui,sans-serif}
+main{max-width:1500px;margin:auto;padding:14px}a{color:#94d4cb}h1{margin:6px 0;font-size:24px}
+p,small{color:#a8bdc5;line-height:1.6}
+.layout{display:grid;grid-template-columns:minmax(0,2.4fr) minmax(260px,1fr);gap:12px;align-items:start}
+.panel{border:1px solid #304653;background:#111f29;border-radius:12px;padding:12px;margin-bottom:10px}
+canvas{width:100%;height:auto;display:block;border:1px solid #34515c;border-radius:8px;background:#07121d;touch-action:none}
+button,select,input[type=number]{background:#203640;color:#e6f3ed;border:1px solid #42616c;border-radius:6px;padding:7px 9px;font:inherit}
+button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+.note{white-space:pre-line;font-size:12px;color:#bdd1d2;line-height:1.6}.warning{border-left:3px solid #cda96c;padding-left:10px}
+@media(max-width:900px){.layout{display:block}}
+</style>
+</head>
+<body>
+<main>
+<div style="font-size:11px;letter-spacing:.18em;color:#90bcb9">ALIFE 2.0 / ECOSYSTEM / EXPERIMENTAL</div>
+<h1>ALIFE 2.0 生態系（実験版）</h1>
+<p><a href="./alife2-lab.html">形態実験室 2.0</a>　｜　<a href="./index.html">ALIFE 23</a>　｜　保存機能なし。ALIFE 23 のデータには触れない。</p>
+<div class="layout">
+<div>
+  <canvas id="world" width="1280" height="800"></canvas>
+  <div class="controls">
+    <label>乱数種 <input id="seed" type="number" value="1" min="1" style="width:80px"></label>
+    <label>始祖 <select id="founder"><option value="primordial">原始個体（1体節）から自然進化</option><option value="file">進化試験の結果を読み込む（JSON）</option></select></label>
+    <input id="file" type="file" accept=".json" style="display:none">
+    <button id="restart">最初から</button><button id="pause">一時停止</button>
+    <label>速度 <select id="speed"><option>1</option><option selected>4</option><option>16</option><option>64</option></select>×</label>
+    <button id="fit">全体表示</button>
+  </div>
+  <small>ホイールで拡大、ドラッグで移動、クリックで個体を選択。上の水色域が開水域（流れあり・粒が偏在して漂う）、下の帯が底面（流れなし・粒が固定・腹を引きずる）。背景の明るさが溶存栄養。</small>
+</div>
+<div>
+  <section class="panel"><b>世界</b><div id="stats" class="note"></div></section>
+  <section class="panel"><b>選択中の個体</b><canvas id="zoom" width="420" height="300"></canvas><div id="info" class="note">クリックで選択</div></section>
+  <section class="panel note warning">ここに居るのは原始個体から変異と淘汰だけで生じた系統（origin: evolved）。複雑さ・大きさ・運動への報酬は無い。現時点の経済では体積 1.5 前後までの遊泳体しか黒字にならないことを実測で確認している（大型化は未解決）。</section>
+</div>
+</div>
+</main>
+<script src="./alife2-genome.js"></script>
+<script src="./alife2-development.js"></script>
+<script src="./alife2-neural.js"></script>
+<script src="./alife2-physics.js"></script>
+<script src="./alife2-organs.js"></script>
+<script src="./alife2-engine.js"></script>
+<script src="./alife2-render.js"></script>
+<script src="./alife2-gpu.js"></script>
+<script>
+(function () {
+  const A = ALIFE2, $ = id => document.getElementById(id), cv = $('world'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  const zc = $('zoom'), zx = zc.getContext('2d'), zoomR = new A.render.Renderer(), pool = new Map();
+  const q = new URLSearchParams(location.search);
+  let w, view, paused = false, sel = null, loaded = null;
+  function start() {
+    w = new A.engine.World({ seed: Number($('seed').value) || 1 });
+    if (loaded) for (const k of loaded.top) for (let i = 0; i < Math.max(1, Math.round(k.count / 4)); i++) { const o = w.spawn(A.genome.copy(k.genome), w.rand() * w.W, w.rand() * w.H, 1, null); }
+    else w.seedWith(A.genome.primordial(w.seed));
+    fit(); sel = null;
+  }
+  function fit() { view = { cx: w.W / 2, cy: w.H / 2, scale: Math.min(W / w.W, H / w.H) }; }
+  const sx = x => (x - view.cx) * view.scale + W / 2, sy = y => (y - view.cy) * view.scale + H / 2;
+  function draw() {
+    ctx.fillStyle = '#050a12'; ctx.fillRect(0, 0, W, H);
+    const c = w.cell * view.scale;
+    for (let r = 0; r < w.rows; r++) for (let k = 0; k < w.cols; k++) {
+      const x = sx(k * w.cell), y = sy(r * w.cell); if (x > W || y > H || x + c < 0 || y + c < 0) continue;
+      const n = w.nut[r * w.cols + k], bottom = r * w.cell >= w.yBottom;
+      ctx.fillStyle = bottom ? 'rgb(' + Math.round(20 + 18 * n) + ',' + Math.round(26 + 26 * n) + ',' + Math.round(22 + 14 * n) + ')' : 'rgb(' + Math.round(8 + 10 * n) + ',' + Math.round(20 + 34 * n) + ',' + Math.round(34 + 44 * n) + ')';
+      ctx.fillRect(x, y, c + 1, c + 1);
+    }
+    for (const f of w.food) { const x = sx(f.x), y = sy(f.y); if (x < 0 || y < 0 || x > W || y > H) continue; const r = Math.max(0.7, f.size * 0.5 * view.scale); ctx.fillStyle = f.fixed ? 'rgba(190,220,120,.75)' : 'rgba(150,235,170,.75)'; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.3); ctx.fill(); }
+    for (const o of w.bodies) {
+      const b = o.b; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const s of b.segs) { const r = Math.max(s.r0, s.r1); x0 = Math.min(x0, s.ax - r, s.bx - r); x1 = Math.max(x1, s.ax + r, s.bx + r); y0 = Math.min(y0, s.ay - r, s.by - r); y1 = Math.max(y1, s.ay + r, s.by + r); }
+      const px = (x1 - x0) * view.scale, py = (y1 - y0) * view.scale, mx = sx((x0 + x1) / 2), my = sy((y0 + y1) / 2);
+      if (mx < -px || my < -py || mx > W + px || my > H + py) continue;
+      if (Math.max(px, py) < 7) { ctx.fillStyle = 'hsl(' + o.g.hue + ',55%,65%)'; ctx.beginPath(); ctx.arc(mx, my, Math.max(1.5, Math.max(px, py) / 2), 0, 6.3); ctx.fill(); }
+      else {
+        let size = 32; while (size < Math.max(px, py) + 14 && size < 512) size *= 2;
+        if (!pool.has(size)) pool.set(size, new A.render.Renderer());
+        ctx.save(); ctx.translate(Math.round(mx - size / 2), Math.round(my - size / 2));
+        pool.get(size).draw(ctx, b.segs, { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, scale: view.scale, w: size, h: size }, { gpu: false, hue: o.g.hue, glow: false, bristles: view.scale > 20, internals: view.scale > 12 });
+        ctx.restore();
+      }
+      if (o === sel) { ctx.strokeStyle = '#eafff4'; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(mx, my, Math.max(px, py) / 2 + 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
+    }
+    const c0 = w.census();
+    $('stats').textContent = '時刻 ' + c0.t + ' 秒 / 個体数 ' + c0.n + ' / 系統 ' + c0.lines + ' / 平均世代 ' + c0.gen.toFixed(1)
+      + '\n成体の体節数：平均 ' + c0.segMean.toFixed(2) + '・最大 ' + c0.segMax + ' / 多体節の割合 ' + (c0.multi * 100).toFixed(0) + '%'
+      + '\n平均体積 ' + c0.volume.toFixed(2) + ' / 自力移動の平均速度 ' + c0.speed.toFixed(3) + ' u/s'
+      + '\n収入のうち口から ' + (c0.mouthShare * 100).toFixed(0) + '% / 眼を持つ ' + (c0.eyes * 100).toFixed(0) + '% / 底面に居る ' + (c0.bottom * 100).toFixed(0) + '%'
+      + '\n溶存栄養 ' + c0.nutrient.toFixed(2) + ' / 粒 ' + c0.food + '\n出生 ' + c0.births + ' / 餓死 ' + c0.starved + ' / 老衰 ' + c0.aged + ' / 物理破綻 ' + c0.broken + ' / 上限で不成立 ' + c0.blocked;
+    if (sel && !sel.dead) {
+      const d = A.development.describe(sel.plan), sc = Math.min((zc.width - 30) / (d.length + 1), (zc.height - 30) / (d.width + 1), 120), cm = A.physics.com(sel.b);
+      zx.fillStyle = '#07121d'; zx.fillRect(0, 0, zc.width, zc.height);
+      zoomR.draw(zx, sel.b.segs, { cx: cm[0], cy: cm[1], scale: sc, w: zc.width, h: zc.height }, { hue: sel.g.hue });
+      const p = sel.prof, inc = sel.eaten + sel.absorbed;
+      $('info').textContent = '由来 ' + sel.g.origin + ' / 系統 ' + sel.line + ' / 世代 ' + sel.gen + ' / 変異 ' + sel.g.mutations + ' 回\n齢 ' + sel.age.toFixed(0) + ' / ' + sel.life.toFixed(0) + ' 秒 / 成熟段階 ' + sel.stage.toFixed(2) + ' / 子 ' + sel.kids
+        + '\n体節 ' + sel.b.segs.length + '（成体 ' + sel.full.segs + '）/ 体積 ' + p.V.toFixed(2) + ' / 部品 ' + sel.g.parts.length + ' 種・規則 ' + sel.g.links.length + ' 本'
+        + '\nエネルギー ' + sel.E.toFixed(2) + ' / ' + p.Emax.toFixed(2) + ' / 消化管内 ' + sel.G.toFixed(2) + ' / 維持費 ' + p.basal.toFixed(3) + '/s'
+        + '\n収入：口 ' + (inc ? sel.eaten / inc * 100 : 0).toFixed(0) + '%・体表 ' + (inc ? sel.absorbed / inc * 100 : 0).toFixed(0) + '% / 自力移動 ' + (sel.path / Math.max(1, sel.age)).toFixed(3) + ' u/s' + (sel.passive ? '（動く関節なし）' : '');
+    } else if (sel) { $('info').textContent = '死亡（' + sel.dead + '）'; sel = null; }
+  }
+  function loop() { if (!paused) { const n = Number($('speed').value); for (let i = 0; i < n; i++) w.step(); } draw(); requestAnimationFrame(loop); }
+  cv.addEventListener('wheel', e => { e.preventDefault(); view.scale = Math.max(2, Math.min(200, view.scale * (e.deltaY < 0 ? 1.2 : 1 / 1.2))); }, { passive: false });
+  let drag = null;
+  cv.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, moved: false }; });
+  cv.addEventListener('pointermove', e => { if (!drag) return; const k = W / cv.clientWidth; if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 3) drag.moved = true; view.cx -= (e.clientX - drag.x) * k / view.scale; view.cy -= (e.clientY - drag.y) * k / view.scale; drag.x = e.clientX; drag.y = e.clientY; });
+  cv.addEventListener('pointerup', e => {
+    if (drag && !drag.moved) { const r = cv.getBoundingClientRect(), k = W / r.width, x = ((e.clientX - r.left) * k - W / 2) / view.scale + view.cx, y = ((e.clientY - r.top) * k - H / 2) / view.scale + view.cy; let best = null, bd = 1e9; for (const o of w.bodies) { const d = Math.hypot(o.cx - x, o.cy - y); if (d < bd) { bd = d; best = o; } } sel = bd < 6 + 20 / view.scale ? best : null; }
+    drag = null;
+  });
+  $('restart').onclick = start; $('fit').onclick = fit;
+  $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; };
+  $('founder').onchange = () => { if ($('founder').value === 'file') $('file').click(); else { loaded = null; start(); } };
+  $('file').onchange = async e => { loaded = JSON.parse(await e.target.files[0].text()); start(); };
+  if (q.get('seed')) $('seed').value = q.get('seed');
+  const boot = async () => {
+    if (window.ALIFE2_LOAD) loaded = window.ALIFE2_LOAD;
+    else if (q.get('load')) loaded = await (await fetch(q.get('load'))).json().catch(() => null);
+    start();
+    const pre = Number(q.get('t') || 0); for (let i = 0; i < pre * 30; i++) w.step();
+    if (q.get('zoom')) { view.scale = Number(q.get('zoom')); const o = w.bodies.slice().sort((a, b) => b.full.segs - a.full.segs)[0]; if (o) { view.cx = o.cx; view.cy = o.cy; sel = o; } }
+    window.ALIFE2_WORLD = { get w() { return w; } }; document.body.dataset.ready = '1'; loop();
+  };
+  boot();
+})();
+</script>
+</body>
+</html>

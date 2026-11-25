@@ -97,3 +97,45 @@ test('the picture is computed from the body: pose and shape change the pixels', 
   let diff = 0; for (let i = 0; i < before.length; i++) if (Math.abs(before[i] - after[i]) > 60) diff++;
   assert.ok(diff > 100, 'pose changed pixels: ' + diff);
 });
+
+// ---- Phase 2: energy budget and the world
+for (const f of ['organs', 'engine']) require('../alife2-' + f + '.js');
+const prof = (id, over) => A.organs.profile(sample(id, over).plan);
+
+test('every tissue is paid for, and one piece of body cannot hold everything', () => {
+  const a = prof('soft'), b = prof('soft', { eyes: 0 }), c = prof('soft', { armor: 0.9 });
+  assert.ok(a.basal > b.basal, 'eyes cost upkeep'); assert.ok(c.basal > a.basal, 'armour costs upkeep');
+  const g = A.genome.create({ parts: [A.genome.part({ muscle: 1, gut: 1, gonad: 1, store: 1, nerve: 1, vessel: 1 })] }), p = develop(g).segs[0].p;
+  assert.ok(Math.abs(p.muscle + p.gut + p.gonad + p.store + p.nerve + p.vessel - A.development.TISSUE_ROOM) < 1e-9);
+});
+
+test('small bodies absorb more per volume, large mouths reach larger food, large bodies hold more reserve', () => {
+  const s = prof('soft', { length: 3, width: 0.7 }), l = prof('soft', { length: 12, width: 2.8 });
+  const abs = p => p.absorb.reduce((x, y) => x + y, 0) / p.V;
+  assert.ok(abs(s) > abs(l) * 2); assert.ok(l.gape > s.gape * 2); assert.ok(l.Emax > s.Emax * 20);
+  assert.ok(l.Emax / l.basal > s.Emax / s.basal, 'a large body starves more slowly');
+});
+
+test('limbs far from the gut are weak unless transport tissue reaches them', () => {
+  const g = design(Object.assign({}, SAMPLES[1].params, { limbLen: 9 })), far = p => Math.min(...p.segs.map(q => q.supply));
+  const g2 = A.genome.copy(g); for (const p of g2.parts) p.vessel = 0.9;
+  assert.ok(far(develop(g)) < 0.5); assert.ok(far(develop(g2)) > far(develop(g)) * 1.5);
+});
+
+test('energy is conserved in the books: a body alone with no food only loses what it spends', () => {
+  const w = new A.engine.World({ seed: 3, founders: 0, cap: 0, grainRate: 0, bottomRate: 0, nutrientStart: 0, nutrientRegrow: 0 });
+  const o = w.spawn(design(SAMPLES[0].params), 80, 30, 1, null), e0 = o.E, t0 = w.t;
+  for (let i = 0; i < 60; i++) w.step();
+  const spent = o.prof.basal * (w.t - t0) + A.organs.C.work * o.b.work + o.egg; // upkeep, muscle work, and what went into the egg
+  assert.ok(Math.abs((e0 - o.E) - spent) < 1e-6 * spent + 1e-9, (e0 - o.E) + ' vs ' + spent); assert.ok(e0 > o.E);
+});
+
+test('with nothing to eat, everything starves; founders live and breed on what the world gives', () => {
+  const barren = new A.engine.World({ seed: 2, grainRate: 0, bottomRate: 0, nutrientStart: 0, nutrientRegrow: 0 }); barren.seedWith(A.genome.primordial(2));
+  for (let i = 0; i < 30 * 150 && barren.bodies.length; i++) barren.step();
+  assert.strictEqual(barren.bodies.length, 0); assert.ok(barren.counts.starved > 0);
+  const w = new A.engine.World({ seed: 2 }); w.seedWith(A.genome.primordial(2));
+  for (let i = 0; i < 30 * 150; i++) w.step();
+  assert.ok(w.bodies.length > 0 && w.counts.births > 10, 'births ' + w.counts.births);
+  assert.ok(w.bodies.some(o => o.g.origin === 'evolved' && o.g.mutations > 0));
+});

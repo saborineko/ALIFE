@@ -36,15 +36,15 @@ p{color:#a8bdc5}canvas{width:100%;height:auto;display:block;border:1px solid #34
     { title: '発生・成熟段階（体節・外骨格型）：芽から成体へ', cells: [0, 0.15, 0.3, 0.5, 0.75, 1].map(s => ({ g: A.bodyplan.design(S('armored')), stage: s, cap: 'stage ' + s, fixed: true })) },
     ...['soft', 'limbed', 'radial'].map((id, k) => ({ title: '突然変異（淘汰なし・各 8 回）：' + A.bodyplan.SAMPLES.find(q => q.id === id).name, cells: [0, 1, 2, 3, 4, 5].map(i => { let g = A.bodyplan.design(S(id)); const r = A.genome.rng(100 + k * 10 + i); if (i) for (let j = 0; j < 8; j++) g = A.genome.mutate(g, r); return { g, cap: i ? '変異体 ' + i : '元の設計' }; }) }))
   ];
-  for (const row of rows) {
+  const addRow = row => {
     const h = document.createElement('h2'); h.textContent = row.title; const cv = document.createElement('canvas'); cv.width = 1380; cv.height = 250;
     document.getElementById('rows').append(h, cv);
     const ctx = cv.getContext('2d'), w = cv.width / row.cells.length, hh = cv.height;
-    const plans = row.cells.map(c => A.development.develop(c.g, { stage: c.stage == null ? 1 : c.stage })), ds = plans.map(A.development.describe);
+    const plans = row.cells.map(c => A.development.develop(c.g, { stage: c.stage == null ? 1 : c.stage, maxSegs: row.maxSegs })), ds = plans.map(A.development.describe);
     const full = row.cells[0].fixed ? A.development.describe(A.development.develop(row.cells[0].g)) : null;
     const scAll = Math.min(...ds.map(d => Math.min((w - 24) / (d.length + 1), (hh - 50) / (d.width + 1))));
     row.cells.forEach((c, i) => {
-      const d = ds[i], sc = full ? Math.min((w - 24) / (full.length + 1), (hh - 50) / (full.width + 1)) : scAll;
+      const d = ds[i], sc = full ? Math.min((w - 24) / (full.length + 1), (hh - 50) / (full.width + 1)) : row.each ? Math.min(90, (w - 24) / (d.length + 1), (hh - 50) / (d.width + 1)) : scAll;
       const v = { cx: (d.bbox[0] + d.bbox[2]) / 2, cy: (d.bbox[1] + d.bbox[3]) / 2, scale: sc, w: Math.round(w), h: hh };
       ctx.save(); ctx.translate(i * w, 0); ctx.beginPath(); ctx.rect(0, 0, w, hh); ctx.clip();
       const g = ctx.createRadialGradient(w / 2, hh / 2, 0, w / 2, hh / 2, w * 0.8); g.addColorStop(0, '#12283a'); g.addColorStop(1, '#050a12'); ctx.fillStyle = g; ctx.fillRect(0, 0, w, hh);
@@ -52,8 +52,16 @@ p{color:#a8bdc5}canvas{width:100%;height:auto;display:block;border:1px solid #34
       ctx.fillStyle = '#e8f5f0'; ctx.font = '12px system-ui'; ctx.fillText(c.cap + '  （体節 ' + d.segments + '）', 8, hh - 10);
       ctx.strokeStyle = '#2b414c'; ctx.strokeRect(0.5, 0.5, w - 1, hh - 1); ctx.restore();
     });
-  }
-  document.body.dataset.ready = '1';
+  };
+  const evo = new URLSearchParams(location.search).get('evo');
+  if (!evo && !window.ALIFE2_EVO) { rows.forEach(addRow); document.body.dataset.ready = '1'; return; }
+  // natural-selection results: the commonest body plans alive at the end of each trial
+  document.querySelector('h1').textContent = 'ALIFE 2.0 進化試験の結果（自然淘汰・origin: evolved）';
+  document.querySelector('p').textContent = '原始個体（1体節）から変異と淘汰だけで生じた身体。各試験の終了時に多かった体制を多い順に並べる。人工設計ではない。';
+  (window.ALIFE2_EVO ? Promise.resolve(window.ALIFE2_EVO) : Promise.all(evo.split(',').map(u => fetch(u).then(r => r.json())))).then(list => {
+    for (const d of list) addRow({ title: 'seed ' + d.seed + '：' + Math.round(d.seconds) + ' 秒後' + (d.extinct ? '（絶滅）' : ''), each: true, maxSegs: 64, cells: d.top.slice(0, 6).map(k => ({ g: k.genome, cap: k.count + '匹 世代' + k.gen + ' 口' + Math.round(k.mouthShare * 100) + '% 速' + (k.speed || 0).toFixed(2) })) });
+    document.body.dataset.ready = '1';
+  });
 })();
 </script>
 </body>

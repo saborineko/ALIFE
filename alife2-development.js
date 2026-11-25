@@ -9,13 +9,21 @@
   if (typeof require !== 'undefined' && !A.genome) require('./alife2-genome.js');
   const { chainScale, clamp } = A.genome;
   const PI = Math.PI, TAU = PI * 2;
-  const MAX_SEGS = 160;
+  const MAX_SEGS = 160, TISSUE_ROOM = 1.5, TISSUES = ['muscle', 'gut', 'gonad', 'store', 'nerve', 'vessel'];
+  const SUPPLY_REACH = 6;
   const smooth = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
 
   // stage: 0 = newly born bud, 1 = adult.
   function develop(g, opt) {
     opt = opt || {};
     const stage = opt.stage == null ? 1 : clamp(opt.stage, 0, 1), cap = opt.maxSegs || MAX_SEGS;
+    // One piece of body has limited room: tissues crowd each other. A single blob can hold a
+    // little of everything; a body with several kinds of part can specialise them.
+    const parts = g.parts.map(p => {
+      const sum = p.muscle + p.gut + p.gonad + p.store + p.nerve + p.vessel, k = sum > TISSUE_ROOM ? TISSUE_ROOM / sum : 1, q = Object.assign({}, p);
+      for (const t of TISSUES) q[t] = p[t] * k;
+      return q;
+    });
     const chainLink = g.parts.map((_, i) => g.links.findIndex(l => l.from === i && l.to === i));
     const segs = [];
     const root = { id: 0, parent: -1, part: g.root, via: -1, idx: 0, chainBase: 1, mir: 1, angle: 0, at: 0, off: 0, phase0: 0, axial: true, counts: {}, chainRoot: 0, group: 0, kids: [] };
@@ -58,7 +66,7 @@
     // geometry at full size
     const n = segs.length, total = 0.3 + 0.7 * stage;
     for (const s of segs) {
-      const p = g.parts[s.part], cl = chainLink[s.part], l = cl >= 0 ? g.links[cl] : null;
+      const p = parts[s.part], cl = chainLink[s.part], l = cl >= 0 ? g.links[cl] : null;
       s.p = p;
       s.birth = n > 1 ? 0.62 * s.id / (n - 1) : 0;
       s.g = stage >= 1 ? 1 : smooth((stage - s.birth) / 0.3 + 0.12);
@@ -104,6 +112,15 @@
       s.bx = s.ax + Math.cos(s.abs) * s.len; s.by = s.ay + Math.sin(s.abs) * s.len;
     }
     for (const s of out) s.az = out[s.chainRoot].abs;
+    // supply: how well each segment is fed, by distance along the body from the nearest gut
+    // (or, with no gut at all, from the skin: every segment feeds itself). Vessels shorten the distance.
+    const anyGut = out.some(s => s.p.gut > 0.05), dist = out.map(s => !anyGut || s.p.gut > 0.05 ? 0 : Infinity);
+    const hop = s => s.len * (1 - 0.9 * s.p.vessel);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = out.length - 1; i > 0; i--) { const s = out[i], q = out[s.parent]; dist[q.id] = Math.min(dist[q.id], dist[i] + hop(q)); }
+      for (let i = 1; i < out.length; i++) { const s = out[i]; dist[i] = Math.min(dist[i], dist[s.parent] + hop(s)); }
+    }
+    for (const s of out) s.supply = Math.exp(-dist[s.id] / SUPPLY_REACH);
     return { segs: out, stage, hue: g.hue, freq: g.freq, origin: g.origin, truncated: segs.length >= cap };
   }
 
@@ -129,6 +146,6 @@
     };
   }
 
-  A.development = { develop, describe, MAX_SEGS };
+  A.development = { develop, describe, MAX_SEGS, TISSUE_ROOM, SUPPLY_REACH };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

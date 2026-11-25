@@ -51,7 +51,7 @@
         mass: Math.max(1e-4, K.density * PI * rm * zm * q.len * (1 + K.armorDensity * q.p.armor)),
         sideArea: q.len * (q.z0 + q.z1), wetArea: PI * (rm + zm) * q.len,
         formArea: Math.abs(PI * q.r0 * q.z0 - PI * q.r1 * q.z1) + (q.leaf ? PI * q.r1 * q.z1 : 0) + (i === 0 ? PI * q.r0 * q.z0 : 0),
-        tauMax: K.muscleStress * q.p.muscle * q.r0 * q.r0 * q.z0,
+        tauMax: K.muscleStress * q.p.muscle * q.r0 * q.r0 * q.z0 * (q.supply == null ? 1 : q.supply),
         pad: q.leaf && q.p.grip > 0.05, ax: 0, ay: 0, bx: 0, by: 0, dx: 1, dy: 0
       };
       if (i === 0) { seg.aw = [[0, 1, 0]]; place(0, q.ax, q.ay); }
@@ -150,7 +150,8 @@
       for (let e = 0; e < 2; e++) {
         const vx = (e ? s.vbx : s.vax) - env.flowX, vy = (e ? s.vby : s.vay) - env.flowY;
         const vt = vx * s.dx + vy * s.dy, vn = -vx * s.dy + vy * s.dx;
-        const ft = -(kt * Math.abs(vt) + kv) * vt, fn = -(kn * Math.abs(vn) + 2 * kv) * vn;
+        const me = 0.6 * s.mass / dt; // never remove more than the end's own momentum in one step
+        const ft = -Math.min(kt * Math.abs(vt) + kv, me) * vt, fn = -Math.min(kn * Math.abs(vn) + 2 * kv, me) * vn;
         const fx = ft * s.dx - fn * s.dy, fy = ft * s.dy + fn * s.dx;
         if (e) { b.fx[s.b] += fx; b.fy[s.b] += fy; } else forceA(b, s, fx, fy);
         b.heat -= (fx * vx + fy * vy) * dt;
@@ -201,7 +202,7 @@
     b.t += dt;
   }
 
-  function step(b, dt) { const n = K.substeps; for (let i = 0; i < n; i++) substep(b, dt / n); pose(b); }
+  function step(b, dt, sub) { const n = sub || K.substeps; for (let i = 0; i < n; i++) substep(b, dt / n); pose(b); }
 
   function com(b) { let x = 0, y = 0; for (let k = 0; k < b.np; k++) { x += b.x[k] * b.m[k]; y += b.y[k] * b.m[k]; } return [x / b.mass, y / b.mass]; }
   function momentum(b) { let x = 0, y = 0, L = 0; for (let k = 0; k < b.np; k++) { x += b.vx[k] * b.m[k]; y += b.vy[k] * b.m[k]; L += b.m[k] * (b.x[k] * b.vy[k] - b.y[k] * b.vx[k]); } return [x, y, L]; }
