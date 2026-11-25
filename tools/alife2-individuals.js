@@ -36,15 +36,18 @@ function assay(list, seed, cond) {
 // compare conditions over several worlds; returns for each genome the list of metrics whose ranges do not overlap
 function compare(list, seeds) {
   const res = {}; for (const c of ['intact', 'numb', 'blind']) res[c] = seeds.map(s => assay(list, s, c));
-  return list.map((q, i) => { const diffs = []; for (const c of ['numb', 'blind']) for (const k of BEH.concat(OUT)) { const a = res.intact.map(r => r[i][k]), b = res[c].map(r => r[i][k]), mean = v => v.reduce((x, y) => x + y, 0) / v.length; if (Math.min(...b) > Math.max(...a) || Math.max(...b) < Math.min(...a)) diffs.push({ cut: c, k, kind: BEH.includes(k) ? '行動' : '結果', from: mean(a), to: mean(b) }); } return diffs; });
+  return list.map((q, i) => { const diffs = []; for (const c of ['numb', 'blind']) for (const k of BEH.concat(OUT)) { const a = res.intact.map(r => r[i][k]), b = res[c].map(r => r[i][k]), mean = v => v.reduce((x, y) => x + y, 0) / v.length; const size = Math.abs(mean(b) - mean(a)) / Math.max(Math.abs(mean(a)), Math.abs(mean(b)), 1e-6);
+      // counts only if the ranges over worlds do not overlap AND the change is at least 10% (5% for outcomes). Nerve activity itself is not behaviour: cutting an input changes it trivially.
+      if (k !== 'nerve' && (Math.min(...b) > Math.max(...a) || Math.max(...b) < Math.min(...a)) && size >= (BEH.includes(k) ? 0.10 : 0.05)) diffs.push({ cut: c, k, kind: BEH.includes(k) ? '行動' : '結果', from: mean(a), to: mean(b), size }); } return diffs; });
 }
 const show = d => (d.cut === 'numb' ? '味覚' : '餌の方向') + 'を切ると' + d.kind + '「' + LABEL[d.k] + '」 ' + d.from.toFixed(3) + ' → ' + d.to.toFixed(3);
 const wiringOf = g => g.parts.map((p, i) => A.neural.wiring(p) > 1e-6 ? `部品${i}[味${p.nC.toFixed(1)} 親${p.nP.toFixed(1)} 子${p.nK.toFixed(1)} 空腹${p.nH.toFixed(1)} 基${p.nB.toFixed(1)} 残${p.leak.toFixed(2)} 順応${p.adapt.toFixed(2)} →繊毛${p.mCil.toFixed(1)} 旋回${p.mTurn.toFixed(1)} 関節${p.mJoint.toFixed(1)}]` : '').filter(Boolean).join(' ') || '回路なし';
 if (!cands.length) { console.log('候補なし。'); process.exit(0); }
 const screen = compare(cands, [901, 902, 903, 904]);
 const flagged = [];
-cands.forEach((q, i) => { const d = screen[i]; console.log(`  #${q.ids[0]}（${q.ids.length} 匹、${W.regions ? W.regions[q.region].name : '世界'}、体節 ${A.development.develop(q.g, { maxSegs: W.maxSegs }).segs.length}、${q.circuit ? '局所回路→効果器' : '脳の重みのみ'}）: ` + (d.length ? d.map(show).join(' / ') : '差なし')); if (d.length) flagged.push(q); });
-const out = { file, flagged: [] };
+cands.forEach((q, i) => { const d = screen[i]; q.effect = d.reduce((m, x) => Math.max(m, x.size), 0); console.log(`  #${q.ids[0]}（${q.ids.length} 匹、${W.regions ? W.regions[q.region].name : '世界'}、体節 ${A.development.develop(q.g, { maxSegs: W.maxSegs }).segs.length}、${q.circuit ? '局所回路→効果器' : '脳の重みのみ'}）: ` + (d.length ? d.map(show).join(' / ') : '差なし')); if (d.length) flagged.push(q); });
+flagged.sort((a, b) => b.effect - a.effect);
+const out = { file, candidates: cands.length, flagged: [] };
 for (const q of flagged.slice(0, 4)) {
   console.log(`\n確認：#${q.ids[0]} を単独で、別の世界 4 つ`);
   const d = compare([q], [911, 912, 913, 914])[0];
