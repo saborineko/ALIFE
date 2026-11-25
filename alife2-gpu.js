@@ -48,7 +48,7 @@ void main(){
 }`;
   const SHADE = `#version 300 es
 precision highp float;
-uniform sampler2D t0, t1, t2, t3; uniform vec3 uBody, uRim, uArm, uDeep; uniform float uOrgans;
+uniform sampler2D t0, t1, t2, t3; uniform vec3 uBody, uRim, uArm, uDeep; uniform float uOrgans, uQ;
 out vec4 o;
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float noise(vec2 x){ vec2 i = floor(x), f = fract(x); f = f * f * (3. - 2. * f);
@@ -61,10 +61,9 @@ float Hh(ivec2 c){ return texelFetch(t0, c, 0).w; }
 void main(){
   ivec2 c = ivec2(gl_FragCoord.xy);
   vec4 f = texelFetch(t0, c, 0); float s = f.x;
-  if (s > 0.5) { o = vec4(0.); return; }
+  if (s > 5. * uQ) { o = vec4(0.); return; }
   vec4 T = texelFetch(t1, c, 0), Q = texelFetch(t2, c, 0), P = texelFetch(t3, c, 0);
   float a = T.x, k = T.y, U = T.z, V = T.w, R = max(f.y, 0.5), Z = f.z, H = f.w;
-  float cov = clamp(0.5 - s, 0., 1.);
   float nx = (Hh(c + ivec2(-1, 0)) - Hh(c + ivec2(1, 0))) * 0.3 + (Hh(c + ivec2(-2, 0)) - Hh(c + ivec2(2, 0))) * 0.1;
   float ny = (Hh(c + ivec2(0, 1)) - Hh(c + ivec2(0, -1))) * 0.3 + (Hh(c + ivec2(0, 2)) - Hh(c + ivec2(0, -2))) * 0.1;
   vec3 n = normalize(vec3(nx, ny, 1.));
@@ -90,7 +89,7 @@ void main(){
     vec2 sc = cells(vec2(U, V) / max(2.6, R * 0.20) + 17.); float st = step(1. - clamp(P.y * 0.9, 0., 1.), sc.y) * (1. - smoothstep(0.26, 0.36, sc.x)) * (1. - smoothstep(0.62, 0.75, av));
     org = mix(org, vec3(1.0, 0.92, 0.62) * (1.2 - sc.x), st * 0.8); oa = max(oa, st * 0.7);
     // gut: a tube along the axis, pinched into chambers, with a wall and granular contents
-    float gw = clamp(Q.x, 0., 1.) * 0.44 * (0.80 + 0.22 * sin(w * 2.3)), gz = (1. - smoothstep(gw * 0.82, gw, av)) * step(0.03, Q.x);
+    float gw = clamp(Q.x, 0., 1.) * 0.46 * (0.80 + 0.22 * sin(w * 2.3) + 0.12 * (noise(vec2(U, V) * 0.15) - 0.5)), gz = (1. - smoothstep(gw * 0.55, gw * 1.05, av)) * step(0.03, Q.x);
     float wall = smoothstep(gw * 0.55, gw * 0.95, av), grn = cells(vec2(U, V) / max(1.6, R * 0.10) + 31.).x;
     vec3 gcol = mix(vec3(1.0, 0.62, 0.22), vec3(0.93, 0.80, 0.34), wall) * (0.70 + 0.5 * noise(vec2(U, V) * 0.5)) * (0.75 + 0.45 * smoothstep(0.1, 0.5, grn));
     org = mix(org, gcol, gz); oa = max(oa, gz * 0.9);
@@ -99,25 +98,34 @@ void main(){
     float brain = (1. - smoothstep(0.25, 0.42, av)) * smoothstep(0.55, 0.8, Q.z) * (0.6 + 0.4 * noise(vec2(U, V) * 0.7));
     float ne = clamp(Q.z * 1.8, 0., 1.) * max(cord, gang * 0.9); ne = max(ne, brain * 0.8);
     org = mix(org, vec3(0.76, 0.56, 1.0) * (0.9 + 0.5 * gang), ne); oa = max(oa, ne * 0.85);
-    oa *= inside;
+    oa *= inside * (0.72 + 0.5 * hash(floor(vec2(U, V) / uQ) + 5.));
   }
 
-  // ---- skin
-  float gr = noise(vec2(U, V) * 0.42), mid2 = noise(vec2(U, V) * 0.9 + 3.), fine = noise(vec2(U, V) * 1.9 + 9.);
-  float ring = 0.5 + 0.5 * sin(U * 6.283 / max(2.6, R * 0.16));
-  float tex = 0.70 + 0.34 * gr + 0.14 * mid2 + 0.12 * fine + (0.10 + 0.14 * a) * ring * thick;
-  float small = R < 9. ? 0.45 + 0.06 * R : 1.;
-  float cut = small * exp(-(e - 0.9) * (e - 0.9) * 0.9), gap = small * exp(-(e - 3.2) * (e - 3.2) * 0.35);
-  float speck = smoothstep(0.80, 0.95, fine) * thick * 0.5;
-  vec3 film = 0.5 + 0.5 * cos(6.283 * (vec3(0., 0.33, 0.67) + n.z * 1.4 + U * 0.004 + gr * 0.25));
-  vec3 base = mix(uBody, uArm, a);
-  float edge = rim * 0.6 + cut * 0.4 + speck;
-  vec3 col = base * (0.20 + 0.58 * diff + 0.12 * fill) * tex + uDeep * 0.20 * back + uRim * edge + film * rim * (0.22 + 0.25 * a) + sp;
-  float al = (0.05 + 0.30 * k + 0.40 * a) * (0.35 + 0.65 * thick) * (0.65 + 0.7 * gr) * (1. - 0.45 * gap) + rim * 0.55 + cut * 0.42 + sp + speck * 0.6;
-  al = min(al, 0.96) * cov;
-  // organs are lit a little by the same light, and seen through the skin
-  vec3 ocol = org * (0.72 + 0.38 * diff); float oal = oa * cov;
-  o = vec4(col * al + ocol * oal * (1. - al), al + oal * (1. - al));
+  // ---- body matter, as a microscope shows it: no drawn outline. The edge is where the
+  // grainy substance thins out, slightly irregular, with a faint halo just outside it.
+  vec2 bp = vec2(U, V) / uQ;                                   // body-fixed coordinates in screen pixels
+  float st = hash(floor(bp)), st2 = hash(floor(bp * 0.5) + 11.), lump = noise(bp * 0.22), lump2 = noise(bp * 0.07 + 5.);
+  float grain = 0.50 + 0.85 * st * st + 0.30 * st2;            // stipple
+  float eN = e / uQ + (noise(bp * 0.3) - 0.5) * 2.4 + (lump2 - 0.5) * 1.6;   // depth inside the edge, with a ragged margin
+  float dens = smoothstep(-0.6, 4.5, eN);                      // substance thickens inwards
+  float halo = (1. - smoothstep(0., 3.2, -eN)) * step(eN, 0.);  // just outside
+  float membrane = exp(-(eN - 1.4) * (eN - 1.4) * 0.45);       // a soft denser band, not a line
+  float ring = 0.5 + 0.5 * sin(U * 6.283 / max(2.6 * uQ, R * 0.16));
+  // colour comes from what the body is made of, glowing from the core outwards
+  float tsum = Q.x + Q.y + Q.z + Q.w + 1e-4;
+  vec3 tissue = (Q.x * vec3(1.0, 0.72, 0.30) + Q.y * vec3(1.0, 0.40, 0.42) + Q.z * vec3(0.62, 0.48, 1.0) + Q.w * vec3(1.0, 0.55, 0.85)) / tsum;
+  float core = thick * thick * smoothstep(0., 1.2, tsum);
+  vec3 base = mix(mix(uBody, uArm, a), tissue, 0.45 * core);
+  float lightK = 0.34 + 0.50 * diff + 0.12 * fill;
+  vec3 col = base * lightK * (0.55 + 0.75 * grain) * (0.82 + 0.36 * lump) + tissue * core * 0.22 + uDeep * 0.14 * back
+           + uRim * (membrane * 0.30 + rim * 0.18) + (0.10 + 0.14 * a) * ring * thick * uRim * 0.5 + sp * (0.25 + 0.6 * a);
+  float al = dens * (0.26 + 0.24 * k + 0.42 * a) * (0.50 + 0.50 * thick) * (0.45 + 0.80 * grain) * (0.80 + 0.40 * lump)
+           + membrane * (0.16 + 0.10 * k + 0.3 * a) * (0.6 + 0.6 * st) + sp * (0.2 + 0.5 * a);
+  al = min(al, 0.95) * smoothstep(-0.8, 0.8, eN);
+  float hal = halo * 0.10 * (0.5 + st);
+  // organs are lit a little by the same light, and seen through the matter in front of them
+  vec3 ocol = org * (0.72 + 0.38 * diff); float oal = oa * smoothstep(0.5, 3.5, eN);
+  o = vec4(col * al + ocol * oal * (1. - al * 0.7) + uRim * hal * (1. - al), al + oal * (1. - al * 0.7) * (1. - al) + hal * (1. - al));
 }`;
 
   class GpuSkin {
@@ -131,7 +139,7 @@ void main(){
         const prog = fs => { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.bindAttribLocation(p, 0, 'p'); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; };
         this.pField = prog(FIELD); this.pShade = prog(SHADE);
         const loc = (p, names) => Object.fromEntries(names.map(n => [n, gl.getUniformLocation(p, n)]));
-        this.uF = loc(this.pField, ['uSeg', 'uN', 'uRes']); this.uS = loc(this.pShade, ['t0', 't1', 't2', 't3', 'uBody', 'uRim', 'uArm', 'uDeep', 'uOrgans']);
+        this.uF = loc(this.pField, ['uSeg', 'uN', 'uRes']); this.uS = loc(this.pShade, ['t0', 't1', 't2', 't3', 'uBody', 'uRim', 'uArm', 'uDeep', 'uOrgans', 'uQ']);
         const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
         gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
         this.seg = gl.createTexture(); this.data = new Float32Array(MAXS * ROWS * 4);
@@ -156,7 +164,7 @@ void main(){
     }
     // groups: arrays of pixel-space segments in draw order (from Renderer.layout).
     // Returns the canvas; the picture is in this.region = [sx, sy, w, h] of it.
-    render(groups, w, h, colors, organs) {
+    render(groups, w, h, colors, organs, q) {
       const gl = this.gl, d = this.data; this.reserve(w, h); if (!this.ok) return null;
       let n = 0;
       for (const grp of groups) for (const p of grp) {
@@ -171,7 +179,7 @@ void main(){
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.useProgram(this.pShade);
       this.tex.forEach((t, i) => { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, t); gl.uniform1i(this.uS['t' + i], i); });
-      gl.uniform3fv(this.uS.uBody, colors.body); gl.uniform3fv(this.uS.uRim, colors.rim); gl.uniform3fv(this.uS.uArm, colors.arm); gl.uniform3fv(this.uS.uDeep, colors.deep); gl.uniform1f(this.uS.uOrgans, organs ? 1 : 0);
+      gl.uniform3fv(this.uS.uBody, colors.body); gl.uniform3fv(this.uS.uRim, colors.rim); gl.uniform3fv(this.uS.uArm, colors.arm); gl.uniform3fv(this.uS.uDeep, colors.deep); gl.uniform1f(this.uS.uOrgans, organs ? 1 : 0); gl.uniform1f(this.uS.uQ, q || 1);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.region = [0, this.h - h, w, h];
       return this.canvas;

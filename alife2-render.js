@@ -133,7 +133,7 @@
       const q = opt.quality || 1, organs = opt.internals !== false; let skin = null, src = null; this.used = 'cpu';
       if (opt.gpu !== false && A.gpu) {
         const g = this.gpuSkin = A.gpu.shared();
-        if (g.ok && segs.length <= A.gpu.MAXS) { skin = g.render(this.layout(segs, view, q), Math.max(8, Math.round(view.w * q)), Math.max(8, Math.round(view.h * q)), this.colors(opt.hue == null ? 170 : opt.hue), organs); if (skin) { this.used = 'gpu'; src = g.region; } }
+        if (g.ok && segs.length <= A.gpu.MAXS) { skin = g.render(this.layout(segs, view, q), Math.max(8, Math.round(view.w * q)), Math.max(8, Math.round(view.h * q)), this.colors(opt.hue == null ? 170 : opt.hue), organs, q); if (skin) { this.used = 'gpu'; src = g.region; } }
       }
       if (!skin) { const img = this.field(segs, view, opt); this.canvas.getContext('2d').putImageData(img, 0, 0); skin = this.canvas; src = [0, 0, this.w, this.h]; }
       const blit = (dx, dy) => ctx.drawImage(skin, src[0], src[1], src[2], src[3], dx, dy, view.w, view.h);
