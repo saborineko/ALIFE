@@ -121,10 +121,12 @@
       while (this.bottomDebt > 0) { const size = this.bottomSize[this.pick(this.bottomSize, null)], e = this.grainEnergy * size * size * size; this.addFood(r() * this.W, this.yBottom + 1 + r() * (this.H - this.yBottom - 2), size, e, true, this.bottomLife); this.bottomDebt -= e; }
       for (const p of this.patch) { p.a += (r() - 0.5) * 0.3; p.x = ((p.x + Math.cos(p.a) * 0.6 * dt) % this.W + this.W) % this.W; p.y = clamp(p.y + Math.sin(p.a) * 0.6 * dt, 6, this.yBottom - 6); }
       for (const c of this.grid) c.length = 0;
-      let n = 0;
-      for (const f of this.food) {
+      // drifting grains are jostled in turns, a quarter of them each step for four steps' worth: the same spreading, a quarter of the work
+      let n = 0; const ph = this.tick & 3, dt4 = dt * 4, jit = this.jitter * Math.sqrt(dt4);
+      for (let i = 0; i < this.food.length; i++) {
+        const f = this.food[i];
         if (f.e <= 0 || f.die < this.t) continue;
-        if (!f.fixed) { const [vx, vy] = this.flowAt(f.x, f.y); f.x = ((f.x + vx * dt) % this.W + this.W) % this.W; f.x += r.gauss() * this.jitter * Math.sqrt(dt); f.y = clamp(f.y + (vy + this.sink) * dt + r.gauss() * this.jitter * Math.sqrt(dt), 0.5, this.H - 0.5); if (f.y >= this.yBottom) f.fixed = true; }
+        if (!f.fixed && (i & 3) === ph) { const [vx, vy] = this.flowAt(f.x, f.y); f.x = ((f.x + vx * dt4 + (r() + r() + r() - 1.5) * 2 * jit) % this.W + this.W) % this.W; f.y = clamp(f.y + (vy + this.sink) * dt4 + (r() + r() + r() - 1.5) * 2 * jit, 0.5, this.H - 0.5); if (f.y >= this.yBottom) f.fixed = true; }
         this.food[n++] = f; this.grid[this.cellAt(f.x, f.y)].push(f);
       }
       this.food.length = n;
@@ -148,10 +150,10 @@
         const dy = f.y - hy, d2 = dx * dx + dy * dy; if (d2 > R * R) continue;
         const w = f.e / (d2 + 1), d = Math.sqrt(d2) + 1e-6; sx += w * dx / d; sy += w * dy / d;
       }
-      const m = Math.hypot(sx, sy), k = m / (m + 0.2) / (m + 1e-9), ahead = (sx * fx + sy * fy) * k, left = (-sx * fy + sy * fx) * k;
+      const m = Math.sqrt(sx * sx + sy * sy), k = m / (m + 0.2) / (m + 1e-9), ahead = (sx * fx + sy * fy) * k, left = (-sx * fy + sy * fx) * k;
       o.noise += (this.rand.gauss() - o.noise * 0.3) * 0.3; o.wander += this.rand.gauss() * 0.15;
       // taxis: over the last interval, how much of its own movement went towards the food it perceived then
-      if (o.seen && Math.abs(o.cx - o.sx) < 5) { const fl = this.flowAt(o.cx, o.cy), mx = o.cx - o.sx - fl[0] * o.sdt, my = o.cy - o.sy - fl[1] * o.sdt, d = Math.hypot(mx, my); o.taxDot += mx * o.seen[0] + my * o.seen[1]; o.taxLen += d; o.taxN++; }
+      if (o.seen && Math.abs(o.cx - o.sx) < 5) { const fl = this.flowAt(o.cx, o.cy), mx = o.cx - o.sx - fl[0] * o.sdt, my = o.cy - o.sy - fl[1] * o.sdt, d = Math.sqrt(mx * mx + my * my); o.taxDot += mx * o.seen[0] + my * o.seen[1]; o.taxLen += d; o.taxN++; }
       o.seen = m > 1e-6 ? [sx / m, sy / m] : null; o.sx = o.cx; o.sy = o.cy; o.sdt = 5 * this.dt;
       // ablation for experiments: this body, or this whole world, gets no information about where food is
       const cut = o.blind || this.blind;
@@ -176,7 +178,7 @@
         let c = P.com(b);
         if (c[0] < 0 || c[0] >= this.W) { const s = c[0] < 0 ? this.W : -this.W; for (let k = 0; k < b.np; k++) b.x[k] += s; c[0] += s; P.pose(b); }
         if (c[1] < 2 || c[1] > this.H - 2) { const push = (c[1] < 2 ? 2 - c[1] : this.H - 2 - c[1]) * 0.5; for (let k = 0; k < b.np; k++) { b.y[k] += push; b.vy[k] *= 0.5; } c[1] += push; P.pose(b); }
-        o.path += Math.hypot(c[0] - o.cx, c[1] - o.cy) < 5 ? Math.hypot(c[0] - o.cx - fl[0] * dt, c[1] - o.cy - fl[1] * dt) : 0; o.cx = c[0]; o.cy = c[1];
+        o.path += Math.sqrt((c[0] - o.cx) * (c[0] - o.cx) + (c[1] - o.cy) * (c[1] - o.cy)) < 5 ? Math.sqrt((c[0] - o.cx - fl[0] * dt) * (c[0] - o.cx - fl[0] * dt) + (c[1] - o.cy - fl[1] * dt) * (c[1] - o.cy - fl[1] * dt)) : 0; o.cx = c[0]; o.cy = c[1];
         // income: skin
         for (let i = 0; i < b.segs.length; i++) {
           const a = pr.absorb[i]; if (a <= 0) continue;
@@ -189,7 +191,7 @@
           for (const f of this.grid[ci]) {
             if (f.e <= 0 || f.size > m.gape * 1.3 || o.G + f.e > pr.gutCap) continue;
             let dx = f.x - s.bx; if (dx > this.W / 2) dx -= this.W; else if (dx < -this.W / 2) dx += this.W;
-            if (Math.hypot(dx, f.y - s.by) < m.gape + f.size * 0.5) { o.G += f.e; o.eaten += f.e; this.counts.eaten += f.e; f.e = 0; }
+            if (Math.sqrt(dx * dx + (f.y - s.by) * (f.y - s.by)) < m.gape + f.size * 0.5) { o.G += f.e; o.eaten += f.e; this.counts.eaten += f.e; f.e = 0; }
           }
         }
         const dg = Math.min(o.G, pr.digest * dt); o.G -= dg; o.E += dg * pr.eta;

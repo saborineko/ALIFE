@@ -69,8 +69,8 @@
     // lump mass: half on the far end, half shared by whatever carries the near end
     for (const s of b.segs) {
       b.m[s.b] += s.mass / 2;
-      let tot = 0; for (const [, r, i] of s.aw) tot += Math.hypot(r, i);
-      for (const [k, r, i] of s.aw) b.m[k] += s.mass / 2 * Math.hypot(r, i) / tot;
+      let tot = 0; for (const [, r, i] of s.aw) tot += Math.sqrt(r * r + i * i);
+      for (const [k, r, i] of s.aw) b.m[k] += s.mass / 2 * Math.sqrt(r * r + i * i) / tot;
     }
     b.mass = 0; for (let i = 0; i < np; i++) { b.im[i] = 1 / b.m[i]; b.mass += b.m[i]; }
     pose(b);
@@ -95,17 +95,24 @@
       s.padCap = s.pad ? K.padStress * s.p.grip * (0.2 + ref.p.muscle) * ref.r0 * ref.r0 * ref.z0 : 0;
     }
     b.hasCilia = b.segs.some(q => q.cil !== 0); b.ciliaUse = 0;
+    // A body with no working joint keeps its shape: it is solved as one rigid body (same forces, far less work).
+    b.rigid = !b.segs.some(q => q.id > 0 && q.tauMax > 0 && q.p.amp > 0.02);
+    if (b.rigid) {
+      const c = com(b); b.loc = new Float64Array(2 * np); b.th = 0; b.om = 0; b.inertia = 1e-9;
+      for (let k = 0; k < np; k++) { b.loc[2 * k] = b.x[k] - c[0]; b.loc[2 * k + 1] = b.y[k] - c[1]; b.inertia += b.m[k] * (b.loc[2 * k] ** 2 + b.loc[2 * k + 1] ** 2); }
+    }
     b.start = com(b);
     return b;
   }
 
   // refresh segment endpoints and directions from particles
   function pose(b) {
-    for (const s of b.segs) {
-      let ax = 0, ay = 0;
-      for (const [k, r, i] of s.aw) { ax += r * b.x[k] - i * b.y[k]; ay += r * b.y[k] + i * b.x[k]; }
-      s.ax = ax; s.ay = ay; s.bx = b.x[s.b]; s.by = b.y[s.b];
-      const dx = s.bx - ax, dy = s.by - ay, l = Math.hypot(dx, dy) || 1e-9;
+    const segs = b.segs, X = b.x, Y = b.y;
+    for (let q = 0; q < segs.length; q++) {
+      const s = segs[q], aw = s.aw; let ax = 0, ay = 0;
+      for (let j = 0; j < aw.length; j++) { const w = aw[j], k = w[0], r = w[1], i = w[2]; ax += r * X[k] - i * Y[k]; ay += r * Y[k] + i * X[k]; }
+      s.ax = ax; s.ay = ay; s.bx = X[s.b]; s.by = Y[s.b];
+      const dx = s.bx - ax, dy = s.by - ay, l = Math.sqrt(dx * dx + dy * dy) || 1e-9;
       s.dx = dx / l; s.dy = dy / l; s.cur = l;
     }
   }
@@ -114,25 +121,29 @@
 
   // One compliant angle constraint between segment s and its parent P.
   // free > 0 makes it a limit: nothing happens inside +-free of the target.
-  const gk = [], gxs = [], gys = [];
+  const gk = new Int32Array(64), gxs = new Float64Array(64), gys = new Float64Array(64);
   function joint(b, s, P, target, alpha, damp, lamMax, free, dt) {
-    let n = 0;
-    const add = (k, x, y) => { for (let j = 0; j < n; j++) if (gk[j] === k) { gxs[j] += x; gys[j] += y; return; } gk[n] = k; gxs[n] = x; gys[n] = y; n++; };
-    const pt = q => { let x = 0, y = 0; for (const [k, r, i] of q.aw) { x += r * b.x[k] - i * b.y[k]; y += r * b.y[k] + i * b.x[k]; } return [x, y]; };
-    const [cax, cay] = pt(s), [pax, pay] = pt(P);
-    let cx = b.x[s.b] - cax, cy = b.y[s.b] - cay, px = b.x[P.b] - pax, py = b.y[P.b] - pay;
-    const lc = Math.hypot(cx, cy) || 1e-9, lp = Math.hypot(px, py) || 1e-9; cx /= lc; cy /= lc; px /= lp; py /= lp;
+    const X = b.x, Y = b.y, IM = b.im, OX = b.ox, OY = b.oy, sa = s.aw, pa = P.aw;
+    let cax = 0, cay = 0, pax = 0, pay = 0;
+    for (let j = 0; j < sa.length; j++) { const w = sa[j], k = w[0]; cax += w[1] * X[k] - w[2] * Y[k]; cay += w[1] * Y[k] + w[2] * X[k]; }
+    for (let j = 0; j < pa.length; j++) { const w = pa[j], k = w[0]; pax += w[1] * X[k] - w[2] * Y[k]; pay += w[1] * Y[k] + w[2] * X[k]; }
+    let cx = X[s.b] - cax, cy = Y[s.b] - cay, px = X[P.b] - pax, py = Y[P.b] - pay;
+    const lc = Math.sqrt(cx * cx + cy * cy) || 1e-9, lp = Math.sqrt(px * px + py * py) || 1e-9; cx /= lc; cy /= lc; px /= lp; py /= lp;
     let C = wrapPi(Math.atan2(px * cy - py * cx, px * cx + py * cy) - target);
     if (free > 0) { if (C > free) C -= free; else if (C < -free) C += free; else return 0; }
     const gcx = -cy / lc, gcy = cx / lc, gpx = py / lp, gpy = -px / lp; // d(theta)/d(B_child), d(theta)/d(B_parent)
-    add(s.b, gcx, gcy); for (const [k, r, i] of s.aw) add(k, -(r * gcx + i * gcy), -(r * gcy - i * gcx));
-    add(P.b, gpx, gpy); for (const [k, r, i] of P.aw) add(k, -(r * gpx + i * gpy), -(r * gpy - i * gpx));
+    let n = 0;
+    // gradient on each particle; a particle can receive several contributions
+    gk[n] = s.b; gxs[n] = gcx; gys[n] = gcy; n++;
+    for (let j = 0; j < sa.length; j++) { const w = sa[j], k = w[0], x = -(w[1] * gcx + w[2] * gcy), y = -(w[1] * gcy - w[2] * gcx); let q = 0; while (q < n && gk[q] !== k) q++; if (q === n) { gk[n] = k; gxs[n] = x; gys[n] = y; n++; } else { gxs[q] += x; gys[q] += y; } }
+    { const k = P.b; let q = 0; while (q < n && gk[q] !== k) q++; if (q === n) { gk[n] = k; gxs[n] = gpx; gys[n] = gpy; n++; } else { gxs[q] += gpx; gys[q] += gpy; } }
+    for (let j = 0; j < pa.length; j++) { const w = pa[j], k = w[0], x = -(w[1] * gpx + w[2] * gpy), y = -(w[1] * gpy - w[2] * gpx); let q = 0; while (q < n && gk[q] !== k) q++; if (q === n) { gk[n] = k; gxs[n] = x; gys[n] = y; n++; } else { gxs[q] += x; gys[q] += y; } }
     let den = 0, rate = 0;
-    for (let j = 0; j < n; j++) { const k = gk[j]; den += b.im[k] * (gxs[j] * gxs[j] + gys[j] * gys[j]); rate += gxs[j] * (b.x[k] - b.ox[k]) + gys[j] * (b.y[k] - b.oy[k]); }
+    for (let j = 0; j < n; j++) { const k = gk[j]; den += IM[k] * (gxs[j] * gxs[j] + gys[j] * gys[j]); rate += gxs[j] * (X[k] - OX[k]) + gys[j] * (Y[k] - OY[k]); }
     const gamma = alpha * damp * dt; // damping proportional to stiffness
     let lam = -(C + gamma * rate) / ((1 + gamma) * den + alpha);
-    lam = clamp(lam, -lamMax, lamMax);
-    for (let j = 0; j < n; j++) { const k = gk[j], g = lam * b.im[k]; b.x[k] += g * gxs[j]; b.y[k] += g * gys[j]; }
+    lam = lam < -lamMax ? -lamMax : lam > lamMax ? lamMax : lam;
+    for (let j = 0; j < n; j++) { const k = gk[j], g = lam * IM[k]; X[k] += g * gxs[j]; Y[k] += g * gys[j]; }
     return lam;
   }
 
@@ -174,11 +185,11 @@
       const carried = Math.min(1, cap / W); b.carried = carried;
       if (cap > 0) for (const s of segs) {
         if (!s.pad || s.press <= 0) continue;
-        const N = carried * W * s.padCap * s.press / cap, v = Math.hypot(s.vbx, s.vby), f = -K.muFoot * s.p.grip * N / (v + K.slip);
+        const N = carried * W * s.padCap * s.press / cap, v = Math.sqrt(s.vbx * s.vbx + s.vby * s.vby), f = -K.muFoot * s.p.grip * N / (v + K.slip);
         b.fx[s.b] += f * s.vbx; b.fy[s.b] += f * s.vby;
       }
       if (carried < 1) for (let k = 0; k < np; k++) {
-        const v = Math.hypot(b.vx[k], b.vy[k]), f = -K.muBelly * (1 - carried) * b.m[k] * env.gravity / (v + K.slip);
+        const v = Math.sqrt(b.vx[k] * b.vx[k] + b.vy[k] * b.vy[k]), f = -K.muBelly * (1 - carried) * b.m[k] * env.gravity / (v + K.slip);
         b.fx[k] += f * b.vx[k]; b.fy[k] += f * b.vy[k];
       }
     }
@@ -200,19 +211,65 @@
       joint(b, s, P, s.rest, 1 / (s.kPassive * dt2), K.damping, Infinity, 0, dt);
       joint(b, s, P, s.rest, 1 / (s.kLimit * dt2), K.damping, Infinity, s.p.range * 1.1 + 0.03, dt);
     }
-    for (let it = 0; it < K.iters; it++) for (const s of segs) {
-      let ax = 0, ay = 0, wsum = b.im[s.b];
-      for (const [k, r, i] of s.aw) { ax += r * b.x[k] - i * b.y[k]; ay += r * b.y[k] + i * b.x[k]; wsum += (r * r + i * i) * b.im[k]; }
-      let nx = b.x[s.b] - ax, ny = b.y[s.b] - ay; const l = Math.hypot(nx, ny) || 1e-9; nx /= l; ny /= l;
-      const lam = -(l - s.len) / wsum;
-      b.x[s.b] += lam * b.im[s.b] * nx; b.y[s.b] += lam * b.im[s.b] * ny;
-      for (const [k, r, i] of s.aw) { const g = lam * b.im[k]; b.x[k] -= g * (r * nx + i * ny); b.y[k] -= g * (r * ny - i * nx); }
+    { const X = b.x, Y = b.y, IM = b.im;
+      for (let it = 0; it < K.iters; it++) for (let q = 0; q < segs.length; q++) {
+        const s = segs[q], aw = s.aw, sb = s.b; let ax = 0, ay = 0, wsum = IM[sb];
+        for (let j = 0; j < aw.length; j++) { const w = aw[j], k = w[0], r = w[1], i = w[2]; ax += r * X[k] - i * Y[k]; ay += r * Y[k] + i * X[k]; wsum += (r * r + i * i) * IM[k]; }
+        let nx = X[sb] - ax, ny = Y[sb] - ay; const l = Math.sqrt(nx * nx + ny * ny) || 1e-9; nx /= l; ny /= l;
+        const lam = -(l - s.len) / wsum;
+        X[sb] += lam * IM[sb] * nx; Y[sb] += lam * IM[sb] * ny;
+        for (let j = 0; j < aw.length; j++) { const w = aw[j], k = w[0], g = lam * IM[k]; X[k] -= g * (w[1] * nx + w[2] * ny); Y[k] -= g * (w[1] * ny - w[2] * nx); }
+      }
     }
     for (let k = 0; k < np; k++) { b.vx[k] = (b.x[k] - b.ox[k]) / dt; b.vy[k] = (b.y[k] - b.oy[k]) / dt; }
     b.t += dt;
   }
 
-  function step(b, dt, sub) { const n = sub || K.substeps; for (let i = 0; i < n; i++) substep(b, dt / n); pose(b); }
+  // Rigid body: forces on every segment are the same as in the jointed solver (water, cilia, ground);
+  // they are summed into one force and one torque about the centre of mass.
+  function rigidStep(b, dt, n) {
+    n = Math.max(1, n >> 1); // no stiff joints to resolve: half the substeps are enough
+    const { segs, env } = b, np = b.np, M = b.mass, h = dt / n;
+    A.neural.cpg(b, b.t, b.cmd);
+    let cx = 0, cy = 0, vx = 0, vy = 0;
+    for (let k = 0; k < np; k++) { cx += b.x[k] * b.m[k]; cy += b.y[k] * b.m[k]; vx += b.vx[k] * b.m[k]; vy += b.vy[k] * b.m[k]; }
+    cx /= M; cy /= M; vx /= M; vy /= M; let om = b.om, th = b.th;
+    for (let it = 0; it < n; it++) {
+      const c = Math.cos(th), sn = Math.sin(th);
+      for (let k = 0; k < np; k++) { const lx = b.loc[2 * k], ly = b.loc[2 * k + 1]; b.x[k] = cx + lx * c - ly * sn; b.y[k] = cy + lx * sn + ly * c; }
+      pose(b);
+      let Fx = 0, Fy = 0, T = 0;
+      const fluid = env.fluid, drive = b.cmd.drive, turn = b.cmd.turn, fwx = env.flowX, fwy = env.flowY;
+      for (let q = 0; q < segs.length; q++) {
+        const s = segs[q], dx = s.dx, dy = s.dy;
+        if (fluid > 0) {
+          const kn = 0.25 * fluid * K.cn * s.sideArea, kt = 0.25 * fluid * (K.cf * s.wetArea + K.cform * s.formArea), kv = K.visc * s.len * fluid, me = 0.6 * s.mass / h;
+          for (let e = 0; e < 2; e++) {
+            const px = e ? s.bx : s.ax, py = e ? s.by : s.ay, rx = vx - om * (py - cy) - fwx, ry = vy + om * (px - cx) - fwy, vt = rx * dx + ry * dy, vn = -rx * dy + ry * dx;
+            const at = kt * (vt < 0 ? -vt : vt) + kv, an = kn * (vn < 0 ? -vn : vn) + 2 * kv, ft = -(at < me ? at : me) * vt, fn = -(an < me ? an : me) * vn;
+            let fx = ft * dx - fn * dy, fy = ft * dy + fn * dx;
+            if (s.cil) { const f = -K.cilia * s.cil * drive * fluid * 0.5, t = K.cilia * (s.cil < 0 ? -s.cil : s.cil) * turn * fluid * 0.35 * (e ? -1 : 1); fx += f * dx + t * dy; fy += f * dy - t * dx; }
+            Fx += fx; Fy += fy; T += (px - cx) * fy - (py - cy) * fx;
+          }
+          if (s.cil) b.ciliaUse += (s.cil < 0 ? -s.cil : s.cil) * ((drive < 0 ? -drive : drive) + 0.35 * (turn < 0 ? -turn : turn)) * h;
+        }
+        s.vbx = vx - om * (s.by - cy); s.vby = vy + om * (s.bx - cx);
+      }
+      if (env.ground) {
+        const W = M * env.gravity; let cap = 0;
+        for (const s of segs) if (s.pad) cap += s.padCap * s.press;
+        const carried = Math.min(1, cap / W); b.carried = carried;
+        if (cap > 0) for (const s of segs) { if (!s.pad || s.press <= 0) continue; const N = carried * W * s.padCap * s.press / cap, v = Math.sqrt(s.vbx * s.vbx + s.vby * s.vby), f = -K.muFoot * s.p.grip * N / (v + K.slip), fx = f * s.vbx, fy = f * s.vby; Fx += fx; Fy += fy; T += (s.bx - cx) * fy - (s.by - cy) * fx; }
+        if (carried < 1) for (let k = 0; k < np; k++) { const ux = vx - om * (b.y[k] - cy), uy = vy + om * (b.x[k] - cx), v = Math.sqrt(ux * ux + uy * uy), f = -K.muBelly * (1 - carried) * b.m[k] * env.gravity / (v + K.slip), fx = f * ux, fy = f * uy; Fx += fx; Fy += fy; T += (b.x[k] - cx) * fy - (b.y[k] - cy) * fx; }
+      }
+      vx += Fx / M * h; vy += Fy / M * h; om += T / b.inertia * h; cx += vx * h; cy += vy * h; th += om * h; b.t += h;
+    }
+    const c = Math.cos(th), sn = Math.sin(th);
+    for (let k = 0; k < np; k++) { const lx = b.loc[2 * k], ly = b.loc[2 * k + 1], rx = lx * c - ly * sn, ry = lx * sn + ly * c; b.x[k] = cx + rx; b.y[k] = cy + ry; b.vx[k] = vx - om * ry; b.vy[k] = vy + om * rx; }
+    b.om = om; b.th = th; pose(b);
+  }
+
+  function step(b, dt, sub) { const n = sub || K.substeps; if (b.rigid) return rigidStep(b, dt, n); for (let i = 0; i < n; i++) substep(b, dt / n); pose(b); }
 
   function com(b) { let x = 0, y = 0; for (let k = 0; k < b.np; k++) { x += b.x[k] * b.m[k]; y += b.y[k] * b.m[k]; } return [x / b.mass, y / b.mass]; }
   function momentum(b) { let x = 0, y = 0, L = 0; for (let k = 0; k < b.np; k++) { x += b.vx[k] * b.m[k]; y += b.vy[k] * b.m[k]; L += b.m[k] * (b.x[k] * b.vy[k] - b.y[k] * b.vx[k]); } return [x, y, L]; }
@@ -225,10 +282,10 @@
     for (let t = 0; t < warm; t += dt) step(b, dt);
     const c0 = com(b), w0 = b.work; let path = 0, last = c0, maxBend = 0;
     for (let t = 0; t < T; t += dt) {
-      step(b, dt); const c = com(b); path += Math.hypot(c[0] - last[0], c[1] - last[1]); last = c;
+      step(b, dt); const c = com(b); path += Math.sqrt((c[0] - last[0]) * (c[0] - last[0]) + (c[1] - last[1]) * (c[1] - last[1])); last = c;
       for (let i = 1; i < b.segs.length; i++) maxBend = Math.max(maxBend, Math.abs(wrapPi(b.segs[i].theta - b.segs[i].rest)));
     }
-    const dist = Math.hypot(last[0] - c0[0], last[1] - c0[1]), work = b.work - w0;
+    const dist = Math.sqrt((last[0] - c0[0]) * (last[0] - c0[0]) + (last[1] - c0[1]) * (last[1] - c0[1])), work = b.work - w0;
     return { ok: finite(b), distance: dist, path, speed: dist / T, work, power: work / T, mass: b.mass, costOfTransport: dist > 1e-6 ? work / (b.mass * dist) : Infinity, maxBend, body: b };
   }
 
