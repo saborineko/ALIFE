@@ -173,13 +173,23 @@ test('cilia push against water: they move a jointless body, need water, and cost
   const a = A.organs.profile(blob(0)), b = A.organs.profile(blob(0.9)); assert.ok(b.basal > a.basal);
 });
 
-test('taxis index: about zero for a body that swims without steering, positive for one that turns to food', () => {
-  const run = brain => { const w = new A.engine.World({ seed: 9, founders: 0, cap: 0 }); for (let i = 0; i < 600; i++) w.step();
+test('taxis index: about zero without steering, positive when turning to food, zero again when that perception is cut', () => {
+  const run = (brain, blind) => { const w = new A.engine.World({ seed: 9, founders: 0, cap: 0, blind: blind ? 1 : 0 }); for (let i = 0; i < 600; i++) w.step();
     const g = A.genome.primordial(1); g.parts[0].cilia = 0.5; g.parts[0].beat = -1; g.parts[0].nerve = 0.5; g.brain = brain;
     for (let i = 0; i < 16; i++) { const p = w.patch[i % 4]; w.spawn(A.genome.copy(g), p.x + w.rand.gauss() * 4, p.y + w.rand.gauss() * 4, 1, null); }
-    for (let i = 0; i < 30 * 120; i++) w.step(); return w.census().taxis; };
-  const blind = run([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), a = run([2, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0]), b = run([2, 0, 0, 0, 0, 0, 0, -2, 0, 0, 0, 0, 0, 0, 0]);
-  assert.ok(Math.abs(blind) < 0.15, 'unsteered ' + blind); assert.ok(Math.max(a, b) > 0.25 && Math.max(a, b) > Math.abs(blind) + 0.2, 'steered ' + a + ' / ' + b);
+    for (let i = 0; i < 30 * 120; i++) w.step(); return w.census(); };
+  const plain = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], st = s => [2, 0, 0, 0, 0, 0, 0, s, 0, 0, 0, 0, 0, 0, 0];
+  const none = run(plain).taxis, a = run(st(2)).taxis, b = run(st(-2)).taxis, good = a > b ? st(2) : st(-2), cut = run(good, true).taxis;
+  assert.ok(Math.abs(none) < 0.12, 'unsteered ' + none); assert.ok(Math.max(a, b) > 0.2 && Math.max(a, b) > Math.abs(none) + 0.15, 'steered ' + a + ' / ' + b);
+  assert.ok(Math.abs(cut) < 0.12, 'steering genes but no perception ' + cut);
+});
+
+test('taxis index ignores bodies that only tremble in place', () => {
+  const w = new A.engine.World({ seed: 5, noCilia: 1 }); w.seedWith(A.genome.primordial(5));
+  for (let i = 0; i < 30 * 200; i++) w.step();
+  const c = w.census(), still = w.bodies.filter(o => o.age > 5 && o.path / o.age < 0.02);
+  assert.ok(still.length > w.bodies.length * 0.8, 'most bodies in a world without cilia do not travel');
+  assert.ok(still.every(o => !w.traveller(o))); assert.strictEqual(c.taxisN, w.bodies.length - still.length - w.bodies.filter(o => o.age <= 5 || (o.path / o.age >= 0.02 && o.taxLen < 2)).length);
 });
 
 test('control world: with cilia disabled no body can express them', () => {
