@@ -6,9 +6,24 @@
   const zc = $('zoom'), zx = zc.getContext('2d'), zoomR = new A.render.Renderer(), thumbR = new A.render.Renderer(), bodyR = new A.render.Renderer();
   let gpuOn = new URLSearchParams(location.search).get('gfx') !== 'cpu';
   const q = new URLSearchParams(location.search), KEY = 'alife2_world_v1';
+  let grainSprites = null;
   let field = null, fimg = null, sand = null, motes = null, frameNo = 0; const trails = new WeakMap();
   let w, view, paused = false, sel = null, shown = null, follow = false, loaded = window.ALIFE2_LOAD || null, lastPanels = 0, lastSave = 0;
 
+  // a food grain: a few lobes of stippled matter with a soft ragged edge (drifting ones greenish, bottom ones ochre)
+  function clump(kind, seed) {
+    const n = 64, c = Object.assign(document.createElement('canvas'), { width: n, height: n }), g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data;
+    let s = seed * 7919 + kind * 104729 + 13; const rnd = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    const lobes = Array.from({ length: 3 + ((rnd() * 4) | 0) }, () => { const a = rnd() * 6.283, r = rnd() * 0.20; return [0.5 + Math.cos(a) * r, 0.5 + Math.sin(a) * r, 0.13 + rnd() * 0.11]; });
+    const tone = kind ? [[214, 190, 112], [150, 120, 70], [240, 225, 160]] : [[120, 205, 165], [70, 150, 150], [190, 245, 205]], hue = rnd();
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      let f = 0; for (const [cx, cy, r] of lobes) { const q = ((x / n - cx) ** 2 + (y / n - cy) ** 2) / (r * r); f += Math.exp(-q * 1.3); }
+      const st = rnd(), dens = Math.max(0, Math.min(1, (f - 0.38) * 1.6)), core = Math.max(0, Math.min(1, (f - 1.0) * 0.9)), j = (y * n + x) * 4;
+      const a = dens * (0.30 + 0.75 * st * st) + core * 0.25, t = st > 0.82 ? tone[2] : hue > 0.5 ? tone[0] : tone[1], m = 0.55 + 0.6 * core;
+      d[j] = Math.min(255, t[0] * m + tone[0][0] * core * 0.3); d[j + 1] = Math.min(255, t[1] * m + tone[0][1] * core * 0.3); d[j + 2] = Math.min(255, t[2] * m); d[j + 3] = Math.min(255, a * 235);
+    }
+    g.putImageData(img, 0, 0); return c;
+  }
   function start(world) {
     if (world) w = world;
     else {
@@ -110,13 +125,20 @@
       const x = X(m.x), y = Y(m.y); if (x < -20 || x > W + 20 || y < -20 || y > H + 20) continue;
       const l = Math.min(26, 2.2 * sc); ctx.strokeStyle = 'rgba(170,215,240,' + 0.22 * m.a + ')'; ctx.lineWidth = Math.max(0.8, 0.05 * sc); ctx.beginPath(); ctx.moveTo(x - vx * l, y - vy * l); ctx.lineTo(x + 0.01, y); ctx.stroke();
     }
-    // food grains: soft, and quieter than the living things
-    for (const pass of [0, 1]) {
-      ctx.fillStyle = pass ? 'rgba(214,196,120,.6)' : 'rgba(120,214,178,.55)'; ctx.beginPath();
-      for (const f of w.food) { if (!!f.fixed !== !!pass) continue; const x = X(f.x), y = Y(f.y); if (x < -4 || y < -4 || x > W + 4 || y > H + 4) continue; const r = f.size * 0.42 * sc; if (r < 0.9) ctx.rect(x - 0.6, y - 0.6, 1.2, 1.2); else { ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, 6.3); } }
-      ctx.fill();
-      if (sc > 9) { ctx.fillStyle = pass ? 'rgba(255,240,180,.10)' : 'rgba(170,255,220,.10)'; ctx.beginPath(); for (const f of w.food) { if (!!f.fixed !== !!pass) continue; const x = X(f.x), y = Y(f.y); if (x < -9 || y < -9 || x > W + 9 || y > H + 9) continue; const r = f.size * 0.95 * sc; ctx.moveTo(x + r, y); ctx.arc(x, y, r, 0, 6.3); } ctx.fill(); }
+    // food grains: clumps of the same grainy matter as the bodies, not discs.
+    // Their drawn position follows the true one with a short lag: in the model a grain is jostled every step,
+    // which at high speed reads as trembling; the simulation itself is not changed by this.
+    if (!grainSprites) grainSprites = [0, 1].map(kind => Array.from({ length: 8 }, (_, i) => clump(kind, i)));
+    const lag = paused ? 1 : Math.min(1, 0.10 + 0.04 * Number($('speed').value));
+    ctx.fillStyle = 'rgba(150,215,190,.5)'; const dots = [[], []];
+    for (const f of w.food) {
+      if (f._x == null) { f._x = f.x; f._y = f.y; f._v = (Math.random() * 8) | 0; }
+      let dx = f.x - f._x; dx -= Math.round(dx / w.W) * w.W; f._x += dx * lag; f._y += (f.y - f._y) * lag;
+      const x = X(f._x), y = Y(f._y); if (x < -30 || y < -30 || x > W + 30 || y > H + 30) continue;
+      const d = f.size * sc * 1.9;
+      if (d < 3.2) dots[f.fixed ? 1 : 0].push(x, y, Math.max(1, d * 0.5)); else ctx.drawImage(grainSprites[f.fixed ? 1 : 0][f._v], x - d / 2, y - d / 2, d, d);
     }
+    for (const k of [0, 1]) { ctx.fillStyle = k ? 'rgba(205,190,125,.55)' : 'rgba(140,210,185,.5)'; ctx.beginPath(); const q = dots[k]; for (let i = 0; i < q.length; i += 3) ctx.rect(q[i] - q[i + 2] / 2, q[i + 1] - q[i + 2] / 2, q[i + 2], q[i + 2]); ctx.fill(); }
     frameNo++;
     for (const o of w.bodies) {
       const b = o.b; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
@@ -136,7 +158,7 @@
         // each body gets its own small picture, drawn larger than shown when the body is small
         const size = Math.ceil(Math.max(px, py) + 18), ss = Math.max(1, Math.min(4, Math.floor(440 / size)));
         ctx.save(); ctx.translate(Math.round(mx - size / 2), Math.round(my - size / 2));
-        bodyR.draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: gpuOn, quality: gpuOn ? ss : Math.min(2, ss), hue: o.g.hue, glow: sc > 18, shadow: o.cy >= w.yBottom, time: b.t, drive: b.cmd.drive, bristles: sc > 20, internals: sc > 6, pads: o.cy >= w.yBottom });
+        bodyR.draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: gpuOn, quality: gpuOn ? ss : Math.min(2, ss), hue: o.g.hue, glow: sc > 18, shadow: o.cy >= w.yBottom, time: b.t, clock: w.t, gut: o.G / Math.max(1e-6, o.prof.gutCap), drive: b.cmd.drive, bristles: sc > 20, internals: sc > 6, pads: o.cy >= w.yBottom });
         ctx.restore();
       }
       if (o === sel) { ctx.strokeStyle = '#eafff4'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(mx, my, Math.max(px, py) / 2 + 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
@@ -157,7 +179,7 @@
     } else if (sel && !sel.dead) {
       const d = A.development.describe(sel.plan), sc = Math.min((zc.width - 30) / (d.length + 1), (zc.height - 30) / (d.width + 1), 120), cm = A.physics.com(sel.b);
       zx.fillStyle = '#07121d'; zx.fillRect(0, 0, zc.width, zc.height);
-      zoomR.draw(zx, sel.b.segs, { cx: cm[0], cy: cm[1], scale: sc, w: zc.width, h: zc.height }, { hue: sel.g.hue, glow: false, time: sel.b.t, drive: sel.b.cmd.drive });
+      zoomR.draw(zx, sel.b.segs, { cx: cm[0], cy: cm[1], scale: sc, w: zc.width, h: zc.height }, { hue: sel.g.hue, glow: false, time: sel.b.t, clock: w.t, gut: sel.G / Math.max(1e-6, sel.prof.gutCap), drive: sel.b.cmd.drive });
       const p = sel.prof, inc = sel.eaten + sel.absorbed;
       $('info').textContent = '#' + sel.id + ' / 由来 ' + sel.g.origin + ' / 系統 ' + sel.line + ' / 世代 ' + sel.gen + ' / 変異 ' + sel.g.mutations + ' 回\n齢 ' + sel.age.toFixed(0) + ' / ' + sel.life.toFixed(0) + ' 秒 / 成熟段階 ' + sel.stage.toFixed(2) + ' / 子 ' + sel.kids + ' / 出生時の大きさ ' + sel.g.birth.toFixed(2)
         + '\n体節 ' + sel.b.segs.length + '（成体 ' + sel.full.segs + '）/ 体積 ' + p.V.toFixed(2) + ' / 口 ' + p.mouths.length + ' / 部品 ' + sel.g.parts.length + ' 種・規則 ' + sel.g.links.length + ' 本'

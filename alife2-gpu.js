@@ -48,7 +48,7 @@ void main(){
 }`;
   const SHADE = `#version 300 es
 precision highp float;
-uniform sampler2D t0, t1, t2, t3; uniform vec3 uBody, uRim, uArm, uDeep; uniform float uOrgans, uQ;
+uniform sampler2D t0, t1, t2, t3; uniform vec3 uBody, uRim, uArm, uDeep; uniform float uOrgans, uQ, uGut, uTime;
 out vec4 o;
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float noise(vec2 x){ vec2 i = floor(x), f = fract(x); f = f * f * (3. - 2. * f);
@@ -89,9 +89,10 @@ void main(){
     vec2 sc = cells(vec2(U, V) / max(2.6, R * 0.20) + 17.); float st = step(1. - clamp(P.y * 0.9, 0., 1.), sc.y) * (1. - smoothstep(0.26, 0.36, sc.x)) * (1. - smoothstep(0.62, 0.75, av));
     org = mix(org, vec3(1.0, 0.92, 0.62) * (1.2 - sc.x), st * 0.8); oa = max(oa, st * 0.7);
     // gut: a tube along the axis, pinched into chambers, with a wall and granular contents
-    float gw = clamp(Q.x, 0., 1.) * 0.46 * (0.80 + 0.22 * sin(w * 2.3) + 0.12 * (noise(vec2(U, V) * 0.15) - 0.5)), gz = (1. - smoothstep(gw * 0.55, gw * 1.05, av)) * step(0.03, Q.x);
+    float wave = sin(w * 2.3 - uTime * 4.0 * step(0.02, uGut)); // contents are squeezed along only while there is something to digest
+    float gw = clamp(Q.x, 0., 1.) * 0.46 * (0.50 + 0.42 * uGut) * (0.86 + (0.10 + 0.20 * uGut) * wave + 0.12 * (noise(vec2(U, V) * 0.15) - 0.5)), gz = (1. - smoothstep(gw * 0.55, gw * 1.05, av)) * step(0.03, Q.x);
     float wall = smoothstep(gw * 0.55, gw * 0.95, av), grn = cells(vec2(U, V) / max(1.6, R * 0.10) + 31.).x;
-    vec3 gcol = mix(vec3(1.0, 0.62, 0.22), vec3(0.93, 0.80, 0.34), wall) * (0.70 + 0.5 * noise(vec2(U, V) * 0.5)) * (0.75 + 0.45 * smoothstep(0.1, 0.5, grn));
+    vec3 gcol = mix(mix(vec3(0.62, 0.50, 0.40), vec3(1.0, 0.62, 0.22), smoothstep(0., 0.5, uGut)), vec3(0.93, 0.80, 0.34), wall) * (0.70 + 0.5 * noise(vec2(U, V) * 0.5)) * (0.75 + 0.45 * smoothstep(0.1, 0.5, grn));
     org = mix(org, gcol, gz); oa = max(oa, gz * 0.9);
     // nerve: a cord along the axis with a ganglion in every stretch of body, a brain where there is much
     float cord = 1. - smoothstep(0.035, 0.075, abs(v - 0.02)), gang = (1. - smoothstep(0.08, 0.16, length(vec2(fract(w * 0.9) - 0.5, v * 1.3))));
@@ -139,7 +140,7 @@ void main(){
         const prog = fs => { const p = gl.createProgram(); gl.attachShader(p, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs)); gl.bindAttribLocation(p, 0, 'p'); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); return p; };
         this.pField = prog(FIELD); this.pShade = prog(SHADE);
         const loc = (p, names) => Object.fromEntries(names.map(n => [n, gl.getUniformLocation(p, n)]));
-        this.uF = loc(this.pField, ['uSeg', 'uN', 'uRes']); this.uS = loc(this.pShade, ['t0', 't1', 't2', 't3', 'uBody', 'uRim', 'uArm', 'uDeep', 'uOrgans', 'uQ']);
+        this.uF = loc(this.pField, ['uSeg', 'uN', 'uRes']); this.uS = loc(this.pShade, ['t0', 't1', 't2', 't3', 'uBody', 'uRim', 'uArm', 'uDeep', 'uOrgans', 'uQ', 'uGut', 'uTime']);
         const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
         gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
         this.seg = gl.createTexture(); this.data = new Float32Array(MAXS * ROWS * 4);
@@ -164,7 +165,7 @@ void main(){
     }
     // groups: arrays of pixel-space segments in draw order (from Renderer.layout).
     // Returns the canvas; the picture is in this.region = [sx, sy, w, h] of it.
-    render(groups, w, h, colors, organs, q) {
+    render(groups, w, h, colors, organs, q, gut, time) {
       const gl = this.gl, d = this.data; this.reserve(w, h); if (!this.ok) return null;
       let n = 0;
       for (const grp of groups) for (const p of grp) {
@@ -179,7 +180,7 @@ void main(){
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.useProgram(this.pShade);
       this.tex.forEach((t, i) => { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, t); gl.uniform1i(this.uS['t' + i], i); });
-      gl.uniform3fv(this.uS.uBody, colors.body); gl.uniform3fv(this.uS.uRim, colors.rim); gl.uniform3fv(this.uS.uArm, colors.arm); gl.uniform3fv(this.uS.uDeep, colors.deep); gl.uniform1f(this.uS.uOrgans, organs ? 1 : 0); gl.uniform1f(this.uS.uQ, q || 1);
+      gl.uniform3fv(this.uS.uBody, colors.body); gl.uniform3fv(this.uS.uRim, colors.rim); gl.uniform3fv(this.uS.uArm, colors.arm); gl.uniform3fv(this.uS.uDeep, colors.deep); gl.uniform1f(this.uS.uOrgans, organs ? 1 : 0); gl.uniform1f(this.uS.uQ, q || 1); gl.uniform1f(this.uS.uGut, gut == null ? 0.6 : Math.max(0, Math.min(1, gut))); gl.uniform1f(this.uS.uTime, (time || 0) % 1000);
       gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.region = [0, this.h - h, w, h];
       return this.canvas;
