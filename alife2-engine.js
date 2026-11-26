@@ -88,6 +88,10 @@
                                           // dragging over a bottom, taking food in), at a pitch set by its size. A segment can grow hearing tissue (an ear: how loud the water is at
                                           // its outer end, over the pitches it is tuned to) and sound-making tissue (a voice, driven by its nerve circuit, costing energy for every
                                           // sound). Sound spreads, fades and adds up (see SND above). No sound has a meaning given to it.
+    soundWork: 0,                         // 1 = the sound of beating cilia follows the work they do against the water (their thrust times the speed at which the body moves through
+                                          //     the water), turned to sound as muscle work is. 0 = in proportion to the beating itself, as first calibrated — which made swimming by
+                                          //     cilia by far the loudest thing in the water (about three quarters of all sound), louder than eating, striking or scraping.
+                                          //     No new number: the thrust is the one the physics uses, the efficiency is the one muscle has.
     deaf: 0,                              // control experiment: no ear in this world hears anything
     mute: 0,                              // control experiment: no voice in this world makes a sound (bodies still make the sounds they cannot help making)
     soundLag: 0,                          // control experiment: ears hear the water as it was this many seconds ago (what is heard no longer follows what just happened)
@@ -226,6 +230,7 @@
       if ((this.vision || this.contact) && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
       if (o.adhere != null && !!o.adhere !== !!this.adhere) { this.adhere = o.adhere ? 1 : 0; this.log('世界の設定を変更：パッドが他の身体を掴み、触れ合う身体のあいだで蓄えが染み出す規則を' + (o.adhere ? '有効にした' : '無効にした')); }
       if (o.wave != null && o.wave !== this.wave) { this.wave = o.wave > 0 ? o.wave : 0; this.log('世界の設定を変更：豊かさの波（溶存栄養の回復と粒の供給が、波として世界を移動する）を' + (this.wave > 0 ? '有効にした（周期 ' + this.wave + ' 秒）' : '無効にした')); }
+      if (o.soundWork != null && !!o.soundWork !== !!this.soundWork) { this.soundWork = o.soundWork ? 1 : 0; this.log('世界の設定を変更：繊毛の音を、水に対してした仕事（推力 × 水の中を進む速さ）から決める規則を' + (o.soundWork ? '有効にした（繊毛で泳ぐ音はごく小さくなる）' : '無効にした（打った量に比例する元の決め方）')); }
       if (o.sound != null && !!o.sound !== !!this.sound) { this.sound = o.sound ? 1 : 0; this.log('世界の設定を変更：音（身体の活動から生じる音、耳、声）を' + (o.sound ? '有効にした' : '無効にした')); if (this.sound && !this.snd) this.soundInit(); }
       for (const k of ['deaf', 'mute']) if (o[k] != null && !!o[k] !== !!this[k]) { this[k] = o[k] ? 1 : 0; this.log('世界の設定を変更（対照実験）：' + (k === 'deaf' ? 'すべての耳が何も聞こえない' : 'すべての声が出ない') + (o[k] ? '状態にした' : '状態を解いた')); }
       if (o.soundLag != null && o.soundLag !== this.soundLag) { this.soundLag = o.soundLag > 0 ? o.soundLag : 0; this.sndRing = []; this.log('世界の設定を変更（対照実験）：耳が聞く音を ' + this.soundLag + ' 秒前のものにした'); }
@@ -269,10 +274,10 @@
     // Several of its measures follow the call statistics of LIFE — Digital Evolution Observatory (github.com/dominikvytisk/life-simulation, analysis/acoustics.ts):
     // what listeners did after a call, calls after calls against how often a body has just heard a call anyway, how like a reply is to what it followed
     // against an unrelated call, the order of call shapes, differences between regions, shapes that outlast a generation, and firsts that must persist.
-    acoNew() { const cell = () => ({ n: 0, m: 0, m2: 0, eat: 0, eat2: 0, pre: 0, post: 0, hn: 0, h: 0, h2: 0 });
+    acoNew() { const cell = () => ({ n: 0, m: 0, m2: 0, eat: 0, eat2: 0, pre: 0, post: 0, hn: 0, h: 0, h2: 0, ids: {} });
       return { out: { cilia: 0, muscle: 0, hit: 0, tear: 0, scrape: 0, crunch: 0, voice: 0 }, recent: [], onsets: 0, after: 0, expect: 0, toward: 0, away: 0, tab: {}, spent: 0,
         on: 0, replied: 0, hearN: 0, hearYes: 0, resD: 0, resN: 0, chD: 0, chN: 0, pool: [], shape: new Array(18).fill(0), gen: [], reg: {}, seqN: 0, seqRep: 0, seqExp: 0,
-        lis: [cell(), cell()], first: {} }; } // lis: what bodies did after a call began near them, less what the same bodies did just before: [no working ear, working ear]
+        lis: [cell(), cell(), cell()], who: {}, first: {} }; } // lis: what bodies did after a call began near them, less what the same bodies did just before: [no ear, working ear, an ear that is cut (deaf world or body)]
     // Firsts of sound (after LIFE's chronicle): written to the world's log only when a measure has stayed past its threshold for five half-minute
     // censuses in a row — once is a twitch, not a finding. Each says what was measured, never what it means. If none of it happens, nothing is written.
     soundFirsts(c) {
@@ -286,7 +291,7 @@
         order: [c.sequenceN >= 50 && Math.abs(c.sequenceOrder) >= 0.1, '同じ個体の鳴き声の形の順序が、その個体の持ち歌から無作為に選んだ場合と違う（' + (c.sequenceOrder > 0 ? '同じ形を続ける' : '形を入れ替える') + '。差 ' + c.sequenceOrder.toFixed(2) + '）'],
         dialect: [c.dialectRegions >= 2 && c.dialectBits >= 0.1, '海域によって鳴き声の形が違う（' + c.dialectBits.toFixed(2) + ' ビット。遺伝の違いだけでも起きる）'],
         outlive: [c.shapeGenerations >= 3, '同じ形の鳴き声が ' + c.shapeGenerations + ' 世代にわたって使われている（遺伝だけでも起きる）'] };
-      for (const k in tests) { const f = F[k] || (F[k] = { run: 0, at: null }); if (f.at != null) continue; f.run = tests[k][0] ? f.run + 1 : 0; if (f.run >= 5) { f.at = this.t; this.log('音（観測）：' + tests[k][1] + '。5 回続けて観測。意味は与えていない'); } }
+      for (const k in tests) { const f = F[k] || (F[k] = { run: 0, at: null }); if (f.at != null) continue; f.run = tests[k][0] && c.callers >= 3 ? f.run + 1 : 0; /* (never on the strength of one or two bodies) */ if (f.run >= 5) { f.at = this.t; f.text = tests[k][1]; /* (kept with the notebook: the world's log forgets its oldest lines) */ this.log('音（観測）：' + tests[k][1] + '。5 回続けて観測。意味は与えていない'); } }
     }
     // The record of sound (counting only). It keeps apart four things that are easily taken for one another:
     //   sound is made      — voices exist and sound (voiced, calling, callsPer100s, voiceShare of all sound made)
@@ -321,26 +326,33 @@
       // turned towards the place of the call (in radians: how far off the call the heading was before, less how far off after). Distance to the caller is not
       // used: a body that merely goes straight past, or one that speeds up in any direction, ends up farther away, and would read as fleeing.
       const L = K.lis, mean = (c, f) => { const n = f === 'h' ? c.hn : c.n; return n > 0 ? c[f] / n : 0; }, sdOf = (c, f) => Math.sqrt(Math.max(0, c[f + '2'] / Math.max(1, f === 'h' ? c.hn : c.n) - mean(c, f) ** 2));
-      const both = L[0].n >= 25, ok = L[1].n >= 25; let eff = 0, of = '', raw = 0;
+      const count = o => { let n = 0; for (const k in o) n++; return n; }, callers = count(K.who), ears = count(L[1].ids), bare = count(L[0].ids);
+      // enough cases, from enough different bodies: at least three callers, and at least six different listeners in a group
+      const both = L[0].n >= 25 && bare >= 6, ok = L[1].n >= 25 && ears >= 6 && callers >= 3; let eff = 0, of = '', raw = 0, z = 0;
       if (ok) for (const [f, name, floor, sd0] of [['h', '声の方へ向きを変える', 0.1, 0.1], ['m', '動く', 0.02, 0.02], ['eat', '食べる', 0.02, 0.1]]) {
-        if (f === 'h' && L[1].hn < 25) continue;
-        const d = mean(L[1], f) - (both && (f !== 'h' || L[0].hn >= 25) ? mean(L[0], f) : 0); if (Math.abs(d) < floor) continue;
-        const e = d / Math.max(sd0, sdOf(L[1], f)); if (Math.abs(e) > Math.abs(eff)) { eff = e; of = name; raw = d; } }
+        const n1 = f === 'h' ? L[1].hn : L[1].n, n0 = f === 'h' ? L[0].hn : L[0].n, two = both && n0 >= 25; if (n1 < 25) continue;
+        const d = mean(L[1], f) - (two ? mean(L[0], f) : 0); if (Math.abs(d) < floor) continue;
+        // The difference is measured against the spread of both groups, and must stand clear of its own uncertainty (2.5 standard errors): with a few dozen cases
+        // the mean of the bodies without ears wanders by itself, and taking it off must not create a finding. (The first version divided by the spread of the
+        // bodies with ears alone, and logged a "first" in an evolved world that came from 36 earless bodies and nothing else.)
+        const s1 = sdOf(L[1], f), s0 = two ? sdOf(L[0], f) : 0, se = Math.sqrt(s1 * s1 / n1 + (two ? s0 * s0 / n0 : 0)); if (Math.abs(d) < 2.5 * se) continue;
+        const e = d / Math.max(sd0, two ? Math.sqrt((s1 * s1 + s0 * s0) / 2) : s1); if (Math.abs(e) > Math.abs(eff)) { eff = e; of = name; raw = d; z = se > 0 ? d / se : 0; } }
       return { replyRate, heardAnyway, alternation: replyRate - heardAnyway, resemble: K.resN >= 5 && K.chN >= 5 ? K.chD / K.chN - K.resD / K.resN : 0, resembleN: K.resN, callShapes: shapes, callsEnded: calls, topShape: top,
         sequenceOrder: K.seqN >= 5 ? (K.seqRep - K.seqExp) / K.seqN : 0, sequenceN: K.seqN, dialectBits: dialect, dialectRegions: regs.length, shapeGenerations: span,
-        lisEffect: eff, lisOf: of, lisRaw: raw, lisControl: ok ? (both ? 'both' : 'self') : '', lisN: L[1].n, lisDeafN: L[0].n,
-        lisTurn: mean(L[1], 'h'), lisTurnN: L[1].hn, lisMoved: mean(L[1], 'm'), lisEat: mean(L[1], 'eat'), lisMovedBefore: mean(L[1], 'pre'), lisMovedAfter: mean(L[1], 'post'), deafTurn: mean(L[0], 'h'), deafMoved: mean(L[0], 'm'), deafEat: mean(L[0], 'eat') };
+        callers, lisBodies: ears, lisDeafBodies: bare, lisEffect: eff, lisOf: of, lisRaw: raw, lisZ: z, lisControl: ok ? (both ? 'both' : 'self') : '', lisN: L[1].n, lisDeafN: L[0].n,
+        cutN: L[2].n, cutMoved: mean(L[2], 'm'), cutEat: mean(L[2], 'eat'), cutTurn: mean(L[2], 'h'), cutTurnN: L[2].hn, lisTurn: mean(L[1], 'h'), lisTurnN: L[1].hn, lisMoved: mean(L[1], 'm'), lisMovedSd: sdOf(L[1], 'm'), lisEat: mean(L[1], 'eat'), lisEatSd: sdOf(L[1], 'eat'), lisMovedBefore: mean(L[1], 'pre'), lisMovedAfter: mean(L[1], 'post'), deafTurn: mean(L[0], 'h'), deafMoved: mean(L[0], 'm'), deafEat: mean(L[0], 'eat') };
     }
     // The notebook read out for a person, sorted by how much each line may claim (after LIFE's labels: observed / correlated / inferred / unknown):
     //   観測 what was counted · 相関 what goes together, cause not settled · 推定 what a comparison with ears or voices cut supports (the notebook alone never does) · 不明 too few cases yet
     soundReading(c) {
-      const p = v => (v * 100).toFixed(v < 0.1 ? 1 : 0) + '%', R = { seen: [], goes: [], inferred: [], unknown: [] }, names = { hungry: '空腹', fed: '消化管に餌がある', touched: '押されている', hurt: '傷がある', seeing: '何か見えている', hearing: '何か聞こえている', young: '幼体' };
-      R.seen.push('声を持つ個体 ' + p(c.voiced) + '・耳を持つ個体 ' + p(c.eared) + '・最近の鳴き声 ' + Math.round(c.callsEnded) + ' 回（声を持つ個体が鳴いていた時間 ' + p(c.callTime) + '）');
+      const p = v => (v * 100).toFixed(v < 0.1 ? 1 : 0) + '%', R = { seen: [], goes: [], inferred: [], unknown: [] }, names = { ate: 'この 1 秒に食べた', hungry: '空腹', fed: '消化管に餌がある', touched: '押されている', hurt: '傷がある', seeing: '何か見えている', hearing: '何か聞こえている', young: '幼体' };
+      R.seen.push('声を持つ個体 ' + p(c.voiced) + '・耳を持つ個体 ' + p(c.eared) + '・最近の鳴き声 ' + Math.round(c.callsEnded) + ' 回、鳴いた個体 ' + c.callers + ' 匹（声を持つ個体が鳴いていた時間 ' + p(c.callTime) + '）');
       if (c.callShapes >= 1) R.seen.push('繰り返される鳴き声の形 ' + c.callShapes + ' 種類（25 回以上。最も多い形が全体の ' + p(c.topShape) + '）'); else R.unknown.push('鳴き声の形（どの形も 25 回に届いていない）');
       if (c.callsEnded >= 25 && c.signalOf) R.goes.push('鳴くことと鳴く側の状態：' + c.signalBits.toFixed(3) + ' ビット（' + (names[c.signalOf] || c.signalOf) + '。0 なら状態と無関係）'); else R.unknown.push('鳴くことと状態の結びつき（鳴き声 ' + Math.round(c.callsEnded) + ' 回、25 回から）');
       if (c.answerN >= 20) R.goes.push('他個体の鳴き始めの直後に鳴き始める：偶然の ' + c.answer.toFixed(2) + ' 倍（1 前後なら応答ではない）。直後だった割合 ' + p(c.replyRate) + '、鳴く個体がふだん「聞いたばかり」である割合 ' + p(c.heardAnyway)); else R.unknown.push('鳴き声への鳴き返し（直後の鳴き始め ' + Math.round(c.answerN) + ' 回、20 回から）');
       if (c.lisControl) R.goes.push('鳴き声が始まった前後の、聞こえる個体のふるまい' + (c.lisOf ? '：「' + c.lisOf + '」が ' + c.lisEffect.toFixed(2) + ' 標準偏差だけ変わる' : '：変化なし（下限未満）') + '。動く速さ ' + c.lisMovedBefore.toFixed(2) + ' → ' + c.lisMovedAfter.toFixed(2) + '（' + Math.round(c.lisN) + ' 例' + (c.lisControl === 'both' ? '。聞こえない個体 ' + Math.round(c.lisDeafN) + ' 例に起きた変化は引いてある' : '。聞こえない個体との比較はまだない') + '）');
-      else R.unknown.push('聞き手のふるまい（静かな所で鳴き声に出会った聞こえる個体 ' + Math.round(c.lisN) + ' 例、25 例から）');
+      else R.unknown.push('聞き手のふるまい（静かな所で鳴き声に出会った聞こえる個体 ' + Math.round(c.lisN) + ' 例・' + c.lisBodies + ' 匹、鳴いた個体 ' + c.callers + ' 匹。25 例・6 匹・鳴き手 3 匹から）');
+      if (c.cutN >= 25) R.goes.push('耳を切られた個体（' + Math.round(c.cutN) + ' 例）の、鳴き声が始まった前後の変化：動く ' + c.cutMoved.toFixed(3) + '・食べる ' + c.cutEat.toFixed(3) + (c.cutTurnN >= 25 ? '・声の方へ向きを変える ' + c.cutTurn.toFixed(2) : '') + '（聞こえる個体での変化と比べるためのもの）');
       if (c.resembleN >= 20) R.goes.push('直後の鳴き声と直前の鳴き声の音程の近さ：無関係な鳴き声との差 ' + c.resemble.toFixed(3) + '（正なら似ている。血縁は元から似る）・音程を寄せた割合 ' + (c.pitchN ? p(c.pitchToward) : '—')); else R.unknown.push('鳴き声が似てくるか（' + Math.round(c.resembleN) + ' 例、20 例から）');
       if (c.sequenceN >= 50) R.goes.push('同じ個体の中での形の順序：持ち歌から無作為に選んだ場合との差 ' + c.sequenceOrder.toFixed(2) + '（正：同じ形を続ける、負：入れ替える、0：順序なし）'); else R.unknown.push('鳴き声の順序（2 種類以上の形を使う個体の鳴き声 ' + Math.round(c.sequenceN) + ' 回、50 回から）');
       if (c.dialectRegions >= 2) R.goes.push('海域による鳴き声の形の違い：' + c.dialectBits.toFixed(2) + ' ビット（遺伝の違いだけでも起きる）'); else R.unknown.push('海域による違い（鳴き声が 40 回以上ある海域が ' + c.dialectRegions + ' つ、2 つから）');
@@ -381,7 +393,7 @@
       if (this.tick % 30 === 0) { // the notebook forgets: counts fade over about eight minutes, so that what it shows is the world as it is now (totals of sound made and paid for do not fade)
         const K = this.aco, T = K.tab, f = 0.998; for (const k in T) for (let i = 0; i < 4; i++) T[k][i] *= f;
         for (const k of ['after', 'expect', 'toward', 'away', 'on', 'replied', 'hearN', 'hearYes', 'resD', 'resN', 'chD', 'chN', 'seqN', 'seqRep', 'seqExp']) K[k] *= f;
-        for (let i = 0; i < 18; i++) K.shape[i] *= f; for (const k in K.reg) { const a = K.reg[k]; for (let i = 0; i < 18; i++) a[i] *= f; } for (const c of K.lis) for (const k in c) c[k] *= f;
+        for (let i = 0; i < 18; i++) K.shape[i] *= f; for (const k in K.reg) { const a = K.reg[k]; for (let i = 0; i < 18; i++) a[i] *= f; } for (const c of K.lis) { for (const k in c) if (k !== 'ids') c[k] *= f; if (this.tick % 900 === 0) for (const id in c.ids) if (c.ids[id] < this.t - 500) delete c.ids[id]; } if (this.tick % 900 === 0) for (const id in K.who) if (K.who[id] < this.t - 500) delete K.who[id];
         // and it notes, once a second, where each body is, how far it has come, what it has eaten, and how loud the voices are there (the last three notes are kept)
         const V = this.sndV; for (const o of this.bodies) { const z = o.vs2 || {}; o.vs2 = o.vs1; o.vs1 = o.vs0; o.vs0 = z; z.t = this.t; z.path = o.path; z.eaten = o.eaten; z.x = o.cx; z.y = o.cy; const i = this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01)); let v = 0; for (let b = 0; b < SND.B; b++) v += V[b][i]; z.v = v; } }
     }
@@ -397,12 +409,14 @@
       for (let i = 0; i < segs.length; i++) { const q = segs[i]; if (!(q.voxV > 0) || !(q.vo > 0)) continue;
         const p = clamp(q.p.pitch + q.p.bend * (q.vq || 0), 0, 1), pw = SND.voice * q.voxV * q.vo; this.emit(q.bx, q.by, p, pw, 'voice'); cost += C.call * q.voxV * q.vo * dt; if (q.vo > loud) { loud = q.vo; pit = p; shift = q.vq || 0; base = q.p.pitch; } }
       if (cost > 0) { o.E -= cost; o.voE = (o.voE || 0) + cost; this.aco.spent += cost; if (this.ledger) this.ledger.sound = (this.ledger.sound || 0) + cost; }
-      o.voL = loud; o.voP = pit; this.voiceRecord(o, loud > 0.2, pit, shift, base, dt);
+      o.voL = loud; o.voP = pit;
+      // (record) A call begins when the voice rises above a fifth of its full strength, and has ended when it has stayed below a tenth for a fifth of a second.
+      // A voice that hovers at one level, or one that a ringing circuit switches on and off many times a second, is one call, not many.
+      const above = loud > (o.voOn ? 0.1 : 0.2); o.voGap = above ? 0 : (o.voGap || 0) + 1; this.voiceRecord(o, above || (!!o.voOn && o.voGap < 6), pit, shift, base, dt, loud > 0.2);
     }
     // The record of voices (counting only; no body ever sees it).
-    // A call begins when a voice rises above a fifth of its full strength and ends when it falls below.
-    voiceRecord(o, on, pit, shift, base, dt) {
-      const K = this.aco; if (on) o.voT = (o.voT || 0) + dt;
+    voiceRecord(o, on, pit, shift, base, dt, sounding) {
+      const K = this.aco; if (sounding) o.voT = (o.voT || 0) + dt;
       if (on && !o.voOn) { // --- a call begins
         o.voN = (o.voN || 0) + 1; o.voAt = this.t; o.voPit = pit; K.onsets++; K.on++;
         // Had other bodies within 16 units begun to sound just before (0.05-0.5 s)? Against that: how many would have, if those neighbours began at their
@@ -418,9 +432,10 @@
           if (Math.abs(shift) > 0.02 && Math.abs(near.p - base) > 0.02) { if ((pit - base) * (near.p - base) > 0) K.toward++; else K.away++; } }
         if (K.pool.length > 8) { K.chD += Math.abs(pit - K.pool[(K.onsets * 7) % K.pool.length]); K.chN++; } K.pool.push(pit); if (K.pool.length > 32) K.pool.shift();
         K.recent.push({ id: o.id, t: this.t, x: o.cx, y: o.cy, p: pit, r: o.voN / Math.max(8, o.age) });
-        if (this.sndPend.length < 1200) this.voiceMark(o);
+        K.who[o.id] = this.t; // (who has called lately: findings must rest on several callers, not on one body calling many times)
+        if (this.sndPend.length < 1200 && this.t - (o.voMarkAt == null ? -9 : o.voMarkAt) >= 3) { o.voMarkAt = this.t; this.voiceMark(o); } // (the bodies around one caller are looked at once in three seconds: the stretches before and after must not overlap)
       } else if (!on && o.voOn) { // --- a call ends: its shape (band of pitch x short, middling, long), who uses it, where, and what shape this body made before
-        const dur = this.t - (o.voAt || this.t); this.voiceShape(o, Math.min(5, Math.floor((o.voPit || 0) * 6)) * 3 + (dur < 0.4 ? 0 : dur < 1.5 ? 1 : 2));
+        const dur = Math.max(0, this.t - (o.voAt || this.t) - 6 * dt); this.voiceShape(o, Math.min(5, Math.floor((o.voPit || 0) * 6)) * 3 + (dur < 0.4 ? 0 : dur < 1.5 ? 1 : 2));
       }
       o.voOn = on;
     }
@@ -441,7 +456,7 @@
       for (const q of this.bodies) { if (q === o || q.dead) continue; const z = q.vs2; if (!z || !(z.v < Q && q.vs1.v < Q && q.vs0.v < Q)) continue;
         let dx = q.cx - o.cx; if (dx > half) dx -= this.W; else if (dx < -half) dx += this.W; const dy = q.cy - o.cy, d2 = dx * dx + dy * dy; if (d2 > 256) continue;
         const L = t - z.t; if (L < 1.5) continue; let px = q.cx - z.x; if (px > half) px -= this.W; else if (px < -half) px += this.W; // (px, py): where it came from in those seconds
-        this.sndPend.push({ o: q, due: t + L, L, bx: -dx, by: -dy, qx: q.cx, qy: q.cy, px, py: q.cy - z.y, path: q.path, eaten: q.eaten, ear: q.b.hasEar && !(this.deaf || q.deaf) ? 1 : 0, pm: (q.path - z.path) / L, pe: q.eaten > z.eaten ? 1 : 0 });
+        this.sndPend.push({ o: q, due: t + L, L, bx: -dx, by: -dy, qx: q.cx, qy: q.cy, px, py: q.cy - z.y, path: q.path, eaten: q.eaten, ear: q.b.hasEar ? (this.deaf || q.deaf ? 2 : 1) : 0, pm: (q.path - z.path) / L, pe: q.eaten > z.eaten ? 1 : 0 });
         if (++k >= 8) break; }
     }
     voiceAfter() {
@@ -449,16 +464,17 @@
       for (let i = 0; i < P.length; i++) { const e = P[i]; if (e.due > this.t) { P[n++] = e; continue; } const q = e.o; if (q.dead) continue;
         let dx = q.cx - e.qx; if (dx > half) dx -= this.W; else if (dx < -half) dx += this.W; const dy = q.cy - e.qy;
         const pm = (q.path - e.path) / e.L, m = pm - e.pm, eat = (q.eaten > e.eaten ? 1 : 0) - e.pe, L = K.lis[e.ear];
-        L.n++; L.m += m; L.m2 += m * m; L.eat += eat; L.eat2 += eat * eat; L.pre += e.pm; L.post += pm;
+        L.n++; L.m += m; L.m2 += m * m; L.eat += eat; L.eat2 += eat * eat; L.pre += e.pm; L.post += pm; L.ids[q.id] = this.t;
         if (dx * dx + dy * dy > 0.01 && e.px * e.px + e.py * e.py > 0.01) { const to = Math.atan2(e.by, e.bx), off = a => Math.abs(wrapPi(a - to)), h = off(Math.atan2(e.py, e.px)) - off(Math.atan2(dy, dx)); L.hn++; L.h += h; L.h2 += h * h; } }
       P.length = n;
     }
     // (record) once a second, for a body with a voice: is it sounding, and what state is it in? Kept as counts, old ones fading (about 8 minutes).
     voiceNote(o) {
+      if (o.voOn) this.aco.who[o.id] = this.t;
       const T = this.aco.tab, segs = o.b.segs, call = o.voOn ? 1 : 0, pr = o.prof; let touched = 0, seeing = 0, hearing = 0;
       for (let i = 0; i < segs.length; i++) { const q = segs[i]; if (q.tch > 0.01) touched = 1; if (q.v > 0.2) seeing = 1; if (q.e > 0.15) hearing = 1; }
-      const st = { hungry: o.E < 0.35 * pr.Emax ? 1 : 0, fed: o.G > 0.3 * pr.gutCap ? 1 : 0, touched, hurt: o.hp && o.hp.some(h => h < 1) ? 1 : 0, seeing, hearing, young: o.stage < 1 ? 1 : 0 };
-      for (const k in st) { const t = T[k] || (T[k] = [0, 0, 0, 0]); t[call * 2 + st[k]]++; }
+      const st = { ate: o.eaten > (o.voEaten == null ? o.eaten : o.voEaten) ? 1 : 0, hungry: o.E < 0.35 * pr.Emax ? 1 : 0, fed: o.G > 0.3 * pr.gutCap ? 1 : 0, touched, hurt: o.hp && o.hp.some(h => h < 1) ? 1 : 0, seeing, hearing, young: o.stage < 1 ? 1 : 0 };
+      o.voEaten = o.eaten; for (const k in st) { const t = T[k] || (T[k] = [0, 0, 0, 0]); t[call * 2 + st[k]]++; }
       const K = this.aco; let heard = 0; for (const e of K.recent) { if (e.id === o.id) continue; const age = this.t - e.t; if (age < 0.05 || age > 0.5) continue; let dx = e.x - o.cx; if (dx > this.W / 2) dx -= this.W; else if (dx < -this.W / 2) dx += this.W; const dy = e.y - o.cy; if (dx * dx + dy * dy <= 256) { heard = 1; break; } }
       K.hearN++; K.hearYes += heard;
     }
@@ -773,7 +789,7 @@
         if (c[1] < 2 || c[1] > this.H - 2) { const push = (c[1] < 2 ? 2 - c[1] : this.H - 2 - c[1]) * 0.5; for (let k = 0; k < b.np; k++) { b.y[k] += push; b.vy[k] *= 0.5; } c[1] += push; P.pose(b); }
         // own travel: displacement with the water's drift removed. A body resting on a bottom is not carried by the water,
         // so nothing is removed there; a body with nothing to move itself with has travelled nowhere by itself.
-        { const jx = c[0] - o.cx, jy = c[1] - o.cy, ux = ground ? 0 : fl[0] * dt, uy = ground ? 0 : fl[1] * dt; if (!o.passive && jx * jx + jy * jy < 25) o.path += Math.sqrt((jx - ux) * (jx - ux) + (jy - uy) * (jy - uy)); if (this.sound && ground && jx * jx + jy * jy < 25) this.emit(c[0], c[1], o.sp, SND.scrape * pr.V * Math.sqrt(jx * jx + jy * jy), 'scrape'); o.cx = c[0]; o.cy = c[1]; }
+        { const jx = c[0] - o.cx, jy = c[1] - o.cy, ux = ground ? 0 : fl[0] * dt, uy = ground ? 0 : fl[1] * dt; if (!o.passive && jx * jx + jy * jy < 25) o.path += Math.sqrt((jx - ux) * (jx - ux) + (jy - uy) * (jy - uy)); if (this.soundWork) o.vSelf = jx * jx + jy * jy < 25 ? Math.sqrt((jx - ux) * (jx - ux) + (jy - uy) * (jy - uy)) / dt : 0; /* (how fast it moved through the water in this tick; used a few lines below, not kept) */ if (this.sound && ground && jx * jx + jy * jy < 25) this.emit(c[0], c[1], o.sp, SND.scrape * pr.V * Math.sqrt(jx * jx + jy * jy), 'scrape'); o.cx = c[0]; o.cy = c[1]; }
         // income: skin
         for (let i = 0; i < b.segs.length; i++) {
           const a = pr.absorb[i]; if (a <= 0) continue;
@@ -806,7 +822,7 @@
         }
         const dg = Math.min(o.G, pr.digest * dt); o.G -= dg; o.E += dg * pr.eta; if (lg) lg.digest += dg * (1 - pr.eta); if (this.recycle) this.giveBack(o.cx, o.cy, dg * (1 - pr.eta));
         // spending
-        if (this.sound) { const dC = b.ciliaUse - o.cil0, dW = b.work - o.work0; if (dC > 0) this.emit(o.cx, o.cy, o.sp, SND.cilia * dC, 'cilia'); if (dW > 0) this.emit(o.cx, o.cy, o.sp, SND.muscle * dW, 'muscle'); }
+        if (this.sound) { const dC = b.ciliaUse - o.cil0, dW = b.work - o.work0; if (dC > 0) this.emit(o.cx, o.cy, o.sp, this.soundWork ? SND.muscle * P.K.cilia * dC * (o.vSelf || 0) : SND.cilia * dC, 'cilia'); if (dW > 0) this.emit(o.cx, o.cy, o.sp, SND.muscle * dW, 'muscle'); }
         if (lg) { lg.basal += pr.basal * dt; lg.work += C.work * (b.work - o.work0); lg.cilia += C.ciliaWork * (b.ciliaUse - o.cil0); lg.nerve += C.spike * (b.nerveUse - o.nerve0); }
         o.E -= pr.basal * dt + C.work * (b.work - o.work0) + C.ciliaWork * (b.ciliaUse - o.cil0) + C.spike * (b.nerveUse - o.nerve0); o.work0 = b.work; o.cil0 = b.ciliaUse; o.nerve0 = b.nerveUse;
         if (o.E > pr.Emax) { if (lg) lg.clip += o.E - pr.Emax; if (this.recycle) this.giveBack(o.cx, o.cy, o.E - pr.Emax); o.E = pr.Emax; }
@@ -897,7 +913,7 @@
     static restore(d) {
       if (!d || d.format !== 'alife2-world-1') throw new Error('not an ALIFE 2.0 world');
       const w = new World(d.opt); w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = Object.assign({}, d.counts); for (const k of ['killed', 'flesh', 'torn', 'stillborn']) if (w.counts[k] == null) w.counts[k] = 0; /* worlds saved before bodies could touch */ w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
-      if (w.sound && d.snd) { w.snd = d.snd.f.map(unb64); w.sndIn = d.snd.i.map(unb64); w.sndV = d.snd.v.map(unb64); w.sndVIn = d.snd.vi.map(unb64); w.aco = Object.assign(w.acoNew(), d.snd.aco || {}); /* (worlds saved before the notebook grew keep what they had) */ }
+      if (w.sound && d.snd) { w.snd = d.snd.f.map(unb64); w.sndIn = d.snd.i.map(unb64); w.sndV = d.snd.v.map(unb64); w.sndVIn = d.snd.vi.map(unb64); w.aco = Object.assign(w.acoNew(), d.snd.aco || {}); while (w.aco.lis.length < 3) w.aco.lis.push(w.acoNew().lis[0]); for (const c of w.aco.lis) if (!c.ids) c.ids = {}; /* (worlds saved before the notebook grew keep what they had) */ }
       for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: d.exact ? f[5] : w.t + f[5] });
       if (d.exact) { w.grainDebt = d.grainDebt; w.bottomDebt = d.bottomDebt; if (d.liveLines) w.liveLines = new Set(d.liveLines); if (d.regionState && w.regions) d.regionState.forEach((q, i) => { w.regions[i].debt = q.debt; w.regions[i].patch = q.patch; }); }
       const nodes = new Map(d.tree.map(n => [n.id, n]));

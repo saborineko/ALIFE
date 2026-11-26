@@ -660,6 +660,31 @@ test('mutation frequency and width as two genes (mutsplit): changes of plan foll
   const c = w.census(); assert.ok(Number.isFinite(c.mutGene) && Number.isFinite(c.mutWidth));
 });
 
+test('the sound of cilia from the work they do (soundWork): swimming by cilia becomes nearly silent, other sounds are untouched, an eater can hear itself eat; off by default; switched in a running world', () => {
+  const G = A.genome, W = o => new A.engine.World(Object.assign({ seed: 5, founders: 0, cap: 0, sound: 1, nerve2: 1, blind: 1 }, o || {}));
+  assert.strictEqual(W().soundWork, 0);
+  const swimmer = () => G.create({ parts: [G.part({ len: 1, r0: 0.4, r1: 0.3, cilia: 0.5, beat: 1, nerve: 0.5, mouth: 0.6, gut: 0.5 })], links: [] });
+  const run = (o, steps) => { const w = W(o), L = []; for (let i = 0; i < 8; i++) L.push(w.spawn(swimmer(), 20 + i * 15, 30, 1, null)); for (let i = 0; i < steps; i++) { w.step(); for (const b of L) b.E = b.prof.Emax * 0.8; } return { w, L }; };
+  const old = run({}, 900), neu = run({ soundWork: 1 }, 900);
+  assert.strictEqual(JSON.stringify(neu.L.map(o => [o.cx, o.cy, o.eaten])), JSON.stringify(old.L.map(o => [o.cx, o.cy, o.eaten])), 'bodies without ears live the same life under either rule');
+  assert.ok(old.w.aco.out.cilia > 50 * neu.w.aco.out.cilia && neu.w.aco.out.cilia > 0, 'cilia: ' + old.w.aco.out.cilia + ' -> ' + neu.w.aco.out.cilia);
+  assert.strictEqual(neu.w.aco.out.crunch, old.w.aco.out.crunch, 'the sound of eating is the same'); assert.ok(old.w.aco.out.crunch > 0);
+  // what the rule says: thrust times the speed through the water, at the efficiency of muscle
+  { const o = neu.L[0], w = neu.w, c0 = w.aco.out.cilia, u0 = o.b.ciliaUse, p0 = o.path; for (let i = 0; i < 30; i++) w.step(); const others = neu.L.length;
+    const made = (w.aco.out.cilia - c0) / others, expect = 0.02 * A.physics.K.cilia * (o.b.ciliaUse - u0) * (o.path - p0); assert.ok(made > 0.3 * expect && made < 3 * expect, 'about thrust x speed x efficiency of muscle: ' + made + ' / ' + expect); }
+  // switched in a running world, kept in a save
+  { const { w } = run({}, 300), a0 = w.aco.out.cilia; for (let i = 0; i < 60; i++) w.step(); const before = w.aco.out.cilia - a0; w.enable({ soundWork: 1 }); assert.ok(/繊毛の音/.test(w.events[w.events.length - 1].text));
+    const a1 = w.aco.out.cilia; for (let i = 0; i < 60; i++) w.step(); assert.ok(w.aco.out.cilia - a1 < before / 50, 'quieter from the moment it is switched on');
+    assert.strictEqual(A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))).soundWork, 1); }
+  // an eater with an ear tuned to the sound of its own mouth: does the ear tell eating from not eating?
+  const eater = () => { const g = G.create({ parts: [G.part({ len: 1, r0: 0.5, r1: 0.4, cilia: 0.3, beat: 1, nerve: 0.5, mouth: 0.6, gut: 0.5 }), G.part({ len: 0.5, r0: 0.25, r1: 0.2, nerve: 0.5, ear: 0.6, hTune: 0.36, hWide: 0.15, hE: 0.5 })], links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.3, off: 0.8, angle: 1.0, scale: 1, repeat: 1 })] }); return g; }; // (the ear is wired to its segment's signal, which drives nothing: an ear with no wiring is not built)
+  const ears = sw => { const w = new A.engine.World({ seed: 881, founders: 0, cap: 0, sound: 1, soundWork: sw, nerve2: 1, blind: 1, learn: 1 }), L = []; for (let i = 0; i < 300; i++) w.step(); for (let i = 0; i < 24; i++) L.push(w.spawn(eater(), w.rand() * w.W, 4 + w.rand() * (w.yBottom - 8), 1, null));
+    let all = 0, n = 0, eat = 0, m = 0; for (let i = 0; i < 4500; i++) { w.step(); for (const o of L) { if (o.dead) continue; o.E = o.prof.Emax * 0.6; if (i % 5) continue; for (const q of o.b.segs) if (q.earW) { all += q.e; n++; if (o.b.segs[0].ate > 0.001) { eat += q.e; m++; } } } } return { ratio: (eat / Math.max(1, m)) / (all / Math.max(1, n)), m }; };
+  const e0 = ears(0), e1 = ears(1);
+  assert.ok(e1.m > 20 && e0.m > 20, 'they ate: ' + e0.m + ', ' + e1.m);
+  assert.ok(e1.ratio > 1.3, 'with quiet swimming an ear reads more while its body swallows: x' + e1.ratio); assert.ok(e0.ratio < 1.15, 'under the first calibration it does not (the cilia drown it): x' + e0.ratio);
+});
+
 test('the record of sound is only a notebook: wiping it changes nothing in the world; it tells bodies that respond to a call from bodies that merely differ; order is counted within a body; older saves load', () => {
   const G = A.genome, W = o => new A.engine.World(Object.assign({ seed: 5, founders: 0, cap: 0, sound: 1, nerve2: 1, blind: 1 }, o || {}));
   const one = (o, nn, fr) => { const g = G.create({ freq: fr || 1, parts: [G.part(Object.assign({ len: 0.6, r0: 0.3, r1: 0.3, nerve: 0.5, store: 0.5 }, o))], links: [] }); if (nn) g.parts[0].nn = nn; return g; };
@@ -680,6 +705,25 @@ test('the record of sound is only a notebook: wiping it changes nothing in the w
   assert.ok(r.lisEffect > 1 && r.lisOf === '動く' && r.lisControl === 'both' && r.lisMovedAfter > 1.5 * r.lisMovedBefore, 'responders are found: ' + JSON.stringify([r.lisEffect, r.lisOf, r.lisControl, r.lisN, r.lisMovedBefore, r.lisMovedAfter]));
   assert.ok(Math.abs(d.lisEffect) < 0.25 && d.lisMovedBefore > 0.3, 'bodies that merely differ are not taken for listeners: ' + JSON.stringify([d.lisEffect, d.lisOf, d.lisN, d.lisMovedBefore, d.lisMovedAfter]));
   assert.ok(r.callShapes >= 1 && r.sequenceN === 0 && r.dialectBits === 0, 'one shape of call, so nothing to say about order');
+  // 2b. One body is not a finding. (Both cases come from an evolved world, where a single newborn whose voice hovered at the threshold for 2.4 seconds was logged as
+  //     37 calls, a repeated shape and a change in its listeners.) A voice that hovers at one level is one call; and however often one body calls, and however
+  //     its neighbours respond, the record says "unknown" until several bodies have called.
+  { const hover = () => one({ voice: 0.3, pitch: 0.2, freq: 3 }, [{ b: 0.205, k: 1, in: [['o', 0.012]], out: [['V', 1]] }], 3); // drive wavers between about 0.19 and 0.21, several times a second
+    const w = W(), L = []; for (let i = 0; i < 200; i++) w.step(); const h = w.spawn(hover(), 80, 30, 1, null); L.push(h); for (let j = 0; j < 6; j++) { L.push(w.spawn(kinds.respond[0](), 74 + j * 2.4, 34, 1, null)); L.push(w.spawn(kinds.respond[1](), 74 + j * 2.4, 26, 1, null)); }
+    let lo = 1, hi = 0; for (let i = 0; i < 1200; i++) { w.step(); for (const o of L) if (!o.dead) o.E = o.prof.Emax; if (i > 60) { const v = h.voL || 0; if (v < lo) lo = v; if (v > hi) hi = v; } }
+    assert.ok(lo > 0.1 && lo < 0.2 && hi > 0.2 && hi < 0.3, 'the voice does hover across a fifth: ' + lo + '..' + hi); assert.ok(w.aco.onsets <= 2, 'and is counted as one call, not ' + w.aco.onsets);
+    { const buzz = () => one({ voice: 0.3, pitch: 0.2, freq: 3 }, [{ b: 0, k: 1, in: [['o', 1.2]], out: [['V', 1]] }], 3), w2 = W(); for (let i = 0; i < 100; i++) w2.step(); const z = w2.spawn(buzz(), 80, 30, 1, null); // a voice switched on and off nine times a second
+      let ons = 0, offs = 0, was = 0; for (let i = 0; i < 600; i++) { w2.step(); z.E = z.prof.Emax; const up = (z.voL || 0) > 0.2 ? 1 : 0; if (up && !was) ons++; if (!up && was) offs++; was = up; }
+      assert.ok(ons > 50 && offs > 50, 'the voice does switch many times: ' + ons); assert.ok(w2.aco.onsets <= 2, 'and is one call, not ' + w2.aco.onsets); assert.ok(z.voT > 2 && z.voT < 15, 'its sounding time counts only the moments it sounds: ' + z.voT); }
+    const solo = W(), M = []; for (let i = 0; i < 200; i++) solo.step(); M.push(solo.spawn(caller(), 80, 30, 1, null)); for (let j = 0; j < 8; j++) { M.push(solo.spawn(kinds.respond[0](), 71 + j * 2.4, 34, 1, null)); M.push(solo.spawn(kinds.respond[1](), 71 + j * 2.4, 26, 1, null)); }
+    for (let i = 0; i < 9000; i++) { solo.step(); for (const o of M) if (!o.dead) o.E = o.prof.Emax; } const c = solo.census(), R = solo.soundReading(c);
+    assert.ok(c.onsets >= 10 && c.callers === 1 && c.lisN > 3, 'one caller, many calls: ' + [c.onsets, c.callers, c.lisN]);
+    assert.ok(c.lisEffect === 0 && c.lisControl === '' && R.unknown.some(l => /聞き手のふるまい/.test(l)), 'and nothing is said about listeners: ' + c.lisEffect);
+    // even with ten times the cases it is the number of callers that decides: the same notebook with three callers on its list does speak
+    for (const q of solo.aco.lis) for (const k in q) if (k !== 'ids') q[k] *= 10; assert.ok(solo.aco.lis[1].n >= 25 && solo.soundDerived().lisControl === '', 'many cases from one caller: still nothing');
+    solo.aco.who = { 1: solo.t, 2: solo.t, 3: solo.t }; assert.ok(solo.soundDerived().lisControl === '', 'three callers, but the cases come from four listeners: still nothing (' + solo.soundDerived().lisBodies + ')');
+    for (let i = 0; i < 6; i++) { solo.aco.lis[1].ids['x' + i] = solo.t; solo.aco.lis[0].ids['y' + i] = solo.t; } assert.ok(solo.soundDerived().lisControl === 'both' && solo.soundDerived().lisEffect > 1, 'with three callers and enough listeners the same cases would count: ' + solo.soundDerived().lisEffect);
+    assert.ok(!solo.events.some(e => /音（観測）/.test(e.text)), 'nor is any first logged: ' + solo.events.filter(e => /音（観測）/.test(e.text)).map(e => e.text).join(' / ')); }
   // 3. order: within a body, against its own repertoire
   { const w = W(); let z = 12345; const rnd = () => (z = (z * 1103515245 + 12345) % 2147483648) / 2147483648;
     const seq = fn => { w.aco = w.acoNew(); for (let b = 0; b < 40; b++) { const o = { gen: 1, cx: 10 }; for (let i = 0; i < 60; i++) w.voiceShape(o, fn(b, i)); } return w.soundDerived(); };

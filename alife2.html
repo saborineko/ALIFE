@@ -39,6 +39,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="部品が神経を 4 個まで持てる。神経は、自分の体節の感覚と、同じ体節・親・子・左右の対の神経を入力にでき、繊毛・関節・口を動かす。変異で生じ、結合ごと複製され、消える。これまでの 1 信号の回路はそのまま働く。"><input id="nerve2" type="checkbox">体節あたり複数の神経</label>
     <label title="複数の神経のある世界で働く。神経の結合ごとに、使われ方で強さが変わる速さ（遺伝する。0 なら変わらない）を持てる。変化は「速さ × 入力 × その神経の活動」で、神経ごとに、自分の入力の 1 つが働いているあいだだけ変わる、という門を持てる。身につけた強さはゆっくり薄れ、子には伝わらない（伝わるのは速さと門）。いまの世界のまま切り替えられる。"><input id="learn" type="checkbox">神経の結合が経験で変わる</label>
     <label title="音という物理現象のある世界。どの身体も、していること（繊毛を打つ、筋肉を動かす、他の身体と押し合う、組織を削られる、底を擦る、餌を口に入れる）から、身体の大きさで決まる高さの微かな音を否応なく出す。体節は、聴く組織（耳：その体節の外側の端で水がどれだけ鳴っているかを、合わせた高さのあたりで測る）と、音を出す組織（声：神経が鳴らし、鳴らすたびにエネルギーを使う）を持てる。音は広がり、薄れ、重なる。低い音は遠くまで届いて長く残り、高い音はすぐ消える。水そのものにも雑音がある。誰が・どこで・なぜ出した音かは、どこにも書かれていない。警戒・求愛といった意味も、鳴くことへの報酬も無い。いまの世界のまま切り替えられる。"><input id="sound" type="checkbox">音（身体の音・耳・声）</label>
+    <label title="音のある世界で働く。繊毛の音を、打った量ではなく、水に対してした仕事（推力 × 身体が水の中を進む速さ）から決め、筋肉の仕事と同じ割合で音に変える。新しい係数は足していない（推力は物理が使っている値、割合は筋肉の値）。元の決め方では、繊毛で泳ぐ音が水の中の音の 7〜8 割を占め、食べる・ぶつかる・擦る音より大きかった。実際の水中では、繊毛のような滑らかで粘性の強い運動はほとんど音を出さない。この規則では、同じ速さで泳ぐ身体の繊毛の音はおよそ 300 分の 1 になり、食べている身体は自分の食べる音を耳で聞き分けられるようになる（元の決め方では自分の繊毛の音に埋もれる）。既定は切で、切ってある音の世界は以前とまったく同じに進む。いまの世界のまま切り替えられる。"><input id="soundWork" type="checkbox">繊毛の音を仕事から決める（泳ぐ音は静か）</label>
     <label title="対照実験：この世界のすべての耳が何も聞こえなくなる。声や身体の音は出続ける。音が行動に効いているかを確かめるために使う。"><input id="deaf" type="checkbox">対照：耳を切る</label>
     <label title="対照実験：この世界のすべての声が出なくなる（費用もかからない）。身体が否応なく出す音は残る。"><input id="mute" type="checkbox">対照：声を切る</label>
     <label title="変異の起きやすさと大きさが遺伝し、それ自体も変異する（0.1〜3 倍）。ALIEN や Polyworld が持つ仕組み。いまの世界のまま切り替えられる。"><input id="metamut" type="checkbox">変異の強さも進化する</label>
@@ -54,7 +55,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="溶存栄養の回復と粒の供給が、長さ 120 の波になって世界を一周し続ける（1200 秒で 1 波長ぶん進む＝毎秒 0.1）。どの場所も、豊かな時期と乏しい時期を交互に迎える。時間で平均した供給はどこでも波の無い世界と同じで、乏しい水に降るはずだった粒は別の場所に降る。じっとしていれば飢える時期が来て、波について行けば豊かな水に居続けられる。いまの世界のまま切り替えられる。「全部入り」には含めていない。"><input id="wave" type="checkbox">豊かさの波（餌場が移る）</label>
     <label>始祖 <select id="founder"><option value="primordial">原始個体（1体節）から自然進化</option><option value="file">進化試験の結果を読み込む（JSON）</option></select></label>
     <input id="file" type="file" accept=".json" style="display:none">
-    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・音・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。変異の強さの進化（2 種類）は長期観察のために含めていない：変異の起きやすさは世界の値のまま一定。入れたいときは個別に印を付ける。">全部入りで最初から</button><button id="pause">一時停止</button>
+    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・音・繊毛の音を仕事から決める・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。変異の強さの進化（2 種類）は長期観察のために含めていない：変異の起きやすさは世界の値のまま一定。入れたいときは個別に印を付ける。">全部入りで最初から</button><button id="pause">一時停止</button>
     <label>速度 <select id="speed"><option>1</option><option selected>4</option><option>16</option><option>64</option></select>×</label>
     <label title="同じ種類の世界を、別々のスレッドで同時に回す。増やした島は、いま見ている世界の複製を乱数だけ変えて始める。150 秒ごとに各島から 1 個体が隣の島へ移る（遺伝子・齢・蓄えごと。出入りはエネルギーの収支に記帳される）。裏の島は描画しないので全速で進む。島の数だけ CPU のコアを使う。島を使う世界は、同じ seed でも毎回同じ歴史にはならない。">並列の島 <select id="islands"><option>1</option><option>2</option><option>4</option><option>8</option></select></label>
     <label title="タブを裏に回したり最小化したりしても、世界を止めずに進める（表示中より遅い）。ブラウザがタブを休止させた場合は止まる。"><input id="bg" type="checkbox" checked>裏でも進める</label>
@@ -84,15 +85,15 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=43"></script>
-<script src="./alife2-genome.js?v=43"></script>
-<script src="./alife2-development.js?v=43"></script>
-<script src="./alife2-neural.js?v=43"></script>
-<script src="./alife2-physics.js?v=43"></script>
-<script src="./alife2-organs.js?v=43"></script>
-<script src="./alife2-engine.js?v=43"></script>
-<script src="./alife2-render.js?v=43"></script>
-<script src="./alife2-gpu.js?v=43"></script>
-<script src="./alife2-world.js?v=43"></script>
+<script src="./alife2-version.js?v=44"></script>
+<script src="./alife2-genome.js?v=44"></script>
+<script src="./alife2-development.js?v=44"></script>
+<script src="./alife2-neural.js?v=44"></script>
+<script src="./alife2-physics.js?v=44"></script>
+<script src="./alife2-organs.js?v=44"></script>
+<script src="./alife2-engine.js?v=44"></script>
+<script src="./alife2-render.js?v=44"></script>
+<script src="./alife2-gpu.js?v=44"></script>
+<script src="./alife2-world.js?v=44"></script>
 </body>
 </html>
