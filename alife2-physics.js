@@ -49,7 +49,7 @@
         id: i, parent: q.parent, p: q.p, part: q.part, len: q.len, r0: q.r0, r1: q.r1, z0: q.z0, z1: q.z1, rest: q.angle, mir: q.mir,
         phase: q.phase, az: q.az, axial: q.axial, chainRoot: q.chainRoot, group: q.group, idx: q.idx, tip: q.tip, leaf: q.leaf,
         b: i + 1, aw: null, target: q.angle, press: 0, act: 0, theta: q.angle, osc: 0, dir: 1,
-        a: 0, cd: 1, ct: 0, m: null, kids: q.kids || [], circ: A.neural.wiring(q.p) > 1e-6, // local nerve signal, its effect on this segment's cilia, and whether the segment is wired at all
+        a: 0, cd: 1, ct: 0, m: null, tch: 0, torn: 0, kids: q.kids || [], circ: A.neural.wiring(q.p) > 1e-6, // local nerve signal, its effect on this segment's cilia, and whether the segment is wired at all
         mass: Math.max(1e-4, K.density * PI * rm * zm * q.len * (1 + K.armorDensity * q.p.armor)),
         sideArea: q.len * (q.z0 + q.z1), wetArea: PI * (rm + zm) * q.len,
         formArea: Math.abs(PI * q.r0 * q.z0 - PI * q.r1 * q.z1) + (q.leaf ? PI * q.r1 * q.z1 : 0) + (i === 0 ? PI * q.r0 * q.z0 : 0),

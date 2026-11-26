@@ -69,7 +69,11 @@
     // it looks one way, over a cone, and reports how much of its field is filled by things of the colour it is tuned to.
     vE: [-4, 4, 0, 'n', 'v'],      // from what its own eye reports
     gaze: [-PI, PI, 0, 'a', 'v'],  // which way the eye looks, against the segment's outward direction
-    tune: [-PI, PI, 1, 'a', 'v']   // the colour it responds to (an angle on the colour wheel; food grains are at about 0.9)
+    tune: [-PI, PI, 1, 'a', 'v'],  // the colour it responds to (an angle on the colour wheel; food grains are at about 0.9)
+    // In worlds where bodies touch (marked 'c'): a segment feels being pushed and being torn, and a mouth can be held shut.
+    sT: [-4, 4, 0, 'n', 'c'],      // from the push this segment is getting from another body right now
+    sW: [-4, 4, 0, 'n', 'c'],      // from its wound: tissue being torn from it right now, and how much of it is gone
+    mBite: [-1.5, 1.5, 0, 'n', 'c'] // signal -> how far this segment's mouth is open (0 = no effect: always open)
   };
   const LINK_FIELDS = {
     at: [0, 1, 1, 'n'],            // where along the parent

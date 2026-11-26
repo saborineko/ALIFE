@@ -48,6 +48,7 @@
     contact: 0,                           // 1 = bodies cannot pass through one another, and a mouth tears tissue from whatever body it touches. What is torn is lost to its owner:
                                           // that segment's muscle, gut, eye, cilia... work that much less. Nothing here knows hunter from hunted, kin from stranger
     noBite: 0,                            // control experiment: bodies touch and push, but mouths take nothing from them
+    numbSkin: 0,                          // control experiment: no segment in this world feels being pushed or torn
     shore: 0                              // maps with regions: 0 = the floor begins as a step at a border (the worlds before this existed). >0 = over this width, centred on the border,
                                           // the weight a body rests on the floor with (and so its friction and what its pads can hold) rises smoothly from one region's value to the next
   };
@@ -234,7 +235,7 @@
     // (equal and opposite, so nothing is gained). A mouth that reaches another body's segment tears tissue from it.
     touch(dt) {
       const bg = this.bgrid, cell = this.cell, W = this.W, half = W / 2; let maxExt = 0; const hurt = [];
-      for (const o of this.bodies) { let e = 0; for (const s of o.b.segs) { let dx = s.bx - o.cx; dx -= W * Math.round(dx / W); const d = Math.sqrt(dx * dx + (s.by - o.cy) * (s.by - o.cy)) + s.r1; if (d > e) e = d; } o.ext = e; if (e > maxExt) maxExt = e; }
+      for (const o of this.bodies) { let e = 0; for (const s of o.b.segs) { s.tch = 0; s.torn = 0; let dx = s.bx - o.cx; dx -= W * Math.round(dx / W); const d = Math.sqrt(dx * dx + (s.by - o.cy) * (s.by - o.cy)) + s.r1; if (d > e) e = d; } o.ext = e; if (e > maxExt) maxExt = e; }
       for (const a of this.bodies) {
         const R = a.ext + maxExt, c0 = Math.floor((a.cx - R) / cell), c1 = Math.floor((a.cx + R) / cell), r0 = Math.max(0, Math.floor((a.cy - R) / cell)), r1 = Math.min(this.rows - 1, Math.floor((a.cy + R) / cell));
         if (c1 - c0 >= this.cols) continue; // (a body as wide as the world: not handled)
@@ -251,24 +252,25 @@
       for (let i = 0; i < sa.length; i++) { const p = sa[i]; for (let j = 0; j < sb.length; j++) { const q = sb[j];
         let dx = q.bx - p.bx; if (dx > half) dx -= W; else if (dx < -half) dx += W; const dy = q.by - p.by, R = p.r1 + q.r1, d2 = dx * dx + dy * dy; if (d2 >= R * R) continue;
         const d = Math.sqrt(d2) || 1e-6, ma = A2.rigid ? A2.mass : A2.m[p.b], mb = B2.rigid ? B2.mass : B2.m[q.b], J = ma * mb / (ma + mb) * Math.min(0.2, 12 * (R - d) * dt), jx = J * dx / d, jy = J * dy / d;
-        P.impulse(A2, p.b, -jx, -jy); P.impulse(B2, q.b, jx, jy);
+        P.impulse(A2, p.b, -jx, -jy); P.impulse(B2, q.b, jx, jy); p.tch += J / ma; q.tch += J / mb; // each feels the change of speed the push gives it
       } }
       if (this.noBite) return;
       for (let k = 0; k < 2; k++) { const e = k ? b : a, v = k ? a : b; // each one's mouths on the other
-        for (const m of e.prof.mouths) { if (m.gape <= 0) continue; const s = e.b.segs[m.seg]; let best = -1, bd = Infinity;
-          for (let j = 0; j < v.b.segs.length; j++) { const q = v.b.segs[j]; if (v.hp && v.hp[j] <= 0) continue; let dx = q.bx - s.bx; if (dx > half) dx -= W; else if (dx < -half) dx += W; const d = Math.sqrt(dx * dx + (q.by - s.by) * (q.by - s.by)) - q.r1; if (d < m.gape && d < bd) { bd = d; best = j; } }
-          if (best >= 0 && this.bite(e, m, s, v, best, dt) && hurt.indexOf(v) < 0) hurt.push(v);
+        for (const m of e.prof.mouths) { const s = e.b.segs[m.seg], gape = m.gape * (s.mo == null ? 1 : s.mo); if (gape <= 0) continue; let best = -1, bd = Infinity; // (a mouth held shut takes nothing)
+          for (let j = 0; j < v.b.segs.length; j++) { const q = v.b.segs[j]; if (v.hp && v.hp[j] <= 0) continue; let dx = q.bx - s.bx; if (dx > half) dx -= W; else if (dx < -half) dx += W; const d = Math.sqrt(dx * dx + (q.by - s.by) * (q.by - s.by)) - q.r1; if (d < gape && d < bd) { bd = d; best = j; } }
+          if (best >= 0 && this.bite(e, m, s, v, best, dt, gape) && hurt.indexOf(v) < 0) hurt.push(v);
         } }
     }
     // A mouth takes tissue: as much as its gape and jaw muscle tear in this moment, less through armour and skin, and no more than its gut can hold.
     // What the eater's gut receives is exactly what leaves the other body: the food still in that tissue, and that tissue's share of its reserve and gut contents.
-    bite(e, m, s, v, j, dt) {
+    bite(e, m, s, v, j, dt, gape) {
       const C = A.organs.C, room = e.prof.gutCap - e.G; if (room <= 1e-9 || v.prof.V <= 1e-9) return false;
       const q = v.b.segs[j], hp = v.hp || (v.hp = new Array(v.b.segs.length).fill(1)), vol = Math.PI * (q.r0 + q.r1) / 2 * (q.z0 + q.z1) / 2 * q.len;
-      let dv = Math.min(C.bite * m.gape * m.gape * (0.4 + 1.2 * s.p.muscle) * Math.max(0.05, 1 - 0.85 * q.p.armor - 0.3 * q.p.skin) * dt, vol * hp[j]); if (dv <= 0) return false;
+      if (gape == null) gape = m.gape;
+      let dv = Math.min(C.bite * gape * gape * (0.4 + 1.2 * s.p.muscle) * Math.max(0.05, 1 - 0.85 * q.p.armor - 0.3 * q.p.skin) * dt, vol * hp[j]); if (dv <= 0) return false;
       const per = C.flesh * C.build + (Math.max(0, v.E) + v.G) / v.prof.V; if (dv * per > room) dv = room / per;
       const share = Math.min(1, dv / v.prof.V), eE = Math.max(0, v.E) * share, eG = v.G * share, got = C.flesh * C.build * dv + eE + eG;
-      v.E -= eE; v.G -= eG; hp[j] -= dv / vol; if (hp[j] < 1e-6) hp[j] = 0;
+      v.E -= eE; v.G -= eG; hp[j] -= dv / vol; if (hp[j] < 1e-6) hp[j] = 0; q.torn += dv / vol / dt;
       if (this.ledger) this.ledger.bite += (1 - C.flesh) * C.build * dv;
       e.G += got; e.flesh = (e.flesh || 0) + got; e.eaten += got; this.counts.flesh += got; this.counts.torn += got; v.lost = (v.lost || 0) + got; v.biter = e.id;
       return true;
@@ -449,7 +451,8 @@
             smA = this.smA; smB = this.smB; const off = o.anosmic || this.anosmic;
             for (let i = 0; i < segs.length; i++) { const q = segs[i]; if (off || !q.circ) { smA[i] = smB[i] = 0; continue; } const x = (q.ax + q.bx) * 0.5, y = (q.ay + q.by) * 0.5; smA[i] = this.nutAt(x, y, this.scA); smB[i] = this.nutAt(x, y, this.scB); }
           }
-          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax, smA, smB, this.vision) * dt;
+          if (this.contact && (this.numbSkin || o.numbSkin)) for (let i = 0; i < segs.length; i++) { segs[i].tch = 0; segs[i].torn = 0; }
+          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax, smA, smB, this.vision, this.contact) * dt;
         }
         // a body that cannot move itself is simply carried by the water, and lies still on a stepped floor. On a sloping floor it gets the same physics as any body: the current drags it, the floor holds it by its weight
         if (o.passive && !(ground && this.shore > 0)) { if (!ground) for (let k = 0; k < b.np; k++) { b.x[k] += fl[0] * dt; b.y[k] += fl[1] * dt; } P.pose(b); }
@@ -468,8 +471,8 @@
           this.nut[ci] -= take; o.E += take; o.absorbed += take;
         }
         // income: mouth -> gut
-        for (const m of pr.mouths) {
-          const s = b.segs[m.seg], ci = this.cellAt(s.bx, clamp(s.by, 0, this.H - 0.01));
+        for (const m0 of pr.mouths) {
+          const s = b.segs[m0.seg], ci = this.cellAt(s.bx, clamp(s.by, 0, this.H - 0.01)), m = s.mo == null || s.mo >= 1 ? m0 : { seg: m0.seg, gape: m0.gape * s.mo }; if (m.gape <= 0) continue;
           for (const f of this.grid[ci]) {
             if (this.nibble && f.e > 0 && (f.size > m.gape * 1.3 || o.G + f.e > pr.gutCap) && o.G < pr.gutCap) { // too much to swallow: take a piece
               let dx = f.x - s.bx; if (dx > this.W / 2) dx -= this.W; else if (dx < -this.W / 2) dx += this.W;
@@ -516,7 +519,7 @@
       }
       for (const o of born) {
         const mm = this.metamut ? (o.g.mut == null ? 1 : o.g.mut) : 1;
-        const g = this.rand() < this.mutation * mm ? A.genome.mutate(o.g, this.rand, this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut ? 'm' : '')) : A.genome.copy(o.g);
+        const g = this.rand() < this.mutation * mm ? A.genome.mutate(o.g, this.rand, this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut ? 'm' : '') + (this.contact ? 'c' : '')) : A.genome.copy(o.g);
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
         const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1, bx = o.cx + Math.cos(a) * d, by = clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), B = o.eggCost - C.eggFixed; // B: what the egg holds
@@ -570,7 +573,7 @@
         bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home, v0: o.V0, s0: o.stage0, hp: o.hp || undefined, flesh: o.flesh || undefined, lost: o.lost || undefined,
           sig: b.hasCircuit ? b.segs.map(q => q.a) : undefined,
           st: { x: Array.from(b.x), y: Array.from(b.y), vx: Array.from(b.vx), vy: Array.from(b.vy), t: b.t, work: b.work, heat: b.heat, cilia: b.ciliaUse, nerve: b.nerveUse, om: b.om || 0, th: b.th || 0, loc: b.loc ? Array.from(b.loc) : null, inertia: b.inertia == null ? null : b.inertia, carried: b.carried == null ? null : b.carried, cmd: b.cmd,
-            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB, q.v == null ? null : q.v, q.mV == null ? null : q.mV]), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
+            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB, q.v == null ? null : q.v, q.mV == null ? null : q.mV, q.mo == null ? null : q.mo]), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
       };
     }
     // Older saves (without `exact`) lack pose, velocities, rhythm phase, sensory memory and birth region: bodies then restart from rest.
@@ -589,7 +592,7 @@
         if (st) { // put the body back exactly as it was
           const b = o.b; b.x.set(st.x); b.y.set(st.y); b.vx.set(st.vx); b.vy.set(st.vy); b.t = st.t; b.work = st.work; b.heat = st.heat; b.ciliaUse = st.cilia; b.nerveUse = st.nerve; b.carried = st.carried == null ? undefined : st.carried; b.cmd = st.cmd;
           if (b.rigid && st.loc) { b.om = st.om; b.th = st.th; b.loc.set(st.loc); b.inertia = st.inertia; } // the same numbers, not the same quantities recomputed in another orientation
-          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; if (v[11] != null) q.v = v[11]; if (v[12] != null) q.mV = v[12]; });
+          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; if (v[11] != null) q.v = v[11]; if (v[12] != null) q.mV = v[12]; if (v[13] != null) q.mo = v[13]; });
           A.physics.pose(b); o.cx = s.x; o.cy = s.y;
           Object.assign(o, { noise: st.noise, wander: st.wander, seen: st.seen, sx: st.sx, sy: st.sy, sdt: st.sdt, taxDot: st.taxDot, taxLen: st.taxLen, taxN: st.taxN, work0: st.work0, cil0: st.cil0, nerve0: st.nerve0, nextCost: st.nextCost, nextStage: st.nextStage });
         }

@@ -442,3 +442,20 @@ test('mutation strength can itself evolve; a mouth can take pieces of a grain to
     for (let i = 0; i < 300; i++) x.step(); return { eaten: o.eaten, left: x.food.length ? x.food[0].e : 0, e0, size: x.food.length ? x.food[0].size : 0 }; };
   const off = run(0), on = run(1); assert.strictEqual(off.eaten, 0, 'whole or nothing: nothing'); assert.ok(on.eaten > 0.05 && Math.abs(on.e0 - on.left - on.eaten) < 1e-9 && on.size < 1.2, JSON.stringify(on));
 });
+
+test('where bodies touch: a segment feels a push and a tear, the cut sense feels nothing, and a mouth held shut takes nothing', () => {
+  const G = A.genome, mk = o => { const g = G.primordial(1); Object.assign(g.parts[0], o); return g; };
+  const quiet = { seed: 2, founders: 0, cap: 0, contact: 1, flow: 0, grainRate: 0, bottomRate: 0, jitter: 0, nutrientStart: 0.6, nutrientRegrow: 0 };
+  // pushed: two overlapping bodies, one wired from touch
+  for (const cut of [0, 1]) { const w = new A.engine.World(Object.assign({}, quiet, { noBite: 1, numbSkin: cut })), a = w.spawn(mk({ cilia: 0.2, nerve: 0.5, sT: 4, mouth: 0 }), 80, 30, 1, null); w.spawn(mk({ cilia: 0, mouth: 0 }), 80.3, 30.1, 1, null);
+    let peak = 0; for (let i = 0; i < 20; i++) { w.step(); peak = Math.max(peak, a.b.segs[0].a); } if (cut) assert.strictEqual(peak, 0, 'cut: ' + peak); else assert.ok(peak > 0.3, 'felt the push: ' + peak); }
+  // torn: a small wired body under a big mouth
+  { const w = new A.engine.World(quiet), big = w.spawn(mk({ len: 1.4, r0: 1, r1: 1, mouth: 1, gut: 0.5, muscle: 0.3, cilia: 0 }), 80, 30, 1, null), small = w.spawn(mk({ cilia: 0.2, nerve: 0.5, sW: 4, mouth: 0 }), big.b.segs[0].bx + 0.3, big.b.segs[0].by, 1, null);
+    let peak = 0; for (let i = 0; i < 30 && !small.dead; i++) { w.step(); peak = Math.max(peak, small.b.segs[0].a); } assert.ok(small.lost > 0 && peak > 0.3, 'felt the tear: ' + peak + ' lost ' + small.lost); }
+  // a mouth held shut (signal high, mBite negative) takes neither tissue nor grains; the same mouth without that gene does
+  const fed = mBite => { const w = new A.engine.World(quiet), big = w.spawn(mk({ len: 1.4, r0: 1, r1: 1, mouth: 1, gut: 0.5, muscle: 0.3, cilia: 0.05, nerve: 0.5, nB: 2, mBite }), 80, 30, 1, null); w.step();
+    const s = big.b.segs[0], small = w.spawn(mk({ cilia: 0, mouth: 0 }), s.bx + 0.3, s.by, 1, null); w.addFood(s.bx, s.by, 0.3, 1, true, 1e9); for (let i = 0; i < 20; i++) w.step(); return { flesh: big.flesh || 0, eaten: big.eaten, lost: small.lost || 0 }; };
+  const shut = fed(-1.5), open = fed(0); assert.ok(open.flesh > 0 && open.eaten > 0.9, JSON.stringify(open)); assert.ok(shut.flesh === 0 && shut.eaten === 0 && shut.lost === 0, JSON.stringify(shut));
+  // old rules: these genes never change in worlds without contact
+  let g = G.primordial(4); const r = G.rng(9); for (let i = 0; i < 300; i++) g = G.mutate(g, r, 1, 'xvgm'); assert.ok(g.parts.every(p => p.sT === 0 && p.sW === 0 && p.mBite === 0));
+});
