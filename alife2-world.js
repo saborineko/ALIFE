@@ -221,7 +221,7 @@
   let saving = false;
   async function autosave() {
     if (saving) return; saving = true;
-    try { const text = JSON.stringify(w.save()), blob = await gz(text); await dbPut('autosave', blob || text); $('saveNote').textContent = '自動保存した（' + Math.round(w.t) + ' 秒時点、' + mb(blob ? blob.size : text.length) + '）。保存先はこのブラウザの IndexedDB「' + DB + '」。ALIFE 23 の保存とは別。'; }
+    try { const at = Math.round(w.t), text = JSON.stringify(w.save()), blob = await gz(text); await dbPut('autosave', blob || text); $('saveNote').textContent = '自動保存した（' + at + ' 秒時点、' + mb(blob ? blob.size : text.length) + '）。保存先はこのブラウザの IndexedDB「' + DB + '」。ALIFE 23 の保存とは別。'; }
     catch (e) { $('saveNote').textContent = '自動保存に失敗：' + (e && e.message || e) + '。「世界を保存」でファイルに残してください。'; }
     saving = false;
   }
@@ -239,7 +239,8 @@
   $('biggest').onclick = () => pick(o => o.prof.V, '最大の身体'); $('mover').onclick = () => pick(speedOf, '最も動く個体');
   $('oldest').onclick = () => { const count = new Map(); for (const o of w.bodies) for (const n of w.ancestors(o.id)) count.set(n.id, (count.get(n.id) || 0) + 1); pick(o => count.get(o.id) || 0, '最多の子孫'); rule = o => w.ancestors(o.id).length ? w.bodies.filter(b => w.ancestors(b.id).some(n => n.id === o.id)).length : 0; };
   $('follow').onclick = () => { follow = !follow && !!sel; $('follow').textContent = follow ? '追跡中' : '追跡'; if (follow) view.scale = Math.max(view.scale, 30); };
-  $('restart').onclick = () => start(); $('map').onchange = () => start(); $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
+  const fresh = () => { start(); $('saveNote').textContent = $('auto').checked ? '新しい世界を始めた。次の自動保存で、前の自動保存は上書きされる。' : '新しい世界を始めた。'; if ($('auto').checked) lastSave = performance.now(); };
+  $('restart').onclick = fresh; $('map').onchange = fresh; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; };
   $('founder').onchange = () => { if ($('founder').value === 'file') $('file').click(); else { loaded = null; start(); } };
   $('file').onchange = async e => { loaded = JSON.parse(await e.target.files[0].text()); start(); };
@@ -250,12 +251,24 @@
   $('resume').onclick = async () => { try { let d = await dbGet('autosave'); if (d == null) d = localStorage.getItem(KEY); if (d == null) { $('saveNote').textContent = '自動保存は無い。'; return; } const text = typeof d === 'string' ? d : await gunzip(d); start(A.engine.World.restore(JSON.parse(text))); $('saveNote').textContent = '自動保存から再開（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '再開できない：' + (err && err.message || err); } };
   $('csv').onclick = () => { const rows = ['id,parent,line,generation,born,died,cause,segments,mouths,eye,working_joint,adult_volume,children,mutations']; for (const n of w.tree.values()) rows.push([n.id, n.parent, n.line, n.gen, Math.round(n.born), n.died == null ? '' : Math.round(n.died), n.cause || '', ...n.kind.split('/'), n.V.toFixed(3), n.kids, n.g.mutations].join(',')); download('alife2-lineage-t' + Math.round(w.t) + '.csv', rows.join('\n'), 'text/csv'); };
   $('rank').onchange = $('lostFilter').onchange = () => { lastPanels = 0; };
+  // The choice to save automatically is remembered. With it on, opening the page again (a forced reload included)
+  // carries on from the last automatic save instead of starting a new world.
+  const AUTO = 'alife2_autosave_on';
+  $('auto').onchange = () => { try { localStorage.setItem(AUTO, $('auto').checked ? '1' : '0'); } catch (e) {} if ($('auto').checked) { lastSave = performance.now(); autosave(); } };
+  document.addEventListener('visibilitychange', () => { if (document.hidden && $('auto').checked) autosave(); }); // also when the tab is left
 
   if (q.get('seed')) $('seed').value = q.get('seed');
   if (q.get('map')) $('map').value = q.get('map');
   (async () => {
     if (!loaded && q.get('load')) loaded = await (await fetch(q.get('load'))).json().catch(() => null);
-    start();
+    let resumed = false;
+    try {
+      if (localStorage.getItem(AUTO) === '1' && !q.get('fresh') && !q.get('t') && !loaded) {
+        $('auto').checked = true; const d = await dbGet('autosave');
+        if (d != null) { start(A.engine.World.restore(JSON.parse(typeof d === 'string' ? d : await gunzip(d)))); resumed = true; $('saveNote').textContent = '自動保存から再開した（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。新しい世界を始めるには「最初から」。'; document.querySelector('details:has(#save)').open = true; }
+      }
+    } catch (e) { $('saveNote').textContent = '自動保存を読めなかったので新しい世界を始めた：' + (e && e.message || e); }
+    if (!resumed) start();
     const pre = Number(q.get('t') || 0); for (let i = 0; i < pre * 30; i++) w.step();
     if (q.get('zoom')) { view.scale = Number(q.get('zoom')); const o = w.bodies.slice().sort((a, b) => b.full.segs - a.full.segs)[0]; if (o) { view.cx = o.cx; view.cy = o.cy; select(o); } }
     window.ALIFE2_WORLD = { get w() { return w; }, select }; document.body.dataset.ready = '1'; requestAnimationFrame(loop);
