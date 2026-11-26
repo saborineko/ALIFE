@@ -84,6 +84,9 @@
   // brain: 3 outputs (drive, turn, steer-to-food) x 5 inputs (1, food ahead, food left, hunger, wander)
   const BRAIN_IN = 5, BRAIN_OUT = 3;
   const MAX_PARTS = 12, MAX_LINKS = 24, MAX_REPEAT = 28;
+  // In worlds with the newer gene rules ('g'), MAX_PARTS limits the parts a body can reach from its root, not the parts a genome may carry.
+  // Parts no rule leads to stay in the genome as dormant genes (they can be linked in again) up to these storage limits, and decay slowly.
+  const STORE_PARTS = 36, STORE_LINKS = 48;
 
   function part(o) { const p = {}; for (const k in PART_FIELDS) p[k] = PART_FIELDS[k][2]; return Object.assign(p, o || {}); }
   function link(o) {
@@ -98,13 +101,15 @@
   }
 
   function sanitize(g) {
-    g.parts = g.parts.slice(0, MAX_PARTS);
+    g.parts = g.parts.slice(0, STORE_PARTS);
     for (const p of g.parts) for (const k in PART_FIELDS) {
       const [lo, hi, d, kind] = PART_FIELDS[k];
       let v = Number.isFinite(p[k]) ? p[k] : d;
       p[k] = kind === 'a' ? wrapPi(v) : clamp(v, lo, hi);
     }
-    g.links = g.links.slice(0, MAX_LINKS).filter(l => l.from < g.parts.length && l.to < g.parts.length && l.from >= 0 && l.to >= 0);
+    // zones along an axis: after `span` segments of this part, a chain goes on as part `next` (-1 or absent: it does not change)
+    g.parts.forEach((p, i) => { if (p.next == null) return; p.next = Math.round(p.next); if (!(p.next >= 0 && p.next < g.parts.length) || p.next === i) p.next = -1; p.span = clamp(Math.round(p.span || 1), 1, MAX_REPEAT + 1); });
+    g.links = g.links.slice(0, STORE_LINKS).filter(l => l.from < g.parts.length && l.to < g.parts.length && l.from >= 0 && l.to >= 0);
     for (const l of g.links) {
       for (const k in LINK_FIELDS) {
         const [lo, hi, d, kind] = LINK_FIELDS[k];
@@ -137,8 +142,49 @@
   }
 
   // Mutation acts on the grammar, never on a finished body.
+  // ---- the newer gene rules (worlds with 'g') ----
+  // Every part and rule has an identity that is inherited, so that what happened to a gene can be read from a genealogy
+  // (and, later, so that genes of two parents can be matched). Old genomes get theirs the first time they are needed.
+  const newId = r => 1000000 + r.int(1073741824);
+  function ensureIds(g) { g.parts.forEach((p, i) => { if (p.id == null) p.id = i + 1; }); g.links.forEach((l, i) => { if (l.id == null) l.id = 1000 + i; }); return g; }
+  const nextOf = p => (p.next == null ? -1 : p.next);
+  // parts a body can be built from: reachable from the root by rules or by zone succession
+  function reach(g) {
+    const seen = new Set([g.root]); let grew = true;
+    while (grew) { grew = false; for (const l of g.links) if (seen.has(l.from) && !seen.has(l.to)) { seen.add(l.to); grew = true; } for (const i of [...seen]) { const n = nextOf(g.parts[i]); if (n >= 0 && n < g.parts.length && !seen.has(n)) { seen.add(n); grew = true; } } }
+    return seen;
+  }
+  const axisOf = (g, i) => g.links.findIndex(l => l.from === i && l.to === i); // a part's own axis rule: its first rule onto itself
+  // the stretches of one kind of part along an axis: [{ part, start, len }]
+  function zones(g, li) {
+    const L = g.links[li], out = [{ part: L.from, start: 0, len: 1 }]; let cur = L.from, z = 1;
+    for (let idx = 1; idx <= L.repeat; idx++) { const p = g.parts[cur], n = nextOf(p); if (n >= 0 && n < g.parts.length && z >= (p.span || 1)) { cur = n; z = 1; out.push({ part: cur, start: idx, len: 1 }); } else { z++; out[out.length - 1].len++; } }
+    return out;
+  }
+  // Split a stretch: its first k segments stay as they are; from there on the axis is made of a COPY of the part, carrying copies
+  // of the part's other rules. The body this builds is the same body, to the last number. Afterwards the two parts mutate apart.
+  // Returns the new part's index, or -1 if there was no room.
+  function splitZone(g, li, zi, k, r) {
+    ensureIds(g); const zs = zones(g, li), Z = zs[zi]; if (!Z || k < 1 || k >= Z.len) return -1;
+    const P = Z.part, p = g.parts[P], own = axisOf(g, P), mine = g.links.map((l, i) => i).filter(i => g.links[i].from === P && i !== own);
+    if (g.parts.length >= STORE_PARTS || reach(g).size >= MAX_PARTS || g.links.length + mine.length > STORE_LINKS) return -1;
+    const Q = g.parts.length, q = copy(p); q.id = newId(r); q.src = p.id; q.how = 'split';
+    q.next = nextOf(p); q.span = q.next >= 0 ? Math.max(1, (p.span || 1) - k) : Z.len - k; p.next = Q; p.span = k; g.parts.push(q);
+    for (let j = mine.length - 1; j >= 0; j--) { const i = mine[j], l = g.links[i], c = copy(l); if (l.fam == null) l.fam = l.id; c.fam = l.fam; c.id = newId(r); c.src = l.id; c.from = Q; g.links.splice(i + 1, 0, c); } // each copy right after its source: the order in which a segment grows its children stays the same
+    return Q;
+  }
+  // remove a part no rule leads to, with the rules that touch it
+  function dropPart(g, i) {
+    g.parts.splice(i, 1); g.links = g.links.filter(l => l.from !== i && l.to !== i); for (const l of g.links) { if (l.from > i) l.from--; if (l.to > i) l.to--; }
+    for (const p of g.parts) if (p.next != null) { if (p.next === i) p.next = -1; else if (p.next > i) p.next--; }
+    if (g.root > i) g.root--;
+  }
+  // how far a part's numbers are from another's, as a share of each gene's range (0 = a perfect copy)
+  function divergence(a, b) { let d = 0, n = 0; for (const k in PART_FIELDS) { const [lo, hi, , kind] = PART_FIELDS[k]; d += Math.abs(kind === 'a' ? wrapPi(a[k] - b[k]) / TAU : (a[k] - b[k]) / (hi - lo)); n++; } return d / n; }
+
   function mutate(g0, r, strength, extra) {
-    const g = copy(g0), s = strength == null ? 1 : strength;
+    const g = copy(g0), s = strength == null ? 1 : strength, G2 = extra === true || !!(extra && extra.includes('g'));
+    if (G2) ensureIds(g);
     const num = (o, F) => {
       for (const k in F) {
         if (F[k][4] && !(extra === true || (extra && extra.includes(F[k][4])))) continue;
@@ -155,18 +201,29 @@
       if (l.sym === 'radial' && r() < 0.15 * s) l.n += r() < 0.5 ? -1 : 1;
       if (l.sym === 'radial' && l.n < 3) l.n = 3;
     }
-    if (r() < 0.07 * s && g.parts.length < MAX_PARTS && g.links.length < MAX_LINKS) {
+    if (r() < 0.07 * s && (G2 ? g.parts.length < STORE_PARTS && reach(g).size < MAX_PARTS && g.links.length < STORE_LINKS : g.parts.length < MAX_PARTS && g.links.length < MAX_LINKS)) {
       // gene duplication: copy a part and let one rule make the copy instead
       const i = r.int(g.parts.length); g.parts.push(copy(g.parts[i]));
+      if (G2) { const q = g.parts[g.parts.length - 1]; q.src = g.parts[i].id; q.id = newId(r); q.how = 'dup'; q.next = -1; }
       const cand = g.links.filter(l => l.to === i && l.from !== i);
       if (cand.length) cand[r.int(cand.length)].to = g.parts.length - 1;
       else g.links.push(link({ from: i, to: g.parts.length - 1, at: r(), off: 0.6, angle: (r() - 0.5) * TAU, sym: r() < 0.6 ? 'mirror' : 'none', scale: 0.7 }));
     }
-    if (r() < 0.06 * s && g.links.length < MAX_LINKS) {
+    if (r() < 0.06 * s && g.links.length < (G2 ? STORE_LINKS : MAX_LINKS)) {
       const from = r.int(g.parts.length), to = r.int(g.parts.length);
       g.links.push(link({ from, to, at: r(), off: from === to ? 0 : 0.6, angle: from === to ? r.gauss() * 0.15 : (r() - 0.5) * TAU, sym: from === to ? 'none' : (r() < 0.6 ? 'mirror' : 'none'), repeat: 1 + r.int(3), scale: 0.75 + r() * 0.2, lo: 0, hi: 1 }));
     }
     if (r() < 0.02 * s && g.links.length > 1) g.links.splice(r.int(g.links.length), 1);
+    if (G2) {
+      for (const l of g.links) if (l.id == null) l.id = newId(r);
+      // a stretch of an axis splits in two (the body does not change by it)
+      if (r() < 0.05 * s) { const axes = g.parts.map((_, i) => axisOf(g, i)).filter(i => i >= 0); if (axes.length) { const li = axes[r.int(axes.length)], zs = zones(g, li).map((z, i) => [z, i]).filter(q => q[0].len >= 2); if (zs.length) { const [z, zi] = zs[r.int(zs.length)]; splitZone(g, li, zi, 1 + r.int(z.len - 1), r); } } }
+      // a zone grows or shrinks by a segment; rarely, a part comes to be followed by another part altogether (or by none)
+      g.parts.forEach(p => { if (nextOf(p) >= 0 && r() < 0.14 * s) p.span = (p.span || 1) + (r() < 0.5 ? -1 : 1); });
+      if (r() < 0.02 * s && g.parts.length > 1) { const i = r.int(g.parts.length), p = g.parts[i]; if (r() < 0.5) p.next = -1; else { let n = r.int(g.parts.length - 1); if (n >= i) n++; p.next = n; p.span = 1 + r.int(4); } }
+      // a dormant part (one nothing leads to) decays
+      if (r() < 0.10 * s) { const live = reach(g), idle = g.parts.map((_, i) => i).filter(i => !live.has(i)); if (idle.length) dropPart(g, idle[r.int(idle.length)]); }
+    }
     g.hue += r.gauss() * 6 * s;
     g.freq += r.gauss() * 0.05 * s;
     if (r() < 0.2) g.birth += r.gauss() * 0.06 * s;
@@ -191,6 +248,6 @@
     return sanitize(g);
   }
 
-  A.genome = { BRAIN_IN, BRAIN_OUT, PART_FIELDS, LINK_FIELDS, MAX_PARTS, MAX_LINKS, part, link, create, primordial, sanitize, mutate, crossover, chainScale, rng, copy, clamp, wrapPi };
+  A.genome = { BRAIN_IN, BRAIN_OUT, PART_FIELDS, LINK_FIELDS, MAX_PARTS, MAX_LINKS, STORE_PARTS, STORE_LINKS, part, link, create, primordial, sanitize, mutate, crossover, chainScale, rng, copy, clamp, wrapPi, ensureIds, reach, zones, axisOf, splitZone, dropPart, divergence, nextOf };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -357,3 +357,51 @@ test('bodies that touch push each other apart without gaining momentum; a mouth 
     const snap = x => JSON.stringify([x.bodies.map(o => [o.id, o.cx, o.cy, o.E, o.G, o.hp]), x.counts]); assert.strictEqual(snap(w2), snap(w));
   }
 });
+
+test('newer gene rules: a split leaves the body exactly as it was, at every growth stage; then the two parts can go their own ways', () => {
+  const G = A.genome, r = G.rng(5), pool = SAMPLES.map(s => design(s.params));
+  { const rm = G.rng(77); for (let t = 0; t < 25; t++) { let g = G.primordial(100 + t); for (let i = 0; i < 50; i++) g = G.mutate(g, rm, 1, 'gxv'); if (g.links.length) pool.push(g); } }
+  const KEYS = ['parent', 'idx', 'mir', 'at', 'off', 'angle', 'len', 'r0', 'r1', 'z0', 'z1', 'phase', 'chain', 'tip', 'leaf', 'supply', 'ax', 'ay', 'bx', 'by', 'addr'];
+  const same = (a, b) => a.segs.length === b.segs.length && a.segs.every((x, i) => KEYS.every(k => x[k] === b.segs[i][k]) && Object.keys(G.PART_FIELDS).every(k => x.p[k] === b.segs[i].p[k]));
+  let tried = 0, seenInBody = 0;
+  for (const g0 of pool) { const g = G.ensureIds(G.sanitize(G.copy(g0)));
+    for (const li of g.parts.map((_, i) => G.axisOf(g, i)).filter(i => i >= 0)) G.zones(g, li).forEach((z, zi) => { for (const k of new Set([1, z.len >> 1, z.len - 1])) { if (k < 1 || k >= z.len) continue;
+      const h = G.copy(g), Q = G.splitZone(h, li, zi, k, r); if (Q < 0) continue; tried++; assert.deepStrictEqual(G.sanitize(G.copy(h)), h);
+      for (const stage of [0.3, 0.6, 1]) { const p0 = develop(g, { stage, maxSegs: 64 }), p1 = develop(h, { stage, maxSegs: 64 }); assert.ok(same(p0, p1), 'plan differs at stage ' + stage); assert.strictEqual(JSON.stringify(A.organs.profile(p1)), JSON.stringify(A.organs.profile(p0))); if (stage === 1 && p1.segs.some(s => s.part === Q)) seenInBody++; }
+    } }); }
+  assert.ok(tried > 60 && seenInBody > 30, tried + ' splits, ' + seenInBody + ' with the copy in the body');
+  // the copy is its own part: changing it changes only its stretch of the axis
+  const g = G.ensureIds(design(SAMPLES[0].params)), li = G.axisOf(g, g.root), n = G.zones(g, li)[0].len, Q = G.splitZone(g, li, 0, n >> 1, r), before = develop(g);
+  g.parts[Q].r0 *= 1.5; const after = develop(g); let changed = 0, kept = 0; before.segs.forEach((s, i) => { if (s.part === Q) changed += after.segs[i].r1 !== s.r1 || after.segs[i].r0 !== s.r0 ? 1 : 0; else kept += after.segs[i].len === s.len ? 1 : 0; });
+  assert.ok(changed > 0 && kept === before.segs.filter(s => s.part !== Q).length);
+});
+
+test('newer gene rules: dormant parts decay and do not block duplication; old rules and old genomes are untouched', () => {
+  const G = A.genome;
+  // a genome like the one found after 565 generations: 12 parts, one in use
+  const junk = G.primordial(3); for (let i = 0; i < 11; i++) junk.parts.push(G.copy(junk.parts[0])); G.sanitize(junk); assert.strictEqual(G.reach(junk).size, 1);
+  let a = G.copy(junk), b = G.copy(junk); const ra = G.rng(4), rb = G.rng(4); let grewOld = 0, most = 12;
+  for (let i = 0; i < 600; i++) { a = G.mutate(a, ra); if (a.parts.length > 12) grewOld++; b = G.mutate(b, rb, 1, 'g'); most = Math.max(most, G.reach(b).size); }
+  assert.strictEqual(grewOld, 0, 'old rules: stuck at the limit'); assert.strictEqual(a.parts.length, 12);
+  assert.ok(G.reach(b).size <= G.MAX_PARTS && b.parts.length <= G.STORE_PARTS && b.parts.every(p => p.id != null) && new Set(b.parts.map(p => p.id)).size === b.parts.length);
+  let c = G.copy(junk); const rc = G.rng(8); let dup = 0; for (let i = 0; i < 300; i++) { const n = c.parts.length, ids = new Set(c.parts.map(p => p.id)); c = G.mutate(c, rc, 1, 'g'); if (c.parts.some(p => p.how === 'dup' && !ids.has(p.id))) dup++; }
+  assert.ok(dup > 5, 'duplication happens again: ' + dup); assert.ok(c.parts.length - G.reach(c).size < 11, 'the dormant parts have thinned: ' + (c.parts.length - G.reach(c).size));
+  // old rules consume the same random numbers as before: a genome mutated without the new rules never gets ids or zones
+  let o = G.primordial(6); const ro = G.rng(2); for (let i = 0; i < 300; i++) o = G.mutate(o, ro, 1, 'xv'); assert.ok(o.parts.every(p => p.id == null && p.next == null) && o.links.every(l => l.id == null && l.fam == null));
+  // a world with the new rules runs, records gene use, and restores exactly
+  const w = new A.engine.World({ seed: 5, genome2: 1 }); w.seedWith(G.primordial(5)); for (let i = 0; i < 2400; i++) w.step();
+  const c0 = w.census(); assert.ok(c0.partsUsed >= 1 && c0.partsReach >= c0.partsUsed && c0.partsTotal >= c0.partsReach);
+  const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); for (let i = 0; i < 600; i++) { w.step(); w2.step(); }
+  const snap = x => JSON.stringify(x.bodies.map(q => [q.id, q.cx, q.cy, q.E, q.gu])); assert.strictEqual(snap(w2), snap(w));
+});
+
+test('the energy ledger balances, and keeping it changes nothing', () => {
+  const run = audit => { const w = new A.engine.World({ seed: 7, audit, contact: 1, genome2: 1, vision: 1, scent: 1 }); w.seedWith(A.genome.primordial(7));
+    for (let i = 0; i < 6; i++) { const g = A.genome.primordial(3); Object.assign(g.parts[0], { len: 1.2, r0: 0.9, r1: 0.9, mouth: 1, gut: 0.5, muscle: 0.3, cilia: 0.5, beat: -1 }); w.spawn(g, 20 + i * 25, 40, 1, null); }
+    for (let i = 0; i < 900; i++) w.step(); return w; };
+  const a = run(1), b = run(0), sig = w => JSON.stringify(w.bodies.map(o => [o.id, o.cx, o.cy, o.E, o.G])); assert.strictEqual(sig(a), sig(b), 'same world with and without the ledger'); assert.strictEqual(b.ledger, null);
+  for (const k in a.ledger) a.ledger[k] = 0; const s0 = a.stored(); for (let i = 0; i < 1800; i++) a.step();
+  const L = a.ledger, IN = ['rain', 'regrow', 'placed', 'mutation'], inflow = IN.reduce((x, k) => x + L[k], 0), out = Object.keys(L).filter(k => !IN.includes(k)).reduce((x, k) => x + L[k], 0), gap = (a.stored() - s0) - (inflow - out);
+  assert.ok(Object.values(L).every(Number.isFinite) && L.rain > 100 && L.basal > 10 && L.death > 0 && a.counts.births > 20, JSON.stringify(L));
+  assert.ok(Math.abs(gap) < 1e-6 * inflow, 'unexplained ' + gap + ' of ' + inflow);
+});

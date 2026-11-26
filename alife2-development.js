@@ -26,20 +26,22 @@
     });
     const chainLink = g.parts.map((_, i) => g.links.findIndex(l => l.from === i && l.to === i));
     const segs = [];
-    const root = { id: 0, parent: -1, part: g.root, via: -1, idx: 0, chainBase: 1, mir: 1, angle: 0, at: 0, off: 0, phase0: 0, axial: true, counts: {}, chainRoot: 0, group: 0, kids: [] };
+    // chainLi: the rule that makes this segment's axis (a chain keeps the rule it began with, whatever parts follow along it). zone: how many segments of this part in a row so far.
+    const root = { id: 0, parent: -1, part: g.root, via: -1, idx: 0, chainBase: 1, mir: 1, angle: 0, at: 0, off: 0, phase0: 0, axial: true, counts: {}, chainRoot: 0, group: 0, kids: [], chainLi: chainLink[g.root], zone: 1, addr: 'r', axisAddr: 'r' };
     { const cl0 = chainLink[root.part]; root.scale0 = cl0 >= 0 ? chainScale(g.links[cl0], 0, g.links[cl0].repeat) : 1; }
     segs.push(root);
     let groups = 1;
     for (let q = 0; q < segs.length; q++) {
-      const s = segs[q], cl = chainLink[s.part];
+      const s = segs[q], cl = s.chainLi, own = chainLink[s.part];
       s.R = cl >= 0 ? g.links[cl].repeat : 0;
       s.f = s.R ? s.idx / s.R : 0;
       for (let li = 0; li < g.links.length; li++) {
-        const l = g.links[li];
-        if (l.from !== s.part) continue;
-        const used = s.counts[li] || 0;
+        const l = g.links[li], chain = li === cl;
+        if (!chain && (l.from !== s.part || li === own)) continue; // (a part inside another part's axis does not start its own axis there)
+        const key = l.fam != null ? 'f' + l.fam : li, used = s.counts[key] || 0; // rules copied when a zone split share one count
         if (used >= l.repeat) continue;
-        const chain = li === cl;
+        // along an axis the part changes where a zone ends
+        const sp = g.parts[s.part], nx = sp.next == null ? -1 : sp.next, to = !chain ? l.to : nx >= 0 && nx < g.parts.length && s.zone >= (sp.span || 1) ? nx : s.part;
         if (!chain && s.R && (s.f < l.lo - 1e-6 || s.f > l.hi + 1e-6)) continue; // windows only mean something along a repeated axis
         let copies = l.sym === 'radial' ? l.n : l.sym === 'mirror' && (Math.abs(Math.sin(l.angle)) > 0.05 || l.off > 0.05 && Math.abs(Math.sin(l.angle)) > 0.01) ? 2 : 1;
         if (chain) copies = 1;
@@ -47,17 +49,20 @@
           if (segs.length >= cap) break;
           const flip = l.sym === 'mirror' && k === 1, mir = s.mir * (flip ? -1 : 1);
           const c = {
-            id: segs.length, parent: s.id, part: l.to, via: li, at: l.at, off: chain ? 0 : l.off,
+            id: segs.length, parent: s.id, part: to, via: li, at: l.at, off: chain ? 0 : l.off,
+            chainLi: chain ? cl : chainLink[to], zone: chain && to === s.part ? s.zone + 1 : 1,
             idx: chain ? s.idx + 1 : 0, mir, copy: k,
             angle: mir * l.angle + (l.sym === 'radial' ? TAU * k / l.n : 0),
             chainBase: chain ? s.chainBase : s.scale0 * l.scale,
             phase0: s.phase0 + (chain ? 0 : l.symPhase * k + l.axPhase * s.idx),
             axial: s.axial && copies === 1 && Math.abs(Math.sin(l.angle)) < 0.05,
-            counts: Object.assign({}, s.counts, { [li]: used + 1 }),
+            counts: Object.assign({}, s.counts, { [key]: used + 1 }),
             chainRoot: chain ? s.chainRoot : segs.length, group: chain ? s.group : groups++, chain, kids: []
           };
           c.scale0 = 0; // set below
-          const ccl = chainLink[c.part], cR = ccl >= 0 ? g.links[ccl].repeat : 0;
+          // where this segment is in the body, in terms that stay the same while it grows and from parent to child: its axis, and how far along it
+          c.axisAddr = chain ? s.axisAddr : s.addr + '>' + (l.fam != null ? l.fam : l.id != null ? l.id : 'i' + li) + '.' + k; c.addr = chain ? c.axisAddr + '/' + c.idx : c.axisAddr;
+          const ccl = c.chainLi, cR = ccl >= 0 ? g.links[ccl].repeat : 0;
           c.scale0 = c.chainBase * (ccl >= 0 ? chainScale(g.links[ccl], c.idx, cR) : 1);
           s.kids.push(c.id); segs.push(c);
         }
@@ -66,7 +71,7 @@
     // geometry at full size
     const n = segs.length, total = 0.3 + 0.7 * stage;
     for (const s of segs) {
-      const p = parts[s.part], cl = chainLink[s.part], l = cl >= 0 ? g.links[cl] : null;
+      const p = parts[s.part], cl = s.chainLi, l = cl >= 0 ? g.links[cl] : null;
       s.p = p;
       s.birth = n > 1 ? 0.62 * s.id / (n - 1) : 0;
       s.g = stage >= 1 ? 1 : smooth((stage - s.birth) / 0.3 + 0.12);
@@ -90,7 +95,7 @@
     // reindex and lay out the rest pose
     const map = new Map(); alive.forEach((s, i) => map.set(s.id, i));
     const out = alive.map((s, i) => ({
-      id: i, parent: s.parent < 0 ? -1 : map.get(s.parent), part: s.part, p: s.p, via: s.via, idx: s.idx, R: s.R, f: s.f,
+      id: i, parent: s.parent < 0 ? -1 : map.get(s.parent), part: s.part, p: s.p, via: s.via, idx: s.idx, R: s.R, f: s.f, addr: s.addr,
       mir: s.mir, copy: s.copy || 0, at: s.at, off: s.off, angle: s.angle, len: Math.max(1e-3, s.len), r0: s.r0, r1: s.r1,
       z0: s.r0 * s.depth, z1: s.r1 * s.depth, phase: s.p.phase + s.p.lag * s.idx + s.phase0, axial: s.axial,
       chainRoot: map.get(s.chainRoot), group: s.group, chain: !!s.chain, g: s.g, kids: []

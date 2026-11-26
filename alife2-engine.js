@@ -34,6 +34,9 @@
     vision: 0,                            // 1 = a segment with eye tissue is a receptor that looks one way and sees coloured things: food grains and other bodies alike. 0 = the worlds before this existed
     foodHue: 50,                          // the colour of food grains (degrees). Bodies have the colour their genome gives them
     sightless: 0,                         // control experiment: no eye in this world reports anything
+    audit: 0,                             // 1 = keep a ledger of all energy entering, leaving and changing form (counting only: nothing behaves differently)
+    genome2: 0,                           // 1 = the newer gene rules: a stretch of an axis can split into two parts without changing the body (and then mutate apart);
+                                          // parts nothing leads to are dormant, can be linked in again, and decay slowly; only parts in use count against the limit; genes carry identities
     contact: 0,                           // 1 = bodies cannot pass through one another, and a mouth tears tissue from whatever body it touches. What is torn is lost to its owner:
                                           // that segment's muscle, gut, eye, cilia... work that much less. Nothing here knows hunter from hunted, kin from stranger
     noBite: 0,                            // control experiment: bodies touch and push, but mouths take nothing from them
@@ -70,6 +73,7 @@
       if (M) this.buildMap(M);
       this.counts = { births: 0, starved: 0, aged: 0, broken: 0, blocked: 0, eaten: 0, killed: 0, flesh: 0, torn: 0 };
       this.taste = new Float64Array(256);
+      this.ledger = this.audit ? { rain: 0, regrow: 0, placed: 0, mutation: 0, basal: 0, work: 0, cilia: 0, nerve: 0, digest: 0, clip: 0, eggFixed: 0, death: 0, expire: 0, bite: 0, growth: 0 } : null;
       if (this.vision || this.contact) this.bgrid = Array.from({ length: this.cols * this.rows }, () => []);
       if (this.scent) { const n = this.cols * this.rows; this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
       this.tree = new Map(); this.events = []; this.history = []; this.firsts = {}; this.pruned = 0; this.clades = new Map();
@@ -103,10 +107,11 @@
       const o = { id: this.nextId++, g, stage, taxDot: 0, taxLen: 0, taxN: 0, sx: x, sy: y, age: 0, G: 0, egg: 0, grow: 0, dead: false, noise: 0, wander: this.rand() * TAU, path: 0, eaten: 0, absorbed: 0, kids: 0,
         parent: parent ? parent.id : 0, line: parent ? parent.line : this.nextId - 1, gen: parent ? parent.gen + 1 : 0, born: this.t };
       const C = A.organs.C, baby = A.organs.profile(A.development.develop(g, { stage: g.birth, maxSegs: this.maxSegs }));
-      o.full = A.organs.profile(A.development.develop(g, { maxSegs: this.maxSegs })); o.life = o.full.life * (0.85 + 0.3 * this.rand());
+      { const plan = A.development.develop(g, { maxSegs: this.maxSegs }); o.full = A.organs.profile(plan); o.gu = this.geneUse(g, plan); } o.life = o.full.life * (0.85 + 0.3 * this.rand());
       o.eggCost = C.eggFixed + baby.buildCost + C.eggReserve * baby.Emax; o.eggE = C.eggReserve * baby.Emax;
       this.form(o, x, y, this.rand() * TAU);
       o.E = parent ? Math.min(o.prof.Emax, parent.eggE) : o.prof.Emax * 0.6;
+      if (this.ledger && !parent) this.ledger.placed += o.E + o.prof.buildCost;
       // genealogy: what kind of body this is, and whether that differs from its parent's
       o.home = this.regions ? this.regionAt(x) : 0; // the region it was born in
       o.kind = [o.full.segs, o.full.mouths.length, o.full.eye > 0 ? 1 : 0, this.motile(g) ? 1 : 0, o.full.cilia > 0.05 ? 1 : 0].join('/');
@@ -123,7 +128,10 @@
     }
     // (re)build the body for its current stage, keeping place
     form(o, x, y, ang) {
+      // wounds stay with the segments they are on while the body is rebuilt for growth (a segment is known by its address, not its number)
+      const was = o.hp && o.plan ? new Map(o.plan.segs.map((s, i) => [s.addr, o.hp[i]])) : null;
       o.plan = A.development.develop(o.g, { stage: o.stage, maxSegs: this.maxSegs }); o.prof = A.organs.profile(o.plan);
+      if (was) o.hp = o.plan.segs.map(s => (was.has(s.addr) ? was.get(s.addr) : 1));
       o.b = A.physics.build(o.plan, { x, y, angle: ang, env: { fluid: 1, ground: false, gravity: 4, flowX: 0, flowY: 0 } });
       // lay the body's own centre on (x, y)
       const c = A.physics.com(o.b); for (let k = 0; k < o.b.np; k++) { o.b.x[k] += x - c[0]; o.b.y[k] += y - c[1]; }
@@ -146,6 +154,7 @@
       if (o.shore != null && o.shore !== this.shore) { this.shore = o.shore; this.log('世界の設定を変更：海域の境界を' + (o.shore > 0 ? 'なだらかにした（幅 ' + o.shore + '）' : '段差に戻した')); }
       if (o.contact != null && !!o.contact !== !!this.contact) { this.contact = o.contact ? 1 : 0; this.log('世界の設定を変更：身体の接触と、口による組織の摂取を' + (o.contact ? '有効にした' : '無効にした')); for (const b of this.bodies) b.passive = !this.contact && !b.b.hasCilia && b.b.rigid; for (const k of ['killed', 'flesh', 'torn']) if (this.counts[k] == null) this.counts[k] = 0; }
       if ((this.vision || this.contact) && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
+      if (o.genome2 != null && !!o.genome2 !== !!this.genome2) { this.genome2 = o.genome2 ? 1 : 0; this.log('世界の設定を変更：遺伝子の新しい規則（軸の分割・休眠遺伝子・識別子）を' + (o.genome2 ? '有効にした' : '無効にした')); }
       for (const k of ['vision', 'scent', 'blind']) { if (o[k] == null || !!o[k] === !!this[k]) continue; this[k] = o[k] ? 1 : 0; this.log('世界の設定を変更：' + names[k] + (o[k] ? 'を有効にした' : 'を無効にした')); }
       if (this.scent && !this.scA) { this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
       if (this.vision && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
@@ -153,12 +162,21 @@
     }
     log(text, id) { this.events.push({ t: Math.round(this.t), text, id }); if (this.events.length > 400) this.events.shift(); }
     // things that happen for the first time in this world (observation only; nothing is rewarded)
+    // What a genome carries and what the body uses of it: parts in the genome, parts a rule leads to, kinds of part actually in the adult body,
+    // places along an axis where the part changes (zones), and how far the most changed copy in use is from the part it was copied from.
+    geneUse(g, plan) {
+      const G = A.genome, used = new Set(); let zones = 0, div = 0;
+      for (const s of plan.segs) { used.add(s.part); if (s.chain && s.parent >= 0 && plan.segs[s.parent].part !== s.part) zones++; }
+      for (const i of used) { const p = g.parts[i]; if (p.src == null) continue; const q = g.parts.find(x => x.id === p.src); if (q) div = Math.max(div, G.divergence(p, q)); }
+      return { parts: g.parts.length, reach: G.reach(g).size, expr: used.size, zones, div };
+    }
     note(o) {
       const F = this.firsts, f = o.full, once = (k, text) => { if (!F[k]) { F[k] = o.id; this.log(text, o.id); } };
       if (o.gen === 0) return;
       if (f.segs > 1) once('multi', '初の多体節（' + f.segs + ' 体節）');
       if (f.mouths.length > 1) once('mouths', '初の複数の口（' + f.mouths.length + ' 個）');
       if (f.eye > 0) once('eye', '初の眼');
+      if (this.genome2) { if (o.gu.expr > 1) once('parts2', '初めて 2 種類以上の部品でできた身体（' + o.gu.expr + ' 種類）'); if (o.gu.zones > 0) once('zones', '初の体軸の区分（軸の途中で部品が切り替わる身体）'); if (o.gu.zones > 0 && o.gu.div > 0.05) once('differ', '初の区分の分化（切り替わった先の部品が、元の部品と 5% 以上違う）'); }
       if (o.kind.split('/')[3] === '1') once('motile', '初の動く関節');
       if (o.kind.split('/')[4] === '1') once('cilia', '初の繊毛');
       if (f.segs > (F.maxSegs || 1)) { if (f.segs >= (F.maxSegs || 1) * 1.5 + 1) this.log('体節数の最大を更新：' + f.segs, o.id); F.maxSegs = f.segs; }
@@ -227,6 +245,7 @@
       const per = C.flesh * C.build + (Math.max(0, v.E) + v.G) / v.prof.V; if (dv * per > room) dv = room / per;
       const share = Math.min(1, dv / v.prof.V), eE = Math.max(0, v.E) * share, eG = v.G * share, got = C.flesh * C.build * dv + eE + eG;
       v.E -= eE; v.G -= eG; hp[j] -= dv / vol; if (hp[j] < 1e-6) hp[j] = 0;
+      if (this.ledger) this.ledger.bite += (1 - C.flesh) * C.build * dv;
       e.G += got; e.flesh = (e.flesh || 0) + got; e.eaten += got; this.counts.flesh += got; this.counts.torn += got; v.lost = (v.lost || 0) + got; v.biter = e.id;
       return true;
     }
@@ -282,7 +301,10 @@
       const w = sizes.map((z, i) => (share ? share[i] : 1 / sizes.length) / (z * z * z)); let u = this.rand() * w.reduce((a, b) => a + b, 0), i = 0;
       while (i < w.length - 1 && u > w[i]) { u -= w[i]; i++; } return i;
     }
-    addFood(x, y, size, e, fixed, life) { this.food.push({ x: ((x % this.W) + this.W) % this.W, y: clamp(y, 0.5, this.H - 0.5), size, e, fixed, die: this.t + life }); }
+    // ---- the energy ledger (audit: 1) ----
+    // Everything that holds energy at this moment: dissolved food, grains, and in every body its reserve, gut contents, savings for growth and eggs, and the cost of the tissue it has.
+    stored() { let s = 0; for (let i = 0; i < this.nut.length; i++) s += this.nut[i]; for (const f of this.food) if (f.e > 0) s += f.e; for (const o of this.bodies) s += o.E + o.G + o.grow + o.egg + o.prof.buildCost; return s; }
+    addFood(x, y, size, e, fixed, life) { if (this.ledger && !this.corpse) this.ledger.rain += e; this.food.push({ x: ((x % this.W) + this.W) % this.W, y: clamp(y, 0.5, this.H - 0.5), size, e, fixed, die: this.t + life }); }
 
     stepFood(dt) {
       const r = this.rand;
@@ -302,7 +324,7 @@
       const every = this.jostleEvery; let n = 0; const ph = this.tick % every, dt4 = dt * every, jit = this.jitter * Math.sqrt(dt4);
       for (let i = 0; i < this.food.length; i++) {
         const f = this.food[i];
-        if (f.e <= 0 || f.die < this.t) continue;
+        if (f.e <= 0 || f.die < this.t) { if (this.ledger && f.e > 0) this.ledger.expire += f.e; continue; }
         if (!f.fixed && i % every === ph) { const [vx, vy] = this.flowAt(f.x, f.y); f.x = ((f.x + vx * dt4 + (r() + r() + r() - 1.5) * 2 * jit) % this.W + this.W) % this.W; f.y = clamp(f.y + (vy + this.sink) * dt4 + (r() + r() + r() - 1.5) * 2 * jit, 0.5, this.H - 0.5); if (f.y >= this.yBottom) f.fixed = true; }
         this.food[n++] = f; this.grid[this.cellAt(f.x, f.y)].push(f);
       }
@@ -313,6 +335,7 @@
           const i = y * cols + x, l = y * cols + (x + cols - 1) % cols, rr = y * cols + (x + 1) % cols, u = y ? i - cols : i, d = y < rows - 1 ? i + cols : i;
           nut2[i] = nut[i] + k * (nut[l] + nut[rr] + nut[u] + nut[d] - 4 * nut[i]) + g * (this.nutrientCap - nut[i]);
         }
+        if (this.ledger) { let a = 0, b = 0; for (let i = 0; i < nut.length; i++) { a += nut[i]; b += nut2[i]; } this.ledger.regrow += b - a; }
         this.nut = nut2; this.nut2 = nut;
       }
     }
@@ -334,7 +357,7 @@
       let n = 0; const sq = Math.sqrt(dt);
       for (let i = 0; i < this.food.length; i++) {
         const f = this.food[i];
-        if (f.e <= 0 || f.die < this.t) continue;
+        if (f.e <= 0 || f.die < this.t) { if (this.ledger && f.e > 0) this.ledger.expire += f.e; continue; }
         let ci = this.cellAt(f.x, f.y);
         if (!f.fixed) {
           const [vx, vy] = this.flowAt(f.x, f.y), jit = this.jitter * this.hJit[ci] * sq;
@@ -350,6 +373,7 @@
           const i = y * cols + x, l = y * cols + (x + cols - 1) % cols, rr = y * cols + (x + 1) % cols, u = y ? i - cols : i, d = y < rows - 1 ? i + cols : i;
           nut2[i] = nut[i] + k * (nut[l] + nut[rr] + nut[u] + nut[d] - 4 * nut[i]) + g * this.hRegrow[i] * (this.nutrientCap - nut[i]);
         }
+        if (this.ledger) { let a = 0, b = 0; for (let i = 0; i < nut.length; i++) { a += nut[i]; b += nut2[i]; } this.ledger.regrow += b - a; }
         this.nut = nut2; this.nut2 = nut;
       }
     }
@@ -377,7 +401,7 @@
     }
 
     step() {
-      const dt = this.dt, C = A.organs.C, P = A.physics;
+      const dt = this.dt, C = A.organs.C, P = A.physics, lg = this.ledger;
       this.stepFood(dt);
       if (this.scent && this.tick % 6 === 0) this.stepScent(dt * 6);
       if (this.vision || this.contact) this.index();
@@ -427,10 +451,11 @@
             if (Math.sqrt(dx * dx + (f.y - s.by) * (f.y - s.by)) < m.gape + f.size * 0.5) { o.G += f.e; o.eaten += f.e; this.counts.eaten += f.e; f.e = 0; }
           }
         }
-        const dg = Math.min(o.G, pr.digest * dt); o.G -= dg; o.E += dg * pr.eta;
+        const dg = Math.min(o.G, pr.digest * dt); o.G -= dg; o.E += dg * pr.eta; if (lg) lg.digest += dg * (1 - pr.eta);
         // spending
+        if (lg) { lg.basal += pr.basal * dt; lg.work += C.work * (b.work - o.work0); lg.cilia += C.ciliaWork * (b.ciliaUse - o.cil0); lg.nerve += C.spike * (b.nerveUse - o.nerve0); }
         o.E -= pr.basal * dt + C.work * (b.work - o.work0) + C.ciliaWork * (b.ciliaUse - o.cil0) + C.spike * (b.nerveUse - o.nerve0); o.work0 = b.work; o.cil0 = b.ciliaUse; o.nerve0 = b.nerveUse;
-        if (o.E > pr.Emax) o.E = pr.Emax;
+        if (o.E > pr.Emax) { if (lg) lg.clip += o.E - pr.Emax; o.E = pr.Emax; }
         o.age += dt;
         if (o.E <= 0) { o.dead = 'starved'; continue; }
         if (o.age > o.life) { o.dead = 'aged'; continue; }
@@ -442,7 +467,7 @@
         if (o.stage < 1) { // growth: surplus is set aside until it pays for the next piece of body
           if (o.E > C.growReserve * pr.Emax) { const put = Math.min(o.E - C.growReserve * pr.Emax, pr.basal * 6 * dt + 0.02 * dt); o.E -= put; o.grow += put; }
           if (o.nextCost == null) { o.nextStage = Math.min(1, o.stage + 0.14); o.nextCost = A.organs.profile(A.development.develop(o.g, { stage: o.nextStage, maxSegs: this.maxSegs })).buildCost - o.cleanBuild; }
-          if (o.grow >= o.nextCost) { o.grow -= o.nextCost; o.stage = o.nextStage; o.nextCost = null; const root = b.segs[0]; this.form(o, o.cx, o.cy, Math.atan2(root.dy, root.dx)); }
+          if (o.grow >= o.nextCost) { const paid = o.nextCost, had = pr.buildCost; o.grow -= o.nextCost; o.stage = o.nextStage; o.nextCost = null; const root = b.segs[0]; this.form(o, o.cx, o.cy, Math.atan2(root.dy, root.dx)); if (lg) lg.growth += paid - (o.prof.buildCost - had); }
         } else if (pr.gonadRate > 0 && o.E > C.reproReserve * pr.Emax) {
           const put = Math.max(0, Math.min(pr.gonadRate * dt, o.E - C.reproReserve * pr.Emax, o.eggCost - o.egg)); o.E -= put; o.egg += put;
           if (o.egg >= o.eggCost) {
@@ -452,10 +477,11 @@
         }
       }
       for (const o of born) {
-        const g = this.rand() < this.mutation ? A.genome.mutate(o.g, this.rand, undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '')) : A.genome.copy(o.g);
+        const g = this.rand() < this.mutation ? A.genome.mutate(o.g, this.rand, undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '')) : A.genome.copy(o.g);
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
-        const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1; this.spawn(g, o.cx + Math.cos(a) * d, clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), g.birth, o); this.counts.births++;
+        const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1; const kid = this.spawn(g, o.cx + Math.cos(a) * d, clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), g.birth, o); this.counts.births++;
+        if (lg) { lg.eggFixed += C.eggFixed; lg.mutation += kid.prof.buildCost + kid.E - (o.eggCost - C.eggFixed); } // the parent paid for the young its own genes describe; the young is built from its own (mutated) genes
       }
       if (this.bodies.some(o => o.dead)) {
         for (const o of this.bodies) if (o.dead) {
@@ -466,8 +492,9 @@
             if (cl.alive === 0) { cl.ended = this.t; if (cl.members <= 2) cl.g = null; /* a plan that one or two bodies ever had keeps its numbers, not its genome: these are most of the record's size */ const k = cl.kind.split('/'); if (cl.members >= 5 || k[3] === '1' || k[4] === '1' || k[2] === '1') this.log('体制の絶滅：' + k[0] + '体節・口' + k[1] + (k[2] === '1' ? '・眼' : '') + (k[3] === '1' ? '・関節' : '') + (k[4] === '1' ? '・繊毛' : '') + '（' + cl.members + '匹、' + (cl.genMax - cl.gen0 + 1) + '世代、' + Math.round(this.t - cl.born) + '秒）', cl.id); }
           }
           const node = this.tree.get(o.id); if (node) { node.died = this.t; node.cause = o.dead; node.life = { eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, stage: o.stage }; }
-          let e = C.carrion * (o.prof.buildCost * 0.5 + Math.max(0, o.E) + o.G);
+          const had = o.E + o.G + o.grow + o.egg + o.prof.buildCost; let e = C.carrion * (o.prof.buildCost * 0.5 + Math.max(0, o.E) + o.G); const e0 = e; this.corpse = true;
           while (e > 0.05) { const size = 0.25 + this.rand() * 0.25, pe = Math.min(e, this.grainEnergy * size ** 3); this.addFood(o.cx + this.rand.gauss() * 0.5, o.cy + this.rand.gauss() * 0.5, size, pe, this.isGround(o.cx, o.cy), this.grainLife); e -= pe; }
+          this.corpse = false; if (lg) lg.death += had - (e0 - e);
         }
         this.bodies = this.bodies.filter(o => !o.dead);
       }
@@ -507,7 +534,7 @@
       for (const s of d.bodies) {
         const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade, sig: s.sig || null, home: s.home || 0, taxDot: 0, taxLen: 0, taxN: 0, hp: s.hp || null, flesh: s.flesh || 0, lost: s.lost || 0 };
         const baby = A.organs.profile(A.development.develop(o.g, { stage: o.g.birth, maxSegs: w.maxSegs })), C = A.organs.C;
-        o.full = A.organs.profile(A.development.develop(o.g, { maxSegs: w.maxSegs })); o.life = s.life; o.eggCost = C.eggFixed + baby.buildCost + C.eggReserve * baby.Emax; o.eggE = C.eggReserve * baby.Emax;
+        { const plan = A.development.develop(o.g, { maxSegs: w.maxSegs }); o.full = A.organs.profile(plan); o.gu = w.geneUse(o.g, plan); } o.life = s.life; o.eggCost = C.eggFixed + baby.buildCost + C.eggReserve * baby.Emax; o.eggE = C.eggReserve * baby.Emax;
         w.form(o, s.x, s.y, s.angle); o.E = s.E;
         const st = s.st;
         if (st) { // put the body back exactly as it was
@@ -541,6 +568,7 @@
         multi: n ? segs.filter(s => s > 1).length / n : 0, volume: mean(o => o.prof.V), speed: mean(o => o.age > 5 ? o.path / o.age : 0),
         mouthShare: mean(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), eyes: mean(o => o.prof.eye > 0 ? 1 : 0),
         bottom: mean(o => this.isGround(o.cx, o.cy) ? 1 : 0),
+        partsTotal: mean(o => o.gu.parts), partsReach: mean(o => o.gu.reach), partsUsed: mean(o => o.gu.expr), multiPart: mean(o => o.gu.expr > 1 ? 1 : 0), zoned: mean(o => o.gu.zones > 0 ? 1 : 0), differed: mean(o => o.gu.zones > 0 && o.gu.div > 0.05 ? 1 : 0),
         fleshShare: mean(o => o.eaten > 0 ? (o.flesh || 0) / o.eaten : 0), fleshEaters: mean(o => (o.flesh || 0) > 0.2 * o.eaten && o.eaten > 0 ? 1 : 0), wounded: mean(o => o.hp ? 1 : 0), armor: mean(o => o.g.parts.reduce((a, p) => a + p.armor, 0) / o.g.parts.length),
         // nerve circuits: share of bodies that are wired at all, mean wiring, and share whose taste reaches cilia or a joint
         wired: mean(o => o.full.wiring > 0.2 ? 1 : 0), wiring: mean(o => o.full.wiring), tasteWired: mean(o => o.g.parts.some(p => Math.abs(p.nC) > 0.2 && (Math.abs(p.mCil) > 0.1 || Math.abs(p.mJoint) > 0.1)) ? 1 : 0),
