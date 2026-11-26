@@ -517,3 +517,67 @@ test('islands: a body that leaves one world and arrives in another keeps what it
   assert.strictEqual(JSON.stringify(r.bodies.map(o => [o.id, o.cx, o.E])), JSON.stringify(b.bodies.map(o => [o.id, o.cx, o.E])), 'a world with arrivals saves and continues exactly');
   const lone = new A.engine.World({ seed: 5 }); lone.spawn(A.genome.primordial(5), 10, 10, 1, null); assert.strictEqual(lone.emigrate(3).length, 0, 'the last body of a world does not leave');
 });
+
+test('mix: bare surfaces that touch pass genetic material; the next egg is made from both genomes, by parts they share; skin lets none through; worlds without the rule never mix', () => {
+  const G = A.genome, r = G.rng(3);
+  // the operator: the plan is the mother's; every gene of the child is the mother's or the other's; a part the other lacks is untouched
+  const m = G.ensureIds(G.primordial(1)), f = G.copy(m); Object.assign(m.parts[0], { len: 0.3, mouth: 0.1, cilia: 0.2, store: 0.1 }); Object.assign(f.parts[0], { len: 0.9, mouth: 0.9, cilia: 0.8, store: 0.7 }); f.hue = 10; m.hue = 200;
+  m.parts.push(Object.assign(G.part(), { id: 77, len: 0.44 })); m.links.push(Object.assign(G.link({ from: 0, to: 1 }), { id: 1077 }));
+  let fromBoth = 0, whole = 0; const seen = new Set();
+  for (let i = 0; i < 200; i++) { const c = G.recombine(m, f, r); assert.strictEqual(c.parts.length, 2); assert.strictEqual(c.links.length, m.links.length); assert.strictEqual(c.parts[1].len, 0.44, 'a part only the mother has stays hers');
+    const src = Object.keys(G.PART_FIELDS).map(k => c.parts[0][k] === m.parts[0][k] ? (c.parts[0][k] === f.parts[0][k] ? '=' : 'm') : c.parts[0][k] === f.parts[0][k] ? 'f' : '?').join(''); assert.ok(!src.includes('?'), 'every gene is one parent\'s: ' + src);
+    const s2 = src.replace(/=/g, ''); if (/m/.test(s2) && /f/.test(s2)) fromBoth++; else whole++; assert.ok(/^(m*f*|f*m*)$/.test(s2), 'one cut: ' + s2); seen.add(c.hue); }
+  assert.ok(fromBoth > 50 && whole > 20 && seen.size === 2, 'eggs with genes of both, and eggs with the whole part from one (four genes differ, far apart in the row): ' + fromBoth + ' / ' + whole);
+  const noIds = G.recombine(G.primordial(1), f, r); assert.ok(noIds.parts.length === 1, 'genomes without ids are matched by position');
+  // in a world
+  const quiet = { seed: 4, founders: 0, cap: 50, contact: 1, noBite: 1, flow: 0, grainRate: 0, bottomRate: 0, jitter: 0, mutation: 0 }, mk = (skin, hue) => { const g = G.primordial(1); Object.assign(g.parts[0], { skin, cilia: 0.3, beat: -1 }); g.hue = hue; return g; };
+  const meet = (opt, skin) => { const w = new A.engine.World(Object.assign({}, quiet, opt)), a = w.spawn(mk(skin, 10), 80, 30, 1, null), b = w.spawn(mk(0, 200), 80.6, 30, 1, null); w.index(); for (let i = 0; i < 20; i++) w.touch(w.dt); return { w, a, b }; };
+  const on = meet({ mix: 1 }, 0); assert.ok(on.a.got && on.a.got.id === on.b.id && on.b.got && on.b.got.id === on.a.id, 'both carry the other\'s material');
+  const off = meet({}, 0); assert.ok(!off.a.got && !off.b.got, 'no rule, no uptake');
+  const skin = meet({ mix: 1 }, 1); assert.ok(!skin.a.got && !skin.b.got, 'a fully covered body neither gives nor takes');
+  // the egg: made from both, the material is used up, the record names both parents; saving keeps the material
+  const w = on.w, a = on.a; const copy = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); assert.strictEqual(copy.bodies[0].got.id, on.b.id, 'saved and restored');
+  a.stage = 1; a.E = a.prof.Emax; a.egg = a.eggCost * 3; let kid = null; for (let i = 0; i < 600 && !kid; i++) { w.step(); a.E = a.prof.Emax; kid = w.bodies.find(o => o.parent === a.id); }
+  assert.ok(kid, 'an egg was laid'); assert.strictEqual(kid.p2, on.b.id); assert.strictEqual(w.tree.get(kid.id).p2, on.b.id); assert.strictEqual(w.counts.mixed, 1); assert.ok(kid.g.hue === 10 || kid.g.hue === 200);
+});
+
+test('invest: the reserve a mother gives each egg is hers to inherit; richer eggs cost more and start the young fuller; without the rule the gene is ignored', () => {
+  const G = A.genome, mk = y => { const g = G.primordial(1); g.yolk = y; return g; };
+  const w = new A.engine.World({ seed: 3, founders: 0, invest: 1, budget: 1 }), lean = w.spawn(mk(0.1), 20, 20, 1, null), rich = w.spawn(mk(1.5), 60, 20, 1, null), plain = w.spawn(G.primordial(1), 100, 20, 1, null);
+  assert.ok(lean.eggCost < plain.eggCost && plain.eggCost < rich.eggCost, [lean.eggCost, plain.eggCost, rich.eggCost].join(' < '));
+  const off = new A.engine.World({ seed: 3, founders: 0, budget: 1 }), o2 = off.spawn(mk(1.5), 60, 20, 1, null), p2 = off.spawn(G.primordial(1), 100, 20, 1, null); assert.strictEqual(o2.eggCost, p2.eggCost, 'no rule: the gene does nothing');
+  // an egg of each: the young of the rich mother starts with more (what it cannot hold goes to its growth), and nothing is created
+  const lay = m => { m.E = m.prof.Emax; m.egg = m.eggCost; const before = w.bodies.length; let kid = null; for (let i = 0; i < 300 && !kid; i++) { w.step(); m.E = m.prof.Emax; kid = w.bodies.find(o => o.parent === m.id); } return kid; };
+  const w2 = Object.assign(w, { mutation: 0 }), kl = lay(lean), kr = lay(rich); assert.ok(kl && kr, 'both laid');
+  assert.ok(kr.E + kr.grow > kl.E + kl.grow, 'the richer egg gives more: ' + (kr.E + kr.grow) + ' > ' + (kl.E + kl.grow));
+  // the gene mutates only where the rule is on, and stays in range
+  const r = G.rng(9); let g = mk(0.5), moved = false; for (let i = 0; i < 300; i++) { g = G.mutate(g, r, 1, 'i'); if (g.yolk !== 0.5) moved = true; assert.ok(g.yolk >= 0.05 && g.yolk <= 3); } assert.ok(moved);
+  let h = G.primordial(1); for (let i = 0; i < 100; i++) h = G.mutate(h, r, 1, 'gxv'); assert.strictEqual(h.yolk, undefined, 'never appears in a world without the rule');
+});
+
+test('learn: a connection used together with its neuron grows by its heritable rate, only while its gate is active, fades when unused; not without the rule; saved, carried through growth, mutated only where the rule is on', () => {
+  const G = A.genome, N = A.neural, dt = 1 / 30, taste = new Float64Array(8).fill(0.5);
+  const one = nn => { const g = G.create({ parts: [G.part({ len: 1, r0: 0.5, r1: 0.4, cilia: 0.3, beat: -1, nerve: 0.5 })], links: [] }); g.parts[0].nn = nn; return g; };
+  const run = (nn, learn, hunger, steps) => { const b = P.build(develop(one(nn))); for (let i = 0; i < (steps || 300); i++) N.local(b, taste, hunger || 0, null, null, false, false, learn); return b.segs[0]; };
+  // a constant input, a positive bias: input and neuron are active together
+  const grow = run([{ b: 0.5, k: 1, in: [['1', 0.2, 0.5]], out: [['C', 0.5]] }], dt), fixed = run([{ b: 0.5, k: 1, in: [['1', 0.2, 0.5]], out: [['C', 0.5]] }], 0), none = run([{ b: 0.5, k: 1, in: [['1', 0.2]], out: [['C', 0.5]] }], dt);
+  assert.ok(grow.nw[0] > 1, 'acquired strength: ' + grow.nw[0]); assert.ok(grow.na[0] > fixed.na[0] + 0.1, 'and the neuron answers more strongly: ' + grow.na[0] + ' > ' + fixed.na[0]);
+  assert.strictEqual(fixed.nw, undefined, 'no rule: nothing is acquired'); assert.ok(!none.nw, 'a connection with rate 0 stays as its genes made it'); assert.strictEqual(none.na[0], fixed.na[0]);
+  const shrink = run([{ b: 0.5, k: 1, in: [['1', 0.2, -0.5]], out: [['C', 0.5]] }], dt); assert.ok(shrink.nw[0] < -0.2, 'a negative rate weakens what is used: ' + shrink.nw[0]);
+  // gated by hunger (the neuron's second input, with no strength of its own): fed, nothing changes; hungry, it does
+  const gated = [{ b: 0.5, k: 1, in: [['1', 0.2, 0.5], ['h', 0]], out: [['C', 0.5]], m: 1 }], fed = run(gated, dt, 0), hungry = run(gated, dt, 1);
+  assert.strictEqual(fed.nw[0], 0, 'gate shut'); assert.ok(hungry.nw[0] > 1, 'gate open: ' + hungry.nw[0]);
+  // what was acquired fades when the neuron falls silent
+  { const b = P.build(develop(one([{ b: 0, k: 1, in: [['h', 3, 0.5]], out: [['C', 0.5]] }]))); for (let i = 0; i < 300; i++) N.local(b, taste, 1, null, null, false, false, dt); const top = b.segs[0].nw[0]; for (let i = 0; i < 3000; i++) N.local(b, taste, 0, null, null, false, false, dt); assert.ok(top > 0.5 && b.segs[0].nw[0] < top * 0.7, 'fades: ' + top + ' -> ' + b.segs[0].nw[0]); }
+  // genes: kept by sanitize, changed only with the flag, the gate follows its input when another is removed
+  const s = G.sanitize(one([{ b: 0, k: 1, in: [['c', 1, 0.3], ['h', 1, 9], ['o', 1, 0]], out: [['C', 1]], m: 1 }])).parts[0].nn[0]; assert.deepStrictEqual(s.in, [['c', 1, 0.3], ['h', 1, 1], ['o', 1]]); assert.strictEqual(s.m, 1);
+  assert.strictEqual(G.sanitize(one([{ b: 0, k: 1, in: [['c', 1]], out: [], m: 4 }])).parts[0].nn[0].m, undefined, 'a gate that points nowhere is dropped');
+  const r = G.rng(4); let a = one([{ b: 0, k: 1, in: [['c', 1], ['h', 1]], out: [['C', 1]] }]), bb = G.copy(a), rates = 0, plain = 0;
+  for (let i = 0; i < 300; i++) { a = G.mutate(a, r, 1, 'nl'); if (a.parts[0].nn && a.parts[0].nn.some(q => q.in.some(e => e[2]) || q.m != null)) rates++; bb = G.mutate(bb, r, 1, 'n'); if (bb.parts[0].nn && bb.parts[0].nn.some(q => q.in.some(e => e.length > 2) || q.m != null)) plain++; }
+  assert.ok(rates > 50, 'rates and gates arise by mutation where the rule is on: ' + rates); assert.strictEqual(plain, 0, 'and never where it is off');
+  // in a world: acquired strengths are saved exactly and kept when the body is rebuilt for growth; a world without the rule ignores the genes
+  const mk = learn => { const w = new A.engine.World({ seed: 6, founders: 0, nerve2: 1, learn, carry: 1 }); const g = one([{ b: 0.5, k: 1, in: [['1', 0.2, 0.5]], out: [['C', 0.5]] }]); const o = w.spawn(g, 40, 30, 1, null); for (let i = 0; i < 200; i++) w.step(); return { w, o }; };
+  const on = mk(1), off = mk(0); assert.ok(on.o.b.segs[0].nw && on.o.b.segs[0].nw[0] > 0.5, 'learned in the world'); assert.ok(!off.o.b.segs[0].nw, 'not without the rule');
+  const copy = A.engine.World.restore(JSON.parse(JSON.stringify(on.w.save()))); assert.strictEqual(copy.bodies[0].b.segs[0].nw[0], on.o.b.segs[0].nw[0]); for (let i = 0; i < 60; i++) { on.w.step(); copy.step(); } assert.strictEqual(copy.bodies[0].cx, on.w.bodies[0].cx, 'continues exactly');
+  const had = on.o.b.segs[0].nw[0]; on.w.form(on.o, on.o.cx, on.o.cy, 0); assert.strictEqual(on.o.b.segs[0].nw[0], had, 'kept through rebuilding');
+});

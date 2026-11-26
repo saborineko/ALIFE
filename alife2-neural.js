@@ -41,7 +41,7 @@
   // smA, smB (optional): how much of the two substances bodies leak is in the water at each segment.
   // vis: eyes work as receptors in this world; each seeing segment carries what its eye reports in s.v.
   // con: bodies touch in this world; each segment carries the push on it (s.tch), the tearing of it (s.torn) and what is left of it (s.hp).
-  function local(body, taste, hunger, smA, smB, vis, con) {
+  function local(body, taste, hunger, smA, smB, vis, con, learn) {
     const segs = body.segs; let use = 0;
     for (let i = 0; i < segs.length; i++) {
       const s = segs[i]; if (!s.circ) continue;
@@ -63,6 +63,8 @@
       if (p.nn) { // several neurons in this segment. Each reads what it is wired to (its own senses; neurons here, in the parent, in the children, in its mirror twin: their values of a moment ago) and acts on this segment
         const nn = compile(p.nn), n = nn.length; if (!s.na || s.na.length !== n) { s.na = new Float64Array(n); s.nb = new Float64Array(n); }
         const na = s.na, nb = s.nb, parentSeg = s.parent >= 0 ? segs[s.parent] : null, twin = s.twin >= 0 ? segs[s.twin] : null; let eC = 0, eT = 0, eJ = 0, eM = 0, eP = 0, any = 0;
+        // (learn) connections that change with use: each has, beside the strength its genes give it, a part that this body has acquired in its life
+        const lw = learn && nn.learns ? (s.nw && s.nw.length === nn.total ? s.nw : (s.nw = new Float64Array(nn.total))) : null;
         for (let q = 0; q < n; q++) { const N = nn[q]; let y = N.b;
           for (let e = 0; e < N.src.length; e++) { let v = 0; const j = N.idx[e];
             switch (N.src[e]) {
@@ -73,9 +75,13 @@
               case 11: v = j < n ? na[j] : 0; break; case 12: v = other(parentSeg, j); break;
               case 13: if (kids.length) { for (let c2 = 0; c2 < kids.length; c2++) v += other(segs[kids[c2]], j); v /= kids.length; } break;
               case 14: v = other(twin, j); break;
+              case 15: v = s.ate ? s.ate / (s.ate + 0.1) : 0; break; // (learn) this segment's mouth has just swallowed something
             }
-            y += N.w[e] * v; }
+            if (lw) { pre[e] = v; y += (N.w[e] + lw[N.off + e]) * v; } else y += N.w[e] * v; }
           const v2 = na[q] + N.k * (Math.tanh(y) - na[q]); nb[q] = v2; use += v2 < 0 ? -v2 : v2;
+          if (lw && N.plastic) { // used together, a connection grows (or shrinks, by its gene); where one input gates the change, only while that input is active. What was acquired fades slowly.
+            const gate = N.m >= 0 && N.m < N.src.length ? pre[N.m] : 1;
+            for (let e = 0; e < N.eta.length; e++) if (N.eta[e] !== 0) { let d = lw[N.off + e]; d += learn * (N.eta[e] * pre[e] * v2 * gate - 0.005 * d); lw[N.off + e] = d < -2 ? -2 : d > 2 ? 2 : d; } }
           for (let e = 0; e < N.eff.length; e++) { const z = N.ew[e] * v2; any = 1; switch (N.eff[e]) { case 0: eC += z; break; case 1: eT += z; break; case 2: eJ += z; break; case 3: eM += z; break; case 4: eP += z; } } }
         if (any) { const c3 = s.cd + eC; s.cd = c3 < 0 ? 0 : c3 > 2 ? 2 : c3; s.ct += eT; s.nj = eJ; s.np = eP; if (eM !== 0) { const mo = (s.mo == null ? 1 : s.mo) + eM; s.mo = mo < 0 ? 0 : mo > 1 ? 1 : mo; } }
       }
@@ -91,10 +97,11 @@
   }
   const CIRCUIT = ['nC', 'nP', 'nK', 'nH', 'nB', 'mCil', 'mTurn', 'mJoint', 'adapt', 'sA', 'sB', 'vE', 'sT', 'sW', 'mBite'];
   // what a part's wiring costs to keep: the strengths of the single signal's connections, and for each neuron its connections and a share for the cell itself
-  const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) w += Math.abs(e[1]); for (const e of q.out) w += Math.abs(e[1]); } return w; };
+  const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) w += Math.abs(e[1]) + (e[2] ? 0.5 * Math.abs(e[2]) : 0); for (const e of q.out) w += Math.abs(e[1]); } return w; };
   // neurons, made ready to run: sources and targets as numbers. Done once per part.
-  const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14 }, EFF = { C: 0, T: 1, J: 2, M: 3, P: 4 }, ready = new WeakMap();
-  function compile(nn) { let c = ready.get(nn); if (!c) { c = nn.map(q => ({ b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? +e[0][1] : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]) })); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); ready.set(nn, c); } return c; }
+  const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14, g: 15 }, EFF = { C: 0, T: 1, J: 2, M: 3, P: 4 }, ready = new WeakMap();
+  function compile(nn) { let c = ready.get(nn); if (!c) { let off = 0; c = nn.map(q => { const N = { b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? +e[0][1] : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]), eta: q.in.map(e => e[2] || 0), m: q.m == null ? -1 : q.m, off }; N.plastic = N.eta.some(x => x !== 0); off += q.in.length; return N; }); c.total = off; c.learns = c.some(N => N.plastic); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); ready.set(nn, c); } return c; }
+  const pre = new Float64Array(8); // (the inputs of the neuron being worked on)
   const other = (seg, i) => (seg && seg.na && i < seg.na.length ? seg.na[i] : 0);
 
   A.neural = { cpg, command, local, wiring, CIRCUIT, compile };

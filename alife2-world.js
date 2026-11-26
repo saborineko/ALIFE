@@ -23,7 +23,8 @@
       for (let i = 1; i < k; i++) {
         const x = { worker: new Worker('./alife2-island.js?v=' + A.version.build), s: null, i }; ISL.ws.push(x);
         x.worker.onmessage = e => islandMsg(x, e.data); x.worker.onerror = e => { islandNote('島 ' + (i + 1) + ' を動かせない：' + (e.message || '読み込みに失敗') + '（公開ページ https://… で開いたときに使える）'); };
-        x.worker.postMessage({ type: 'start', text: texts ? texts[i - 1] : base, reseed: texts ? null : ((w.seed * 7919 + i * 104729 + Math.round(w.t)) >>> 0), every: ISL.every, count: ISL.count, phase: texts ? 1 : i / k, paused });
+        const src = texts ? texts[i - 1] : base;
+        x.worker.postMessage(Object.assign(typeof src === 'string' ? { text: src } : { blob: src }, { type: 'start', reseed: texts ? null : ((w.seed * 7919 + i * 104729 + Math.round(w.t)) >>> 0), every: ISL.every, count: ISL.count, phase: texts ? 1 : i / k, paused }));
       }
     } catch (e) { islandStop(); islandNote('島を始められない：' + (e && e.message || e) + '（公開ページ https://… で開いたときに使える）'); $('islands').value = '1'; return; }
     ISL.next = w.t + ISL.every; islandPanel(true);
@@ -32,7 +33,7 @@
   function islandMsg(x, m) {
     if (m.type === 'status') x.s = m.s;
     else if (m.type === 'leave') islandSend(x.i, m.bodies);
-    else if (m.type === 'saved' || m.type === 'swapped') { const f = ISL.wait.get(m.id); if (f) { ISL.wait.delete(m.id); f(m.text); } }
+    else if (m.type === 'saved' || m.type === 'swapped') { const f = ISL.wait.get(m.id); if (f) { ISL.wait.delete(m.id); f(m.blob || m.text); } }
     else if (m.type === 'error') islandNote('島 ' + (x.i + 1) + ' でエラー：' + String(m.text).split('\n')[0]);
   }
   // bodies that left slot `from` arrive on the next one of the ring
@@ -54,13 +55,21 @@
     catch (e) { islandNote('島を切り替えられない：' + (e && e.message || e)); }
     ISL.busy = false; lastPanels = 0;
   }
-  // every world as saved text: the one on screen first
-  const worldTexts = async () => [JSON.stringify(w.save()), ...await Promise.all(ISL.ws.map(x => islandAsk(x, { type: 'save' })))];
-  const bundle = texts => texts.length > 1 ? '{"format":"alife2-islands-1","every":' + ISL.every + ',"count":' + ISL.count + ',"worlds":[' + texts.join(',') + ']}' : texts[0];
-  // open saved text: one world, or a set of islands
+  // Every world as a saved file of its own (gzip where the browser can), the one on screen first. Each island packs its own world in its own thread,
+  // so the page never holds more than one world's text.
+  const worldBlobs = async () => { const mine = JSON.stringify(w.save()); return [(await gz(mine)) || new Blob([mine], { type: 'application/json' }), ...await Promise.all(ISL.ws.map(x => islandAsk(x, { type: 'save' })))]; };
+  const blobText = async blob => { const h = new Uint8Array(await blob.slice(0, 2).arrayBuffer()); return h[0] === 0x1f && h[1] === 0x8b ? gunzip(blob) : blob.text(); };
+  // Several islands in one file: a line of text that says how long each world's file is, then those files one after another.
+  const ISLANDS = '{"format":"alife2-islands-2"';
+  const pack = blobs => new Blob([ISLANDS + ',"every":' + ISL.every + ',"count":' + ISL.count + ',"sizes":[' + blobs.map(b => b.size).join(',') + ']}\n', ...blobs], { type: 'application/octet-stream' });
+  async function unpack(file) { const head = await file.slice(0, 4096).text(), end = head.indexOf('\n'), h = JSON.parse(head.slice(0, end)); let at = end + 1; return h.sizes.map(n => { const b = file.slice(at, at + n); at += n; return b; }); }
+  const isPack = async file => (await file.slice(0, ISLANDS.length).text()) === ISLANDS;
+  function pickIslands(k) { const pick = $('islands'); if (![...pick.options].some(o => Number(o.value) === k)) pick.add(new Option(String(k))); pick.value = String(k); }
+  // open what was saved: one world (text), a set of islands as files, or the first form of an island file (one text for all)
+  async function openSet(blobs) { ISL.keep = true; start(A.engine.World.restore(JSON.parse(await blobText(blobs[0])))); pickIslands(blobs.length); islandStart(blobs.length, blobs.slice(1)); return blobs.length; }
   function openSaved(text) {
     const d = JSON.parse(text);
-    if (d && d.format === 'alife2-islands-1') { const k = d.worlds.length, pick = $('islands'); ISL.keep = true; start(A.engine.World.restore(d.worlds[0])); if (![...pick.options].some(o => Number(o.value) === k)) pick.add(new Option(String(k))); pick.value = String(k); islandStart(k, d.worlds.slice(1).map(x => JSON.stringify(x))); return k; }
+    if (d && d.format === 'alife2-islands-1') { const k = d.worlds.length; ISL.keep = true; start(A.engine.World.restore(d.worlds[0])); pickIslands(k); islandStart(k, d.worlds.slice(1).map(x => JSON.stringify(x))); return k; }
     start(A.engine.World.restore(d)); return 1;
   }
   // one step of the world on screen, and its share of the exchange between islands
@@ -83,12 +92,12 @@
   function start(world) {
     if (world) w = world;
     else {
-      w = new A.engine.World({ seed: Number($('seed').value) || 1, map: $('map').value, scent: $('scent').checked ? 1 : 0, recycle: $('recycle').checked ? 1 : 0, nerve2: $('nerve2').checked ? 1 : 0, metamut: $('metamut').checked ? 1 : 0, nibble: $('nibble').checked ? 1 : 0, budget: $('budget').checked ? 1 : 0, carry: $('carry').checked ? 1 : 0, genome2: $('genome2').checked ? 1 : 0, contact: $('contact').checked || $('adhere').checked ? 1 : 0, adhere: $('adhere').checked ? 1 : 0, vision: $('vision').checked ? 1 : 0, blind: $('blind').checked ? 1 : 0, shore: $('shore').checked ? 24 : 0 });
+      w = new A.engine.World({ seed: Number($('seed').value) || 1, map: $('map').value, scent: $('scent').checked ? 1 : 0, recycle: $('recycle').checked ? 1 : 0, nerve2: $('nerve2').checked || $('learn').checked ? 1 : 0, learn: $('learn').checked ? 1 : 0, metamut: $('metamut').checked ? 1 : 0, nibble: $('nibble').checked ? 1 : 0, budget: $('budget').checked ? 1 : 0, carry: $('carry').checked ? 1 : 0, genome2: $('genome2').checked ? 1 : 0, contact: $('contact').checked || $('adhere').checked || $('mix').checked ? 1 : 0, adhere: $('adhere').checked ? 1 : 0, mix: $('mix').checked ? 1 : 0, invest: $('invest').checked ? 1 : 0, vision: $('vision').checked ? 1 : 0, blind: $('blind').checked ? 1 : 0, shore: $('shore').checked ? 24 : 0 });
       if (loaded) for (const k of loaded.top) for (let i = 0; i < Math.max(1, Math.round(k.count / 4)); i++) w.spawn(A.genome.sanitize(A.genome.copy(k.genome)), w.rand() * w.W, w.rand() * w.H, 1, null); // older result files lack newer genes
       else w.seedWith(A.genome.primordial(w.seed));
     }
     if (world) $('map').value = w.map || ''; // a loaded world shows its own map
-    $('recycle').checked = !!w.recycle; $('nerve2').checked = !!w.nerve2; $('metamut').checked = !!w.metamut; $('nibble').checked = !!w.nibble; $('budget').checked = !!w.budget; $('carry').checked = !!w.carry; $('genome2').checked = !!w.genome2; $('contact').checked = !!w.contact; $('adhere').checked = !!w.adhere; $('shore').checked = w.shore > 0; $('blind').checked = !!w.blind; $('vision').checked = !!w.vision; $('scent').checked = !!w.scent; // a loaded world shows what it was made with
+    $('recycle').checked = !!w.recycle; $('nerve2').checked = !!w.nerve2; $('metamut').checked = !!w.metamut; $('nibble').checked = !!w.nibble; $('budget').checked = !!w.budget; $('carry').checked = !!w.carry; $('genome2').checked = !!w.genome2; $('contact').checked = !!w.contact; $('adhere').checked = !!w.adhere; $('mix').checked = !!w.mix; $('invest').checked = !!w.invest; $('learn').checked = !!w.learn; $('shore').checked = w.shore > 0; $('blind').checked = !!w.blind; $('vision').checked = !!w.vision; $('scent').checked = !!w.scent; // a loaded world shows what it was made with
     fit(); sel = null; shown = null; lastPanels = 0;
     if (ISL.keep) ISL.keep = false; else if (ISL.ws.length || Number($('islands').value) > 1) islandStart(Number($('islands').value)); // a new history on screen: the islands start again as copies of it
   }
@@ -114,9 +123,9 @@
     const c0 = w.census();
     const smellers = w.scent ? w.bodies.filter(o => o.g.parts.some(p => Math.abs(p.sA) > 0.2 || Math.abs(p.sB) > 0.2)).length : 0;
     const seers = w.vision ? w.bodies.filter(o => o.g.parts.some(p => p.eye > 0.1 && Math.abs(p.vE) > 0.2)).length : 0;
-    const birthLine = '出生：体積 ' + c0.birthV.toFixed(3) + '・発生段階 ' + c0.birthStage.toFixed(2) + '（遺伝子の狙い ' + c0.birthGene.toFixed(2) + '）・卵 1 個 ' + c0.eggCost.toFixed(2) + (w.budget ? '・死産 ' + (c0.stillborn || 0) : '') + (w.metamut ? ' / 変異の強さ（遺伝子の平均）' + c0.mutGene.toFixed(2) : '') + (w.nerve2 ? ' / 神経を持つ個体 ' + (c0.neuronBodies * 100).toFixed(0) + '%（1 個体あたり ' + c0.neurons.toFixed(2) + ' 個）' : '') + '\n';
+    const birthLine = '出生：体積 ' + c0.birthV.toFixed(3) + '・発生段階 ' + c0.birthStage.toFixed(2) + '（遺伝子の狙い ' + c0.birthGene.toFixed(2) + '）・卵 1 個 ' + c0.eggCost.toFixed(2) + (w.budget ? '・死産 ' + (c0.stillborn || 0) : '') + (w.invest ? ' / 卵の蓄え（遺伝子の平均）' + c0.yolkGene.toFixed(2) : '') + (w.metamut ? ' / 変異の強さ（遺伝子の平均）' + c0.mutGene.toFixed(2) : '') + (w.nerve2 ? ' / 神経を持つ個体 ' + (c0.neuronBodies * 100).toFixed(0) + '%（1 個体あたり ' + c0.neurons.toFixed(2) + ' 個）' : '') + (w.learn ? ' / 経験で変わる結合を持つ個体 ' + (c0.plastic * 100).toFixed(0) + '%' : '') + '\n';
     const geneLine = birthLine + '遺伝子の部品：持っている ' + c0.partsTotal.toFixed(1) + ' / 規則が届く ' + c0.partsReach.toFixed(1) + ' / 身体に現れる ' + c0.partsUsed.toFixed(2) + ' 種類（2 種類以上の身体 ' + (c0.multiPart * 100).toFixed(0) + '%、軸に区分 ' + (c0.zoned * 100).toFixed(0) + '%、区分が分化 ' + (c0.differed * 100).toFixed(0) + '%）\n';
-    $('stats').textContent = (w.budget ? '【出生の収支を合わせる】' : '') + (w.carry ? '【成長で神経を引き継ぐ】' : '') + (w.genome2 ? '【遺伝子の新しい規則】' : '') + geneLine + (w.contact ? '【接触あり】傷で死亡 ' + (c0.killed || 0) + ' / 傷を負っている ' + (c0.wounded * 100).toFixed(0) + '% / 口の収入のうち他個体の組織 ' + (c0.fleshShare * 100).toFixed(1) + '%（2 割以上の個体 ' + (c0.fleshEaters * 100).toFixed(0) + '%）' + (w.adhere ? ' / 他の身体を掴んでいる ' + (c0.holding * 100).toFixed(0) + '% / 収入のうち染み出しで得た分 ' + (c0.seepShare * 100).toFixed(1) + '%' : '') + '\n' : '') + (w.blind ? '【近道なし】' : '') + (w.vision ? '【視覚あり】配線された眼を持つ個体 ' + seers + ' / ' : '') + (w.scent ? '【他個体の匂いあり】嗅覚の配線を持つ個体 ' + smellers + ' / ' : '') + '時刻 ' + c0.t + ' 秒 / 個体数 ' + c0.n + ' / 系統 ' + c0.lines + ' / 平均世代 ' + c0.gen.toFixed(1)
+    $('stats').textContent = (w.budget ? '【出生の収支を合わせる】' : '') + (w.carry ? '【成長で神経を引き継ぐ】' : '') + (w.genome2 ? '【遺伝子の新しい規則】' : '') + geneLine + (w.contact ? '【接触あり】傷で死亡 ' + (c0.killed || 0) + ' / 傷を負っている ' + (c0.wounded * 100).toFixed(0) + '% / 口の収入のうち他個体の組織 ' + (c0.fleshShare * 100).toFixed(1) + '%（2 割以上の個体 ' + (c0.fleshEaters * 100).toFixed(0) + '%）' + (w.adhere ? ' / 他の身体を掴んでいる ' + (c0.holding * 100).toFixed(0) + '% / 収入のうち染み出しで得た分 ' + (c0.seepShare * 100).toFixed(1) + '%' : '') + (w.mix ? ' / 2 つの遺伝子から生まれた個体 ' + (c0.twoParents * 100).toFixed(0) + '%（相手の遺伝物質を持っている ' + (c0.carrying * 100).toFixed(0) + '%）' : '') + '\n' : '') + (w.blind ? '【近道なし】' : '') + (w.vision ? '【視覚あり】配線された眼を持つ個体 ' + seers + ' / ' : '') + (w.scent ? '【他個体の匂いあり】嗅覚の配線を持つ個体 ' + smellers + ' / ' : '') + '時刻 ' + c0.t + ' 秒 / 個体数 ' + c0.n + ' / 系統 ' + c0.lines + ' / 平均世代 ' + c0.gen.toFixed(1)
       + '\n成体の体節数：平均 ' + c0.segMean.toFixed(2) + '・最大 ' + c0.segMax + ' / 多体節 ' + (c0.multi * 100).toFixed(0) + '%'
       + '\n平均体積 ' + c0.volume.toFixed(2) + ' / 自力移動 ' + c0.speed.toFixed(3) + ' u/s / 口から ' + (c0.mouthShare * 100).toFixed(0) + '% / 眼 ' + (c0.eyes * 100).toFixed(0) + '% / 底面 ' + (c0.bottom * 100).toFixed(0) + '%'
       + '\n溶存栄養 ' + c0.nutrient.toFixed(2) + ' / 粒 ' + c0.food + ' / 出生 ' + c0.births + ' / 餓死 ' + c0.starved + ' / 老衰 ' + c0.aged + ' / 上限で不成立 ' + c0.blocked
@@ -254,7 +263,7 @@
       zx.fillStyle = '#07121d'; zx.fillRect(0, 0, zc.width, zc.height);
       zoomR.draw(zx, sel.b.segs, { cx: cm[0], cy: cm[1], scale: sc, w: zc.width, h: zc.height }, { hue: sel.g.hue, glow: false, time: sel.b.t, clock: w.t, gut: sel.G / Math.max(1e-6, sel.prof.gutCap), speed: sel._v || 0, fill: sel.E / sel.prof.Emax, drive: sel.b.cmd.drive });
       const p = sel.prof, inc = sel.eaten + sel.absorbed;
-      $('info').textContent = (notice ? notice + '\n' : '') + (ruleName ? '［' + ruleName + 'を自動で観察中］ ' : '') + '#' + sel.id + ' / 由来 ' + ({ evolved: 'evolved（自然進化）', primordial: 'primordial（始祖）', 'evolved-from-artificial': 'evolved-from-artificial（人工個体の子孫）' }[sel.g.origin] || sel.g.origin + '（人工）') + ' / 系統 ' + sel.line + ' / 世代 ' + sel.gen + ' / 変異 ' + sel.g.mutations + ' 回\n齢 ' + sel.age.toFixed(0) + ' / ' + sel.life.toFixed(0) + ' 秒 / 成熟段階 ' + sel.stage.toFixed(2) + ' / 子 ' + sel.kids + ' / 出生時の大きさ ' + sel.g.birth.toFixed(2)
+      $('info').textContent = (notice ? notice + '\n' : '') + (ruleName ? '［' + ruleName + 'を自動で観察中］ ' : '') + '#' + sel.id + ' / 由来 ' + ({ evolved: 'evolved（自然進化）', primordial: 'primordial（始祖）', 'evolved-from-artificial': 'evolved-from-artificial（人工個体の子孫）' }[sel.g.origin] || sel.g.origin + '（人工）') + ' / 系統 ' + sel.line + (sel.p2 ? '（2 つの遺伝子から：産んだ親 #' + sel.parent + '、もう一方 #' + sel.p2 + '）' : '') + ' / 世代 ' + sel.gen + ' / 変異 ' + sel.g.mutations + ' 回\n齢 ' + sel.age.toFixed(0) + ' / ' + sel.life.toFixed(0) + ' 秒 / 成熟段階 ' + sel.stage.toFixed(2) + ' / 子 ' + sel.kids + ' / 出生時の大きさ ' + sel.g.birth.toFixed(2)
         + '\n体節 ' + sel.b.segs.length + '（成体 ' + sel.full.segs + '）/ 体積 ' + p.V.toFixed(2) + ' / 口 ' + p.mouths.length + ' / 部品 ' + sel.g.parts.length + ' 種・規則 ' + sel.g.links.length + ' 本'
         + '\n遺伝子：部品 ' + sel.gu.parts + '（規則が届く ' + sel.gu.reach + '・身体に現れる ' + sel.gu.expr + ' 種類・休眠 ' + (sel.gu.parts - sel.gu.reach) + '）' + (() => { const G = A.genome, li = G.axisOf(sel.g, sel.g.root); return li < 0 ? '' : ' / 根の軸：' + G.zones(sel.g, li).map(z => '部品' + z.part + '×' + z.len).join(' → ') + (sel.gu.zones ? '（複製元との差 ' + (sel.gu.div * 100).toFixed(1) + '%）' : ''); })()
         + (sel.g.parts.some(p => p.nn) ? '\n神経：' + sel.g.parts.map((p, i) => (p.nn ? '部品' + i + '［' + p.nn.map(q => q.in.map(e => e[0] + (e[1] >= 0 ? '+' : '') + e[1].toFixed(1)).join(' ') + ' → ' + (q.out.map(e => e[0] + (e[1] >= 0 ? '+' : '') + e[1].toFixed(1)).join(' ') || '出力なし')).join(' ｜ ') + '］' : '')).filter(Boolean).join(' ') : '')
@@ -287,7 +296,7 @@
   let saving = false;
   async function autosave() {
     if (saving) return; saving = true;
-    try { const at = Math.round(w.t), text = bundle(await worldTexts()), blob = await gz(text); await dbPut('autosave', blob || text); $('saveNote').textContent = '自動保存した（' + at + ' 秒時点、' + (ISL.ws.length ? '島 ' + (ISL.ws.length + 1) + ' 個、' : '') + mb(blob ? blob.size : text.length) + '）。保存先はこのブラウザの IndexedDB「' + DB + '」。ALIFE 23 の保存とは別。'; }
+    try { const at = Math.round(w.t), blobs = await worldBlobs(), size = blobs.reduce((a, b) => a + b.size, 0); await dbPut('autosave', blobs.length > 1 ? { format: 'alife2-islands-2', every: ISL.every, count: ISL.count, worlds: blobs } : blobs[0]); $('saveNote').textContent = '自動保存した（' + at + ' 秒時点、' + (blobs.length > 1 ? '島 ' + blobs.length + ' 個、' : '') + mb(size) + '）。保存先はこのブラウザの IndexedDB「' + DB + '」。ALIFE 23 の保存とは別。'; }
     catch (e) { $('saveNote').textContent = '自動保存に失敗：' + (e && e.message || e) + '。「世界を保存」でファイルに残してください。'; }
     saving = false;
   }
@@ -309,21 +318,21 @@
   const fresh = () => { start(); $('saveNote').textContent = $('auto').checked ? '新しい世界を始めた。次の自動保存で、前の自動保存は上書きされる。' : '新しい世界を始めた。'; if ($('auto').checked) lastSave = performance.now(); };
   $('restart').onclick = fresh;
   // every optional rule on, on the coast map, from primordial bodies
-  $('allOn').onclick = () => { for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'metamut', 'nibble', 'recycle', 'nerve2', 'adhere', 'shore']) $(k).checked = true; $('map').value = 'coast'; fresh(); $('saveNote').textContent = 'すべての選択式の規則を有効にして、沿岸の世界を原始個体から始めた。'; };
+  $('allOn').onclick = () => { for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'metamut', 'nibble', 'recycle', 'nerve2', 'adhere', 'mix', 'invest', 'learn', 'shore']) $(k).checked = true; $('map').value = 'coast'; fresh(); $('saveNote').textContent = 'すべての選択式の規則を有効にして、沿岸の世界を原始個体から始めた。'; };
   // Choosing another map moves the living population there (genomes, genealogy and records with it). 「最初から」 starts anew.
   $('map').onchange = () => { const n = w.bodies.length, map = $('map').value; if (!n) return fresh(); start(A.engine.World.transplant(w, map)); $('saveNote').textContent = 'いまの ' + n + ' 個体を、選んだ世界へ移した（遺伝子・系譜・記録ごと）。同じ相対位置に静止して降ろしたので、合わない場所に落ちた個体は死ぬ。原始個体からやり直すなら「最初から」。'; }; $('shore').onchange = () => { enableAll({ shore: $('shore').checked ? 24 : 0 }); $('saveNote').textContent = 'いまの世界のまま、海域の境界を' + ($('shore').checked ? 'なだらかにした。' : '段差に戻した。') + 'ここから先は、変えなかった場合とは別の歴史になる。'; };
-  for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'metamut', 'nibble', 'recycle', 'nerve2', 'adhere']) $(k).onchange = () => { if (k === 'adhere' && $(k).checked && !w.contact) { $('contact').checked = true; enableAll({ contact: 1 }); } if (k === 'contact' && !$(k).checked && w.adhere) { $('adhere').checked = false; enableAll({ adhere: 0 }); } enableAll({ [k]: $(k).checked ? 1 : 0 }); lastPanels = 0; $('saveNote').textContent = 'いまの世界のまま設定を変えた（記録は「進化の記録」に残る）。ここから先は、変えなかった場合とは別の歴史になる。'; }; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
+  for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'metamut', 'nibble', 'recycle', 'nerve2', 'adhere', 'mix', 'invest', 'learn']) $(k).onchange = () => { if (k === 'learn' && $(k).checked && !w.nerve2) { $('nerve2').checked = true; enableAll({ nerve2: 1 }); } if (k === 'nerve2' && !$(k).checked && w.learn) { $('learn').checked = false; enableAll({ learn: 0 }); } if ((k === 'adhere' || k === 'mix') && $(k).checked && !w.contact) { $('contact').checked = true; enableAll({ contact: 1 }); } if (k === 'contact' && !$(k).checked) for (const j of ['adhere', 'mix']) if (w[j]) { $(j).checked = false; enableAll({ [j]: 0 }); } enableAll({ [k]: $(k).checked ? 1 : 0 }); lastPanels = 0; $('saveNote').textContent = 'いまの世界のまま設定を変えた（記録は「進化の記録」に残る）。ここから先は、変えなかった場合とは別の歴史になる。'; }; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; islandAll({ type: paused ? 'pause' : 'resume' }); };
   $('islands').onchange = () => { islandStart(Number($('islands').value)); if (ISL.ws.length) $('saveNote').textContent = '島を ' + (ISL.ws.length + 1) + ' 個にした。増えた島は、いま見ている世界の複製を乱数だけ変えて始めた。'; };
   $('founder').onchange = () => { if ($('founder').value === 'file') $('file').click(); else { loaded = null; start(); } };
   $('file').onchange = async e => { loaded = JSON.parse(await e.target.files[0].text()); start(); };
   const download = (name, text, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); };
-  $('save').onclick = async () => { try { const texts = await worldTexts(), text = bundle(texts), blob = await gz(text), a = document.createElement('a'); a.href = URL.createObjectURL(blob || new Blob([text], { type: 'application/json' })); a.download = (texts.length > 1 ? 'alife2-islands' + texts.length : 'alife2-world') + '-t' + Math.round(w.t) + (blob ? '.json.gz' : '.json'); a.click(); $('saveNote').textContent = '保存した（' + (texts.length > 1 ? '島 ' + texts.length + ' 個をまとめて、' : '') + mb(blob ? blob.size : text.length) + (blob ? '、圧縮済み' : '') + '）。'; } catch (err) { $('saveNote').textContent = '保存できない：' + (err && err.message || err); } };
+  $('save').onclick = async () => { try { const blobs = await worldBlobs(), k = blobs.length, out = k > 1 ? pack(blobs) : blobs[0], zipped = out.type === 'application/gzip', a = document.createElement('a'); a.href = URL.createObjectURL(out); a.download = (k > 1 ? 'alife2-islands' + k : 'alife2-world') + '-t' + Math.round(w.t) + (k > 1 ? '.alife2' : zipped ? '.json.gz' : '.json'); a.click(); $('saveNote').textContent = '保存した（' + (k > 1 ? '島 ' + k + ' 個を 1 つのファイルに、' : '') + mb(out.size) + (zipped || k > 1 ? '、圧縮済み' : '') + '）。'; } catch (err) { $('saveNote').textContent = '保存できない：' + (err && err.message || err); } };
   $('load').onclick = () => $('loadFile').click();
-  $('loadFile').onchange = async e => { try { const file = e.target.files[0], text = /\.gz$/.test(file.name) ? await gunzip(file) : await file.text(); const want = {}, names = { scent: '他個体の匂い', vision: '視覚', blind: '近道の切断', contact: '身体の接触と組織の摂取', genome2: '遺伝子の新しい規則', budget: '出生の収支を合わせる', carry: '成長で神経の状態を引き継ぐ', metamut: '変異の強さの進化', nibble: '粒を削って食べる', recycle: '失った物質を水に戻す', nerve2: '体節あたり複数の神経', adhere: '他の身体を掴む・蓄えの染み出し' }; if ($('adhere').checked) $('contact').checked = true; for (const k in names) if ($(k).checked) want[k] = 1; // boxes ticked before loading are applied to the loaded world
-      const kk = openSaved(text), added = Object.keys(want).filter(k => !w[k]); enableAll(want); for (const k in names) $(k).checked = !!w[k];
+  $('loadFile').onchange = async e => { try { const file = e.target.files[0], set = await isPack(file) ? await unpack(file) : null, text = set ? null : await blobText(file); const want = {}, names = { scent: '他個体の匂い', vision: '視覚', blind: '近道の切断', contact: '身体の接触と組織の摂取', genome2: '遺伝子の新しい規則', budget: '出生の収支を合わせる', carry: '成長で神経の状態を引き継ぐ', metamut: '変異の強さの進化', nibble: '粒を削って食べる', recycle: '失った物質を水に戻す', nerve2: '体節あたり複数の神経', adhere: '他の身体を掴む・蓄えの染み出し', mix: '触れた相手と遺伝子が混ざる', invest: '卵に持たせる蓄えの進化', learn: '神経の結合が経験で変わる' }; if ($('learn').checked) $('nerve2').checked = true; if ($('adhere').checked || $('mix').checked) $('contact').checked = true; for (const k in names) if ($(k).checked) want[k] = 1; // boxes ticked before loading are applied to the loaded world
+      const kk = set ? await openSet(set) : openSaved(text), added = Object.keys(want).filter(k => !w[k]); enableAll(want); for (const k in names) $(k).checked = !!w[k];
       $('saveNote').textContent = '読み込んだ（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体' + (kk > 1 ? '、島 ' + kk + ' 個' : '') + '）。' + (added.length ? 'チェックしてあった設定をこの世界に足した：' + added.map(k => names[k]).join('、') + '。ここから先は元の世界とは別の歴史になる。' : '設定と地図はこの世界が保存されたときのもの。視覚や匂いはチェックを入れれば、沿岸などへは「世界」の欄で選べば、いまの個体のまま移せる。'); } catch (err) { $('saveNote').textContent = '読み込めない：' + err.message; } };
-  $('resume').onclick = async () => { try { let d = await dbGet('autosave'); if (d == null) d = localStorage.getItem(KEY); if (d == null) { $('saveNote').textContent = '自動保存は無い。'; return; } const text = typeof d === 'string' ? d : await gunzip(d); openSaved(text); $('saveNote').textContent = '自動保存から再開（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '再開できない：' + (err && err.message || err); } };
+  $('resume').onclick = async () => { try { let d = await dbGet('autosave'); if (d == null) d = localStorage.getItem(KEY); if (d == null) { $('saveNote').textContent = '自動保存は無い。'; return; } if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); $('saveNote').textContent = '自動保存から再開（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '再開できない：' + (err && err.message || err); } };
   $('csv').onclick = () => { const rows = ['id,parent,line,generation,born,died,cause,segments,mouths,eye,working_joint,adult_volume,children,mutations']; for (const n of w.tree.values()) rows.push([n.id, n.parent, n.line, n.gen, Math.round(n.born), n.died == null ? '' : Math.round(n.died), n.cause || '', ...n.kind.split('/'), n.V.toFixed(3), n.kids, n.g.mutations].join(',')); download('alife2-lineage-t' + Math.round(w.t) + '.csv', rows.join('\n'), 'text/csv'); };
   $('rank').onchange = $('lostFilter').onchange = () => { lastPanels = 0; };
   // The choice to save automatically is remembered. With it on, opening the page again (a forced reload included)
@@ -347,7 +356,7 @@
     try {
       if (localStorage.getItem(AUTO) === '1' && !q.get('fresh') && !q.get('t') && !loaded) {
         $('auto').checked = true; const d = await dbGet('autosave');
-        if (d != null) { openSaved(typeof d === 'string' ? d : await gunzip(d)); resumed = true; $('saveNote').textContent = '自動保存から再開した（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。新しい世界を始めるには「最初から」。'; document.querySelector('details:has(#save)').open = true; }
+        if (d != null) { if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); resumed = true; $('saveNote').textContent = '自動保存から再開した（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。新しい世界を始めるには「最初から」。'; document.querySelector('details:has(#save)').open = true; }
       }
     } catch (e) { $('saveNote').textContent = '自動保存を読めなかったので新しい世界を始めた：' + (e && e.message || e); }
     if (!resumed) start();

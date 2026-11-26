@@ -37,16 +37,19 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="軸の途中から先を、同じ部品の複製に切り替える変異が起きる（その瞬間は身体が変わらない。以後は前半と後半が別々に変異できる）。どの規則も届かない部品は休眠し、再びつながることも、ゆっくり消えることもある。上限は、身体に届く部品の数にかかる。いまの世界のまま切り替えられる。"><input id="genome2" type="checkbox">遺伝子の新しい規則（軸の分割・休眠遺伝子）</label>
     <label title="身体が物質として失ったもの（消化しきれなかった分、蓄えの上限を超えた分、死骸や死産の卵のうち粒にならなかった分、削られた組織のうち食物にならない分）が、その場の溶存栄養に戻る。熱として失った分と、誰も食べなかった粒は戻らない。"><input id="recycle" type="checkbox">失った物質を水に戻す</label>
     <label title="部品が神経を 4 個まで持てる。神経は、自分の体節の感覚と、同じ体節・親・子・左右の対の神経を入力にでき、繊毛・関節・口を動かす。変異で生じ、結合ごと複製され、消える。これまでの 1 信号の回路はそのまま働く。"><input id="nerve2" type="checkbox">体節あたり複数の神経</label>
+    <label title="複数の神経のある世界で働く。神経の結合ごとに、使われ方で強さが変わる速さ（遺伝する。0 なら変わらない）を持てる。変化は「速さ × 入力 × その神経の活動」で、神経ごとに、自分の入力の 1 つが働いているあいだだけ変わる、という門を持てる。身につけた強さはゆっくり薄れ、子には伝わらない（伝わるのは速さと門）。いまの世界のまま切り替えられる。"><input id="learn" type="checkbox">神経の結合が経験で変わる</label>
     <label title="変異の起きやすさと大きさが遺伝し、それ自体も変異する（0.1〜3 倍）。ALIEN や Polyworld が持つ仕組み。いまの世界のまま切り替えられる。"><input id="metamut" type="checkbox">変異の強さも進化する</label>
+    <label title="母が卵 1 個に持たせる蓄えの量（幼体が持てる量に対する割合。この規則が無ければ 0.5）が遺伝し、変異する。多く持たせるほど卵 1 個が高くつき、産める数が減る。幼体が一度に持てない分は、幼体の成長に回る。「出生の収支を合わせる」と一緒に使う想定。いまの世界のまま切り替えられる。"><input id="invest" type="checkbox">卵に持たせる蓄えも進化する</label>
     <label title="飲み込めない大きさの粒（または消化管に入りきらない粒）に口が届いていれば、組織を削るのと同じ速さで少しずつ削って食べる。切ると、粒は丸呑みか、まったく取れないかのどちらか。"><input id="nibble" type="checkbox">粒を削って食べる</label>
     <label title="卵に入るエネルギーは親が決め、子は変異後の自分の遺伝子で、その予算で作れる段階まで育って生まれる。余りは卵黄として子が持つ。最小の芽も作れなければ死産になる。切ると、子は親の支払いに関係なく自分の遺伝子どおりの姿で生まれる以前の規則。いまの世界のまま切り替えられる。"><input id="budget" type="checkbox">出生の収支を合わせる</label>
     <label title="成長で身体を作り直すとき、体節ごとの神経の信号・感覚の順応・律動の位相を引き継ぐ。切ると、成長の一段ごとに初期化される以前の規則。"><input id="carry" type="checkbox">成長で神経の状態を引き継ぐ</label>
     <label title="身体どうしがすり抜けずに押し合い、口が触れた他個体の組織を削り取る世界。削られた体節は、その分だけ筋肉・消化・眼などの働きが落ちる。捕食者という種類は無く、血縁の保護も無い。いまの世界のまま切り替えられる。"><input id="contact" type="checkbox">身体の接触と組織の摂取（実験中）</label>
     <label title="接触のある世界で働く。押しつけたパッドが、地面だけでなく他の身体も掴む（引きずり、離れにくくなる）。触れ合っている身体のあいだでは、裸の表面を通して蓄えが、満ちている側から空いている側へ染み出す（外皮と外骨格は通さない）。寄生・共生・群体という種類は無く、どれになるかは決めていない。いまの世界のまま切り替えられる。"><input id="adhere" type="checkbox">他の身体を掴む・蓄えが染み出す</label>
+    <label title="接触のある世界で働く。裸の表面どうしが触れると、互いの遺伝物質が相手に渡る。受け取った個体が次に産む卵は、自分と相手の 2 つの遺伝子から作られる（身体の設計図は産む側のもの。両方が持つ部品の遺伝子は、1 か所で切ってつなぎ替える）。受け取った分は卵 1 個で使い切る。外皮と外骨格は通さない。相手を選ぶ仕組みも、混ざってはいけない組み合わせも無い。いまの世界のまま切り替えられる。"><input id="mix" type="checkbox">触れた相手と遺伝子が混ざる</label>
     <label title="沿岸の世界で、海底の重さ（摩擦と踏ん張り）が境界をまたいで少しずつ立ち上がる。切ると、境界で段差になる以前の物理。いまの世界のまま切り替えられる。"><input id="shore" type="checkbox">なだらかな境界</label>
     <label>始祖 <select id="founder"><option value="primordial">原始個体（1体節）から自然進化</option><option value="file">進化試験の結果を読み込む（JSON）</option></select></label>
     <input id="file" type="file" accept=".json" style="display:none">
-    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・変異の強さの進化・粒を削る・物質の還元・複数の神経・掴む／染み出す・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。">全部入りで最初から</button><button id="pause">一時停止</button>
+    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・変異の強さの進化・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。">全部入りで最初から</button><button id="pause">一時停止</button>
     <label>速度 <select id="speed"><option>1</option><option selected>4</option><option>16</option><option>64</option></select>×</label>
     <label title="同じ種類の世界を、別々のスレッドで同時に回す。増やした島は、いま見ている世界の複製を乱数だけ変えて始める。150 秒ごとに各島から 1 個体が隣の島へ移る（遺伝子・齢・蓄えごと。出入りはエネルギーの収支に記帳される）。裏の島は描画しないので全速で進む。島の数だけ CPU のコアを使う。島を使う世界は、同じ seed でも毎回同じ歴史にはならない。">並列の島 <select id="islands"><option>1</option><option>2</option><option>4</option><option>8</option></select></label>
     <label title="タブを裏に回したり最小化したりしても、世界を止めずに進める（表示中より遅い）。ブラウザがタブを休止させた場合は止まる。"><input id="bg" type="checkbox" checked>裏でも進める</label>
@@ -64,20 +67,20 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
   <details class="panel" open><summary><b>絶滅した体制の記録</b></summary><div class="note">一度現れて絶えた体制。代表遺伝子・個体数・世代数・生存期間・死因を残す。クリックで身体と記録を表示。</div><div class="controls"><label>表示 <select id="lostFilter"><option value="all">すべて（個体数順）</option><option value="moved">動いたもの（関節・繊毛）</option><option value="eye">眼があったもの</option><option value="recent">最近絶えた順</option></select></label></div><div id="lost" class="cards"></div><div id="lostNote" class="note"></div></details>
   <details class="panel"><summary><b>生存個体 TOP 10</b></summary><div class="controls"><label>順位 <select id="rank"><option value="kids">子の数</option><option value="age">齢</option><option value="V">体積</option><option value="segs">体節数</option><option value="eaten">口から得た量</option><option value="speed">自力移動の速度</option></select></label></div><div id="top" class="note"></div></details>
   <details class="panel" open><summary><b>進化の記録</b></summary><div id="events" class="note" style="max-height:180px;overflow:auto"></div></details>
-  <details class="panel"><summary><b>保存・読み込み</b></summary><div class="controls"><button id="save">世界を保存（圧縮ファイル）</button><button id="load">世界を読み込む</button><input id="loadFile" type="file" accept=".json,.gz" style="display:none"><label><input id="auto" type="checkbox">この端末に自動保存</label><button id="resume">自動保存から再開</button></div><div id="saveNote" class="note">自動保存にチェックを入れておくと、次に開いたとき（再読み込みを含む）に、最後の自動保存から自動で再開する。30 秒ごとと、タブを離れたときに保存する。保存先はこのブラウザの IndexedDB「alife2-worlds」（ALIFE 23 の保存とは別）。v2.0.16 以降の保存は、姿勢・速度・神経の状態まで含み、復元すると保存しなかった場合と同じ続きをたどる。</div></details>
+  <details class="panel"><summary><b>保存・読み込み</b></summary><div class="controls"><button id="save">世界を保存（圧縮ファイル）</button><button id="load">世界を読み込む</button><input id="loadFile" type="file" accept=".json,.gz,.alife2" style="display:none"><label><input id="auto" type="checkbox">この端末に自動保存</label><button id="resume">自動保存から再開</button></div><div id="saveNote" class="note">自動保存にチェックを入れておくと、次に開いたとき（再読み込みを含む）に、最後の自動保存から自動で再開する。30 秒ごとと、タブを離れたときに保存する。保存先はこのブラウザの IndexedDB「alife2-worlds」（ALIFE 23 の保存とは別）。v2.0.16 以降の保存は、姿勢・速度・神経の状態まで含み、復元すると保存しなかった場合と同じ続きをたどる。</div></details>
   <section class="panel note warning">ここに居るのは原始個体から変異と淘汰だけで生じた系統（origin: evolved）。複雑さ・大きさ・運動への報酬は無い。複雑さ・大きさ・運動・捕食への報酬は無い。「身体の接触と組織の摂取」を入れた世界では、口が他個体の組織を削り取れるが、捕食者という種類や本能は定義していない。島・巣・社会は ALIFE 2.0 には無い（ALIFE 23 にはある）。</section>
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=36"></script>
-<script src="./alife2-genome.js?v=36"></script>
-<script src="./alife2-development.js?v=36"></script>
-<script src="./alife2-neural.js?v=36"></script>
-<script src="./alife2-physics.js?v=36"></script>
-<script src="./alife2-organs.js?v=36"></script>
-<script src="./alife2-engine.js?v=36"></script>
-<script src="./alife2-render.js?v=36"></script>
-<script src="./alife2-gpu.js?v=36"></script>
-<script src="./alife2-world.js?v=36"></script>
+<script src="./alife2-version.js?v=37"></script>
+<script src="./alife2-genome.js?v=37"></script>
+<script src="./alife2-development.js?v=37"></script>
+<script src="./alife2-neural.js?v=37"></script>
+<script src="./alife2-physics.js?v=37"></script>
+<script src="./alife2-organs.js?v=37"></script>
+<script src="./alife2-engine.js?v=37"></script>
+<script src="./alife2-render.js?v=37"></script>
+<script src="./alife2-gpu.js?v=37"></script>
+<script src="./alife2-world.js?v=37"></script>
 </body>
 </html>
