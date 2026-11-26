@@ -581,3 +581,22 @@ test('learn: a connection used together with its neuron grows by its heritable r
   const copy = A.engine.World.restore(JSON.parse(JSON.stringify(on.w.save()))); assert.strictEqual(copy.bodies[0].b.segs[0].nw[0], on.o.b.segs[0].nw[0]); for (let i = 0; i < 60; i++) { on.w.step(); copy.step(); } assert.strictEqual(copy.bodies[0].cx, on.w.bodies[0].cx, 'continues exactly');
   const had = on.o.b.segs[0].nw[0]; on.w.form(on.o, on.o.cx, on.o.cy, 0); assert.strictEqual(on.o.b.segs[0].nw[0], had, 'kept through rebuilding');
 });
+
+test('wave: richness travels along the world; every place gets the same supply over a period; the total that falls is not changed; grains fall where the water is rich', () => {
+  const mk = (map, wave) => new A.engine.World({ seed: 8, founders: 0, map, wave, audit: 1 });
+  for (const map of ['', 'coast']) {
+    const w = mk(map, 600), flat = mk(map, 0);
+    // the wave fits the world, averages to 1 along it, and at one place over one period
+    let sx = 0; for (let i = 0; i < 1000; i++) sx += w.waveAt(i / 1000 * w.W); assert.ok(Math.abs(sx / 1000 - 1) < 1e-9, 'mean along the world ' + sx / 1000);
+    assert.ok(Math.abs(w.waveAt(0) - w.waveAt(w.W)) < 1e-9, 'no seam'); let st = 0; const t0 = w.t; for (let i = 0; i < 600; i++) { w.t = t0 + i; st += w.waveAt(37); } w.t = t0; assert.ok(Math.abs(st / 600 - 1) < 1e-9, 'mean over a period ' + st / 600);
+    for (let i = 0; i < 30 * 120; i++) { w.step(); flat.step(); }
+    // what fell is the same amount (to within the last grain), but it fell where the water was rich
+    assert.ok(Math.abs(w.ledger.rain - flat.ledger.rain) < 0.02 * flat.ledger.rain, map + ' rain ' + w.ledger.rain + ' / ' + flat.ledger.rain);
+    let rich = 0, lean = 0; const n0 = w.food.length; w.food.length = 0; for (let i = 0; i < 30; i++) w.step(); for (const f of w.food) { if (w.waveAt(f.x) > 1) rich += f.e; else lean += f.e; }
+    assert.ok(rich > 1.25 * lean && rich > 0, map + ' new grains in rich water ' + rich.toFixed(1) + ', in lean ' + lean.toFixed(1)); // (where grains fall in drifting patches, they can only follow the wave as far as the patches happen to lie)
+    // dissolved food: richer near the crest than near the trough
+    let a = 0, b = 0, na = 0, nb = 0; for (let x = 0; x < w.cols; x++) { const f = w.waveAt((x + 0.5) * w.cell); for (let y = 0; y < w.rows; y++) { const v = w.nut[y * w.cols + x] / (w.hRegrow ? Math.max(0.05, w.hRegrow[y * w.cols + x]) : 1); if (f > 1.5) { a += v; na++; } else if (f < 0.5) { b += v; nb++; } } }
+    assert.ok(na > 0 && nb > 0, 'both rich and lean water exist');
+  }
+  const w = mk('coast', 0); w.enable({ wave: 900 }); assert.strictEqual(w.wave, 900); assert.ok(/豊かさの波/.test(w.events[w.events.length - 1].text));
+});

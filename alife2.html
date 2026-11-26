@@ -47,6 +47,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="接触のある世界で働く。押しつけたパッドが、地面だけでなく他の身体も掴む（引きずり、離れにくくなる）。触れ合っている身体のあいだでは、裸の表面を通して蓄えが、満ちている側から空いている側へ染み出す（外皮と外骨格は通さない）。寄生・共生・群体という種類は無く、どれになるかは決めていない。いまの世界のまま切り替えられる。"><input id="adhere" type="checkbox">他の身体を掴む・蓄えが染み出す</label>
     <label title="接触のある世界で働く。裸の表面どうしが触れると、互いの遺伝物質が相手に渡る。受け取った個体が次に産む卵は、自分と相手の 2 つの遺伝子から作られる（身体の設計図は産む側のもの。両方が持つ部品の遺伝子は、1 か所で切ってつなぎ替える）。受け取った分は卵 1 個で使い切る。外皮と外骨格は通さない。相手を選ぶ仕組みも、混ざってはいけない組み合わせも無い。いまの世界のまま切り替えられる。"><input id="mix" type="checkbox">触れた相手と遺伝子が混ざる</label>
     <label title="沿岸の世界で、海底の重さ（摩擦と踏ん張り）が境界をまたいで少しずつ立ち上がる。切ると、境界で段差になる以前の物理。いまの世界のまま切り替えられる。"><input id="shore" type="checkbox">なだらかな境界</label>
+    <label title="溶存栄養の回復と粒の供給が、長さ 120 の波になって世界を一周し続ける（1200 秒で 1 波長ぶん進む＝毎秒 0.1）。どの場所も、豊かな時期と乏しい時期を交互に迎える。時間で平均した供給はどこでも波の無い世界と同じで、乏しい水に降るはずだった粒は別の場所に降る。じっとしていれば飢える時期が来て、波について行けば豊かな水に居続けられる。いまの世界のまま切り替えられる。「全部入り」には含めていない。"><input id="wave" type="checkbox">豊かさの波（餌場が移る）</label>
     <label>始祖 <select id="founder"><option value="primordial">原始個体（1体節）から自然進化</option><option value="file">進化試験の結果を読み込む（JSON）</option></select></label>
     <input id="file" type="file" accept=".json" style="display:none">
     <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・変異の強さの進化・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。">全部入りで最初から</button><button id="pause">一時停止</button>
@@ -61,7 +62,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
   <section class="panel"><b>世界</b><div id="stats" class="note"></div><canvas id="chart" width="420" height="150"></canvas><div class="note" style="font-size:11px"><span style="color:#8fd0ff">個体数</span>　<span style="color:#ffd27a">平均体節数</span>　<span style="color:#ff9a9a">口からの収入%</span>　<span style="color:#9af0b0">自力移動の速度</span></div></section>
   <section class="panel" id="islandPanel" style="display:none"><b>並列の島</b><div id="islandInfo" class="note"></div><div id="islandNote" class="note" style="color:#ff9a9a"></div></section>
   <section class="panel"><b>観察個体</b><canvas id="zoom" width="420" height="300"></canvas><div id="info" class="note">クリックで選択</div>
-    <div class="controls"><button id="follow">追跡</button><button id="biggest">最大の身体</button><button id="oldest">最多の子孫</button><button id="mover">最も動く個体</button></div></section>
+    <div class="controls"><button id="follow">追跡</button><button id="biggest">最大の身体</button><button id="oldest">最多の子孫</button><button id="mover">最も動く個体</button><button id="brainy" title="身体に現れている神経（体節あたり複数の神経）の数が最も多い個体。神経を持つ個体がいなければ、1 信号の回路の配線が最も強い個体。">神経が最も多い個体</button><button id="mosaic" title="身体に現れている部品の種類が最も多い個体（体節が分化している個体）。">部品の種類が最も多い個体</button></div></section>
   <details class="panel" open><summary><b>遺伝の系譜・祖先</b></summary><div class="note">観察個体から始祖まで。体制が親から変わった世代だけを示す。クリックでその祖先の身体を表示。</div><div id="ancestry" class="cards"></div><div class="controls"><button id="csv">系譜CSV</button></div></details>
   <details class="panel" open><summary><b>生きている形態図鑑</b></summary><div class="note">いま生きている体制を多い順に。クリックで代表個体を観察。</div><div id="atlas" class="cards"></div></details>
   <details class="panel" open><summary><b>絶滅した体制の記録</b></summary><div class="note">一度現れて絶えた体制。代表遺伝子・個体数・世代数・生存期間・死因を残す。クリックで身体と記録を表示。</div><div class="controls"><label>表示 <select id="lostFilter"><option value="all">すべて（個体数順）</option><option value="moved">動いたもの（関節・繊毛）</option><option value="eye">眼があったもの</option><option value="recent">最近絶えた順</option></select></label></div><div id="lost" class="cards"></div><div id="lostNote" class="note"></div></details>
@@ -72,15 +73,15 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=37"></script>
-<script src="./alife2-genome.js?v=37"></script>
-<script src="./alife2-development.js?v=37"></script>
-<script src="./alife2-neural.js?v=37"></script>
-<script src="./alife2-physics.js?v=37"></script>
-<script src="./alife2-organs.js?v=37"></script>
-<script src="./alife2-engine.js?v=37"></script>
-<script src="./alife2-render.js?v=37"></script>
-<script src="./alife2-gpu.js?v=37"></script>
-<script src="./alife2-world.js?v=37"></script>
+<script src="./alife2-version.js?v=38"></script>
+<script src="./alife2-genome.js?v=38"></script>
+<script src="./alife2-development.js?v=38"></script>
+<script src="./alife2-neural.js?v=38"></script>
+<script src="./alife2-physics.js?v=38"></script>
+<script src="./alife2-organs.js?v=38"></script>
+<script src="./alife2-engine.js?v=38"></script>
+<script src="./alife2-render.js?v=38"></script>
+<script src="./alife2-gpu.js?v=38"></script>
+<script src="./alife2-world.js?v=38"></script>
 </body>
 </html>

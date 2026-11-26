@@ -56,6 +56,9 @@
     adhere: 0,                            // 1 (needs contact) = two more things happen where bodies touch. A pad pressed against another body grips it: it drags on it and
                                           // holds it close. And reserve seeps between touching bodies through bare surface, from the fuller to the emptier (skin and armour block it).
                                           // Nothing says what this is for: clinging, sharing, feeding young, stealing are all the same two rules
+    wave: 0, waveLength: 120, waveDepth: 0.8, // wave > 0 = richness travels: the regrowth of dissolved food and the supply of grains are multiplied by 1 + depth x sin, a wave of this
+                                          // length that moves along the world once per `wave` seconds (so every place is rich and lean in turn, and the crest moves at length / wave).
+                                          // The supply averaged over time is the same everywhere as without the wave; grains that would fall in lean water fall elsewhere instead.
     learn: 0,                             // 1 (needs nerve2) = a neuron's connections can change with use during life. Each connection has a heritable rate (0 = fixed, as before);
                                           // the change is rate x input x the neuron's activity, optionally only while one chosen input of the neuron is active, and it fades slowly.
                                           // What a body acquires is not inherited; the rates and the gate are.
@@ -185,6 +188,7 @@
       if (o.contact != null && !!o.contact !== !!this.contact) { this.contact = o.contact ? 1 : 0; this.log('世界の設定を変更：身体の接触と、口による組織の摂取を' + (o.contact ? '有効にした' : '無効にした')); for (const b of this.bodies) b.passive = !this.contact && !b.b.hasCilia && b.b.rigid; for (const k of ['killed', 'flesh', 'torn']) if (this.counts[k] == null) this.counts[k] = 0; }
       if ((this.vision || this.contact) && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
       if (o.adhere != null && !!o.adhere !== !!this.adhere) { this.adhere = o.adhere ? 1 : 0; this.log('世界の設定を変更：パッドが他の身体を掴み、触れ合う身体のあいだで蓄えが染み出す規則を' + (o.adhere ? '有効にした' : '無効にした')); }
+      if (o.wave != null && o.wave !== this.wave) { this.wave = o.wave > 0 ? o.wave : 0; this.log('世界の設定を変更：豊かさの波（溶存栄養の回復と粒の供給が、波として世界を移動する）を' + (this.wave > 0 ? '有効にした（周期 ' + this.wave + ' 秒）' : '無効にした')); }
       if (o.learn != null && !!o.learn !== !!this.learn) { this.learn = o.learn ? 1 : 0; this.log('世界の設定を変更：神経の結合が使われ方で変わる（学習する）規則を' + (o.learn ? '有効にした' : '無効にした')); }
       if (o.invest != null && !!o.invest !== !!this.invest) { this.invest = o.invest ? 1 : 0; this.log('世界の設定を変更：卵に持たせる蓄えの量が遺伝し、変異する規則を' + (o.invest ? '有効にした' : '無効にした')); for (const b of this.bodies) { const baby = A.organs.profile(A.development.develop(b.g, { stage: b.g.birth, maxSegs: this.maxSegs })), y = this.yolkOf(b.g), C = A.organs.C; b.eggCost = C.eggFixed + baby.buildCost + y * baby.Emax; b.eggE = y * baby.Emax; } }
       if (o.mix != null && !!o.mix !== !!this.mix) { this.mix = o.mix ? 1 : 0; this.log('世界の設定を変更：裸の表面どうしが触れると遺伝物質が渡り、次の卵が 2 つの遺伝子から作られる規則を' + (o.mix ? '有効にした' : '無効にした')); }
@@ -212,6 +216,9 @@
     }
     // How far a young with these genes can develop on an egg holding B: the stage its genes aim at if the egg pays for that body and the usual
     // reserve; otherwise the latest stage it does pay for; a mere bud with less reserve if that is all there is; null if not even a bud.
+    // (wave) how rich the water is at x just now, as a multiple of the usual; the wave fits the world's length a whole number of times
+    waveAt(x) { const L = this.W / Math.max(1, Math.round(this.W / this.waveLength)); return 1 + this.waveDepth * Math.sin(TAU * (x / L - this.t / this.wave)); }
+    waveCols() { const f = this.wcol || (this.wcol = new Float64Array(this.cols)); for (let x = 0; x < this.cols; x++) f[x] = this.waveAt((x + 0.5) * this.cell); return f; }
     yolkOf(g) { return this.invest && g.yolk != null ? g.yolk : A.organs.C.eggReserve; }
     afford(g, B, rf) { // rf: the share of reserve the mother meant the egg to have, where that is hers to set (never counted above the usual share)
       const C = A.organs.C, re = rf == null ? C.eggReserve : Math.min(rf, C.eggReserve), cost = s => { const p = A.organs.profile(A.development.develop(g, { stage: s, maxSegs: this.maxSegs })); return [p.buildCost + re * p.Emax, p.buildCost]; };
@@ -387,10 +394,11 @@
       while (this.grainDebt > 0) {
         const i = this.pick(this.grainSizes, this.grainShare);
         const size = this.grainSizes[i], e = this.grainEnergy * size * size * size, p = this.patch[r.int(this.patch.length)], a = r() * TAU, d = Math.sqrt(r()) * this.patchRadius;
+        if (this.wave > 0 && r() * (1 + this.waveDepth) > this.waveAt(p.x + Math.cos(a) * d)) continue; // (wave) lean water here: this grain falls somewhere else instead
         this.addFood(p.x + Math.cos(a) * d, clamp(p.y + Math.sin(a) * d, 1, this.yBottom - 1), size, e, false, this.grainLife); this.grainDebt -= e;
       }
       this.bottomDebt = (this.bottomDebt || 0) + this.bottomRate * dt;
-      while (this.bottomDebt > 0) { const size = this.bottomSize[this.pick(this.bottomSize, null)], e = this.grainEnergy * size * size * size; this.addFood(r() * this.W, this.yBottom + 1 + r() * (this.H - this.yBottom - 2), size, e, true, this.bottomLife); this.bottomDebt -= e; }
+      while (this.bottomDebt > 0) { const size = this.bottomSize[this.pick(this.bottomSize, null)], e = this.grainEnergy * size * size * size, bx = r() * this.W; if (this.wave > 0 && r() * (1 + this.waveDepth) > this.waveAt(bx)) continue; this.addFood(bx, this.yBottom + 1 + r() * (this.H - this.yBottom - 2), size, e, true, this.bottomLife); this.bottomDebt -= e; }
       for (const p of this.patch) { p.a += (r() - 0.5) * 0.3; p.x = ((p.x + Math.cos(p.a) * 0.6 * dt) % this.W + this.W) % this.W; p.y = clamp(p.y + Math.sin(p.a) * 0.6 * dt, 6, this.yBottom - 6); }
       for (const c of this.grid) c.length = 0;
       // drifting grains are jostled in turns, a quarter of them each step for four steps' worth: the same spreading, a quarter of the work
@@ -405,10 +413,10 @@
       }
       this.food.length = n;
       if (this.tick % 6 === 0) { // dissolved food regrows and spreads
-        const { nut, nut2, cols, rows } = this, k = this.nutrientDiffuse, g = this.nutrientRegrow * dt * 6;
+        const { nut, nut2, cols, rows } = this, k = this.nutrientDiffuse, g = this.nutrientRegrow * dt * 6, wf = this.wave > 0 ? this.waveCols() : null;
         for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
           const i = y * cols + x, l = y * cols + (x + cols - 1) % cols, rr = y * cols + (x + 1) % cols, u = y ? i - cols : i, d = y < rows - 1 ? i + cols : i;
-          nut2[i] = nut[i] + k * (nut[l] + nut[rr] + nut[u] + nut[d] - 4 * nut[i]) + g * (this.nutrientCap - nut[i]);
+          nut2[i] = nut[i] + k * (nut[l] + nut[rr] + nut[u] + nut[d] - 4 * nut[i]) + (wf ? g * wf[x] : g) * (this.nutrientCap - nut[i]);
         }
         if (this.ledger) { let a = 0, b = 0; for (let i = 0; i < nut.length; i++) { a += nut[i]; b += nut2[i]; } this.ledger.regrow += b - a; }
         this.nut = nut2; this.nut2 = nut;
@@ -424,6 +432,7 @@
           const size = g.sizes[this.pick(g.sizes, g.share)], e = this.grainEnergy * size * size * size; let x, y;
           if (q.patch.length) { const p = q.patch[r.int(q.patch.length)], a = r() * TAU, d = Math.sqrt(r()) * g.radius; x = p.x + Math.cos(a) * d; y = p.y + Math.sin(a) * d; }
           else { x = q.x0 + r() * (q.x1 - q.x0); y = 1 + r() * (this.H - 2); }
+          if (this.wave > 0 && r() * (1 + this.waveDepth) > this.waveAt(x)) continue; // (wave) lean water here: this grain falls somewhere else instead
           const fixed = g.settle >= 1; this.addFood(x, y, size, e, fixed, fixed ? this.bottomLife : this.grainLife); q.debt -= e;
         }
         for (const p of q.patch) { p.a += (r() - 0.5) * 0.3; p.x = clamp(p.x + Math.cos(p.a) * 0.6 * dt, q.x0 + g.radius, q.x1 - g.radius); p.y = clamp(p.y + Math.sin(p.a) * 0.6 * dt, 8, this.H - 8); }
@@ -445,10 +454,10 @@
       }
       this.food.length = n;
       if (this.tick % 6 === 0) {
-        const { nut, nut2, cols, rows } = this, k = this.nutrientDiffuse, g = this.nutrientRegrow * dt * 6;
+        const { nut, nut2, cols, rows } = this, k = this.nutrientDiffuse, g = this.nutrientRegrow * dt * 6, wf = this.wave > 0 ? this.waveCols() : null;
         for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
           const i = y * cols + x, l = y * cols + (x + cols - 1) % cols, rr = y * cols + (x + 1) % cols, u = y ? i - cols : i, d = y < rows - 1 ? i + cols : i;
-          nut2[i] = nut[i] + k * (nut[l] + nut[rr] + nut[u] + nut[d] - 4 * nut[i]) + g * this.hRegrow[i] * (this.nutrientCap - nut[i]);
+          nut2[i] = nut[i] + k * (nut[l] + nut[rr] + nut[u] + nut[d] - 4 * nut[i]) + (wf ? g * wf[x] : g) * this.hRegrow[i] * (this.nutrientCap - nut[i]);
         }
         if (this.ledger) { let a = 0, b = 0; for (let i = 0; i < nut.length; i++) { a += nut[i]; b += nut2[i]; } this.ledger.regrow += b - a; }
         this.nut = nut2; this.nut2 = nut;
@@ -705,7 +714,7 @@
         mouthShare: mean(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), eyes: mean(o => o.prof.eye > 0 ? 1 : 0),
         bottom: mean(o => this.isGround(o.cx, o.cy) ? 1 : 0),
         seepShare: mean(o => { const inc = o.absorbed + o.eaten * o.prof.eta + (o.seepIn || 0); return inc > 0 ? (o.seepIn || 0) / inc : 0; }), holding: mean(o => (o.held != null && this.tick - o.held < 30 ? 1 : 0)), twoParents: mean(o => (o.p2 ? 1 : 0)), carrying: mean(o => (o.got ? 1 : 0)),
-        mutGene: mean(o => (o.g.mut == null ? 1 : o.g.mut)), plastic: mean(o => (o.g.parts.some(p => p.nn && p.nn.some(q => q.in.some(e => e[2]))) ? 1 : 0)), yolkGene: mean(o => this.yolkOf(o.g)), neurons: mean(o => o.b.segs.reduce((a, q) => a + (q.p.nn ? q.p.nn.length : 0), 0)), neuronBodies: mean(o => o.b.segs.some(q => q.p.nn) ? 1 : 0),
+        mutGene: mean(o => (o.g.mut == null ? 1 : o.g.mut)), plastic: mean(o => (o.g.parts.some(p => p.nn && p.nn.some(q => q.in.some(e => e[2]))) ? 1 : 0)), senseNeurons: mean(o => (o.b.segs.some(q => q.p.nn && q.p.nn.some(n => n.out.length && n.in.some(e => 'cABvtwhjg'.includes(e[0])))) ? 1 : 0)), /* a neuron that reads a sense of its segment and moves something: the least a neuron must do to be more than a constant */ yolkGene: mean(o => this.yolkOf(o.g)), neurons: mean(o => o.b.segs.reduce((a, q) => a + (q.p.nn ? q.p.nn.length : 0), 0)), neuronBodies: mean(o => o.b.segs.some(q => q.p.nn) ? 1 : 0),
         birthV: (l => l.length ? l.reduce((a, o) => a + o.V0, 0) / l.length : 0)(this.bodies.filter(o => o.V0 != null && o.gen > 0)), birthStage: (l => l.length ? l.reduce((a, o) => a + o.stage0, 0) / l.length : 0)(this.bodies.filter(o => o.stage0 != null && o.gen > 0)), birthGene: mean(o => o.g.birth), eggCost: mean(o => o.eggCost), adultV: mean(o => o.full.V),
         partsTotal: mean(o => o.gu.parts), partsReach: mean(o => o.gu.reach), partsUsed: mean(o => o.gu.expr), multiPart: mean(o => o.gu.expr > 1 ? 1 : 0), zoned: mean(o => o.gu.zones > 0 ? 1 : 0), differed: mean(o => o.gu.zones > 0 && o.gu.div > 0.05 ? 1 : 0),
         fleshShare: mean(o => o.eaten > 0 ? (o.flesh || 0) / o.eaten : 0), fleshEaters: mean(o => (o.flesh || 0) > 0.2 * o.eaten && o.eaten > 0 ? 1 : 0), wounded: mean(o => o.hp ? 1 : 0), armor: mean(o => o.g.parts.reduce((a, p) => a + p.armor, 0) / o.g.parts.length),
