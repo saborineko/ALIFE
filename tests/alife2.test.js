@@ -459,3 +459,26 @@ test('where bodies touch: a segment feels a push and a tear, the cut sense feels
   // old rules: these genes never change in worlds without contact
   let g = G.primordial(4); const r = G.rng(9); for (let i = 0; i < 300; i++) g = G.mutate(g, r, 1, 'xvgm'); assert.ok(g.parts.every(p => p.sT === 0 && p.sW === 0 && p.mBite === 0));
 });
+
+test('several neurons per segment: they read senses and each other by place on the body (the mirror twin included), act, mutate, and survive save and growth', () => {
+  const G = A.genome, N = A.neural;
+  // a body with a pod on each side; each pod has an eye and one neuron that hears its own eye and, against it, its twin's neuron
+  const two = () => G.create({ parts: [G.part({ len: 1, r0: 0.5, r1: 0.4, cilia: 0.3, beat: -1, nerve: 0.5, mouth: 0.4, gut: 0.5 }), G.part({ len: 0.5, r0: 0.25, r1: 0.2, cilia: 0.6, beat: -1, nerve: 0.5, eye: 0.5 })],
+    links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.3, off: 0.8, angle: 1.0, scale: 1, repeat: 1 })] });
+  const g = two(); g.parts[1].nn = [{ b: 0, k: 1, in: [['v', 3], ['m0', -2]], out: [['C', 1]] }];
+  const b = P.build(develop(g)), L = b.segs[1], R = b.segs[2]; assert.strictEqual(b.segs.length, 3); assert.ok(L.twin === 2 && R.twin === 1 && b.segs[0].twin === -1, 'twins ' + L.twin + ' ' + R.twin);
+  const taste = new Float64Array(8).fill(0.5); L.v = 1.5; R.v = 0; for (let i = 0; i < 40; i++) N.local(b, taste, 0, null, null, true, false);
+  assert.ok(L.na[0] > 0.5 && R.na[0] < -0.5, 'the side that sees wins: ' + L.na[0] + ' / ' + R.na[0]); assert.ok(L.cd > 1.4 && R.cd < 0.6, 'and beats harder: ' + L.cd + ' / ' + R.cd);
+  // without the twin connection both sides only follow their own eye
+  const h = two(); h.parts[1].nn = [{ b: 0, k: 1, in: [['v', 3]], out: [['C', 1]] }]; const b2 = P.build(develop(h)); b2.segs[1].v = 1.5; b2.segs[2].v = 1.2; for (let i = 0; i < 40; i++) N.local(b2, taste, 0, null, null, true, false);
+  assert.ok(Math.abs(b2.segs[1].na[0] - b2.segs[2].na[0]) < 0.2, 'no comparison without the connection');
+  // mutation makes, copies and loses neurons only where the setting is on
+  let m = G.primordial(3); const r = G.rng(4); let had = 0, most = 0; for (let i = 0; i < 300; i++) { m = G.mutate(m, r, 1, 'n'); const n = m.parts.reduce((a, p) => a + (p.nn ? p.nn.length : 0), 0); if (n) had++; most = Math.max(most, n); assert.ok(m.parts.every(p => !p.nn || p.nn.length <= G.NN_MAX)); }
+  assert.ok(had > 100 && most >= 2, had + ' ' + most); let o = G.primordial(3); const r2 = G.rng(4); for (let i = 0; i < 300; i++) o = G.mutate(o, r2, 1, 'xvgmc'); assert.ok(o.parts.every(p => p.nn == null));
+  assert.ok(A.organs.profile(develop(g)).wiring > A.organs.profile(develop(two())).wiring + 2, 'neurons and their connections cost upkeep');
+  // in a world: runs, restores exactly with the neurons' state, and the state follows the segment through growth
+  const w = new A.engine.World({ seed: 5, founders: 0, cap: 0, nerve2: 1, vision: 1, carry: 1 }); for (let i = 0; i < 300; i++) w.step(); const body = w.spawn(G.copy(g), 60, 40, 0.6, null); for (let i = 0; i < 300; i++) w.step();
+  const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); for (let i = 0; i < 300; i++) { w.step(); w2.step(); } const sig = x => JSON.stringify(x.bodies.map(q => [q.cx, q.cy, q.E, q.b.segs.map(s => (s.na ? Array.from(s.na) : null))])); assert.strictEqual(sig(w2), sig(w));
+  const before = new Map(body.plan.segs.map((s, i) => [s.addr, body.b.segs[i].na ? Array.from(body.b.segs[i].na) : null])); body.stage = 0.9; w.form(body, body.cx, body.cy, 0);
+  body.plan.segs.forEach((s, i) => { if (before.get(s.addr)) assert.deepStrictEqual(Array.from(body.b.segs[i].na), before.get(s.addr)); });
+});

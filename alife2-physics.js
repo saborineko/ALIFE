@@ -49,7 +49,7 @@
         id: i, parent: q.parent, p: q.p, part: q.part, len: q.len, r0: q.r0, r1: q.r1, z0: q.z0, z1: q.z1, rest: q.angle, mir: q.mir,
         phase: q.phase, az: q.az, axial: q.axial, chainRoot: q.chainRoot, group: q.group, idx: q.idx, tip: q.tip, leaf: q.leaf,
         b: i + 1, aw: null, target: q.angle, press: 0, act: 0, theta: q.angle, osc: 0, dir: 1,
-        a: 0, cd: 1, ct: 0, m: null, tch: 0, torn: 0, kids: q.kids || [], circ: A.neural.wiring(q.p) > 1e-6, // local nerve signal, its effect on this segment's cilia, and whether the segment is wired at all
+        a: 0, cd: 1, ct: 0, m: null, tch: 0, torn: 0, addr: q.addr, twin: -1, kids: q.kids || [], circ: A.neural.wiring(q.p) > 1e-6, // local nerve signal, its effect on this segment's cilia, and whether the segment is wired at all
         mass: Math.max(1e-4, K.density * PI * rm * zm * q.len * (1 + K.armorDensity * q.p.armor)),
         sideArea: q.len * (q.z0 + q.z1), wetArea: PI * (rm + zm) * q.len,
         formArea: Math.abs(PI * q.r0 * q.z0 - PI * q.r1 * q.z1) + (q.leaf ? PI * q.r1 * q.z1 : 0) + (i === 0 ? PI * q.r0 * q.z0 : 0),
@@ -95,6 +95,8 @@
       s.padRef = ref.id;
       s.padCap = s.pad ? K.padStress * s.p.grip * (0.2 + ref.p.muscle) * ref.r0 * ref.r0 * ref.z0 : 0;
     }
+    // the segment that is this one's mirror image on the other side of the body (same place in the twin branch), if there is one
+    if (b.segs.some(q => q.p.nn)) { const at = new Map(b.segs.map((q, i) => [q.addr, i])); for (const q of b.segs) { if (!q.addr) continue; const m = q.addr.match(/^(.*>[^>.]+\.)([01])((?:\/\d+)?)$/); if (m) { const t = at.get(m[1] + (m[2] === '0' ? '1' : '0') + m[3]); if (t != null) q.twin = t; } } }
     b.hasCilia = b.segs.some(q => q.cil !== 0); b.ciliaUse = 0; b.hasCircuit = b.segs.some(q => q.circ);
     // A body with no working joint keeps its shape: it is solved as one rigid body (same forces, far less work).
     b.rigid = !b.segs.some(q => q.id > 0 && q.tauMax > 0 && (q.p.amp > 0.02 || Math.abs(q.p.mJoint || 0) > 0.02));

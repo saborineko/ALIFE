@@ -35,6 +35,8 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="眼のある体節が、向きと色の好みを持つ受容器になる世界。餌も他個体も、色のある物として同じように見える。いまの世界のまま切り替えられる。"><input id="vision" type="checkbox">視覚（実験中）</label>
     <label title="世界が全身の脳に「餌が前／左にある」と教える古い近道を切る。餌の方向は、眼や味覚で自分で得るしかなくなる。いまの世界のまま切り替えられる。"><input id="blind" type="checkbox">餌の方向の近道を切る</label>
     <label title="軸の途中から先を、同じ部品の複製に切り替える変異が起きる（その瞬間は身体が変わらない。以後は前半と後半が別々に変異できる）。どの規則も届かない部品は休眠し、再びつながることも、ゆっくり消えることもある。上限は、身体に届く部品の数にかかる。いまの世界のまま切り替えられる。"><input id="genome2" type="checkbox">遺伝子の新しい規則（軸の分割・休眠遺伝子）</label>
+    <label title="身体が物質として失ったもの（消化しきれなかった分、蓄えの上限を超えた分、死骸や死産の卵のうち粒にならなかった分、削られた組織のうち食物にならない分）が、その場の溶存栄養に戻る。熱として失った分と、誰も食べなかった粒は戻らない。"><input id="recycle" type="checkbox">失った物質を水に戻す</label>
+    <label title="部品が神経を 4 個まで持てる。神経は、自分の体節の感覚と、同じ体節・親・子・左右の対の神経を入力にでき、繊毛・関節・口を動かす。変異で生じ、結合ごと複製され、消える。これまでの 1 信号の回路はそのまま働く。"><input id="nerve2" type="checkbox">体節あたり複数の神経</label>
     <label title="変異の起きやすさと大きさが遺伝し、それ自体も変異する（0.1〜3 倍）。ALIEN や Polyworld が持つ仕組み。いまの世界のまま切り替えられる。"><input id="metamut" type="checkbox">変異の強さも進化する</label>
     <label title="飲み込めない大きさの粒（または消化管に入りきらない粒）に口が届いていれば、組織を削るのと同じ速さで少しずつ削って食べる。切ると、粒は丸呑みか、まったく取れないかのどちらか。"><input id="nibble" type="checkbox">粒を削って食べる</label>
     <label title="卵に入るエネルギーは親が決め、子は変異後の自分の遺伝子で、その予算で作れる段階まで育って生まれる。余りは卵黄として子が持つ。最小の芽も作れなければ死産になる。切ると、子は親の支払いに関係なく自分の遺伝子どおりの姿で生まれる以前の規則。いまの世界のまま切り替えられる。"><input id="budget" type="checkbox">出生の収支を合わせる</label>
@@ -43,7 +45,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="沿岸の世界で、海底の重さ（摩擦と踏ん張り）が境界をまたいで少しずつ立ち上がる。切ると、境界で段差になる以前の物理。いまの世界のまま切り替えられる。"><input id="shore" type="checkbox">なだらかな境界</label>
     <label>始祖 <select id="founder"><option value="primordial">原始個体（1体節）から自然進化</option><option value="file">進化試験の結果を読み込む（JSON）</option></select></label>
     <input id="file" type="file" accept=".json" style="display:none">
-    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・変異の強さの進化・粒を削る・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。">全部入りで最初から</button><button id="pause">一時停止</button>
+    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・変異の強さの進化・粒を削る・物質の還元・複数の神経・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。">全部入りで最初から</button><button id="pause">一時停止</button>
     <label>速度 <select id="speed"><option>1</option><option selected>4</option><option>16</option><option>64</option></select>×</label>
     <button id="fit">全体表示</button>
   </div>
@@ -63,15 +65,15 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=33"></script>
-<script src="./alife2-genome.js?v=33"></script>
-<script src="./alife2-development.js?v=33"></script>
-<script src="./alife2-neural.js?v=33"></script>
-<script src="./alife2-physics.js?v=33"></script>
-<script src="./alife2-organs.js?v=33"></script>
-<script src="./alife2-engine.js?v=33"></script>
-<script src="./alife2-render.js?v=33"></script>
-<script src="./alife2-gpu.js?v=33"></script>
-<script src="./alife2-world.js?v=33"></script>
+<script src="./alife2-version.js?v=34"></script>
+<script src="./alife2-genome.js?v=34"></script>
+<script src="./alife2-development.js?v=34"></script>
+<script src="./alife2-neural.js?v=34"></script>
+<script src="./alife2-physics.js?v=34"></script>
+<script src="./alife2-organs.js?v=34"></script>
+<script src="./alife2-engine.js?v=34"></script>
+<script src="./alife2-render.js?v=34"></script>
+<script src="./alife2-gpu.js?v=34"></script>
+<script src="./alife2-world.js?v=34"></script>
 </body>
 </html>

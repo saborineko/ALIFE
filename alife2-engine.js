@@ -34,6 +34,12 @@
     vision: 0,                            // 1 = a segment with eye tissue is a receptor that looks one way and sees coloured things: food grains and other bodies alike. 0 = the worlds before this existed
     foodHue: 50,                          // the colour of food grains (degrees). Bodies have the colour their genome gives them
     sightless: 0,                         // control experiment: no eye in this world reports anything
+    nerve2: 0,                            // 1 = parts can carry several neurons each, wired by where things are on the body (own senses; neurons in the same segment, the parent,
+                                          // the children, the mirror twin), acting on the segment's cilia, joint and mouth. They arise, duplicate with their wiring, and vanish by mutation.
+                                          // The older single signal per segment stays as it is.
+    recycle: 0,                           // 1 = what bodies lose as matter goes back into the water where they are, as dissolved food: the part of a meal the gut does not
+                                          // take up, reserve above what the body can hold, what a dead body or a lost egg does not leave as grains, and torn tissue that
+                                          // is not food. Not returned: heat (upkeep, work, the fixed cost of an egg) and grains nobody ate. 0 = all of these simply vanish
     metamut: 0,                           // 1 = how often and how strongly a lineage mutates is itself inherited and mutates (gene `mut`, 0.1..3 times the world's rate)
     nibble: 0,                            // 1 = a mouth that reaches a grain it cannot swallow whole (too big for it, or for the room left in its gut) tears pieces from it,
                                           // at the rate at which it tears tissue. 0 = the earlier rule: a grain is swallowed whole or not at all
@@ -82,7 +88,7 @@
       if (M) this.buildMap(M);
       this.counts = { births: 0, starved: 0, aged: 0, broken: 0, blocked: 0, eaten: 0, killed: 0, flesh: 0, torn: 0, stillborn: 0 };
       this.taste = new Float64Array(256);
-      this.ledger = this.audit ? { rain: 0, regrow: 0, placed: 0, mutation: 0, basal: 0, work: 0, cilia: 0, nerve: 0, digest: 0, clip: 0, eggFixed: 0, death: 0, expire: 0, bite: 0, growth: 0, stillborn: 0 } : null;
+      this.ledger = this.audit ? { rain: 0, regrow: 0, placed: 0, mutation: 0, recycled: 0, basal: 0, work: 0, cilia: 0, nerve: 0, digest: 0, clip: 0, eggFixed: 0, death: 0, expire: 0, bite: 0, growth: 0, stillborn: 0 } : null;
       this.grains = this.audit ? {} : null; // per size of grain: energy arrived, eaten, gone uneaten, and how much of it a mouth ever reached but could not take (too big for it / its gut was full)
       if (this.vision || this.contact) this.bgrid = Array.from({ length: this.cols * this.rows }, () => []);
       if (this.scent) { const n = this.cols * this.rows; this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
@@ -140,14 +146,14 @@
     form(o, x, y, ang) {
       // wounds stay with the segments they are on while the body is rebuilt for growth (a segment is known by its address, not its number)
       const was = o.hp && o.plan ? new Map(o.plan.segs.map((s, i) => [s.addr, o.hp[i]])) : null;
-      const mind = this.carry && o.b && o.plan ? { t: o.b.t, seg: new Map(o.plan.segs.map((s, i) => { const q = o.b.segs[i]; return [s.addr, [q.a, q.m, q.mA, q.mB, q.mV, q.v]]; })) } : null;
+      const mind = this.carry && o.b && o.plan ? { t: o.b.t, seg: new Map(o.plan.segs.map((s, i) => { const q = o.b.segs[i]; return [s.addr, [q.a, q.m, q.mA, q.mB, q.mV, q.v, q.na ? Float64Array.from(q.na) : null, q.nA, q.nB, q.nV]]; })) } : null;
       o.plan = A.development.develop(o.g, { stage: o.stage, maxSegs: this.maxSegs }); o.prof = A.organs.profile(o.plan);
       if (was) o.hp = o.plan.segs.map(s => (was.has(s.addr) ? was.get(s.addr) : 1));
       o.b = A.physics.build(o.plan, { x, y, angle: ang, env: { fluid: 1, ground: false, gravity: 4, flowX: 0, flowY: 0 } });
       // lay the body's own centre on (x, y)
       const c = A.physics.com(o.b); for (let k = 0; k < o.b.np; k++) { o.b.x[k] += x - c[0]; o.b.y[k] += y - c[1]; }
       A.physics.pose(o.b); o.cx = x; o.cy = y; o.work0 = 0;
-      if (mind) { o.b.t = mind.t; o.plan.segs.forEach((s, i) => { const v = mind.seg.get(s.addr); if (!v) return; const q = o.b.segs[i]; q.a = v[0]; q.m = v[1]; if (v[2] != null) q.mA = v[2]; if (v[3] != null) q.mB = v[3]; if (v[4] != null) q.mV = v[4]; if (v[5] != null) q.v = v[5]; }); }
+      if (mind) { o.b.t = mind.t; o.plan.segs.forEach((s, i) => { const v = mind.seg.get(s.addr); if (!v) return; const q = o.b.segs[i]; q.a = v[0]; q.m = v[1]; if (v[2] != null) q.mA = v[2]; if (v[3] != null) q.mB = v[3]; if (v[4] != null) q.mV = v[4]; if (v[5] != null) q.v = v[5]; if (v[6] && q.p.nn && q.p.nn.length === v[6].length) { q.na = v[6]; q.nb = new Float64Array(v[6].length); } if (v[7] != null) q.nA = v[7]; if (v[8] != null) q.nB = v[8]; if (v[9] != null) q.nV = v[9]; }); }
       // a body with no working joint cannot do anything but drift: move it with the water instead of simulating it
       if (!this.rigid) o.b.rigid = false; // control experiment: solve every body with the jointed solver
       o.passive = !o.b.hasCilia && o.b.rigid && !this.contact; o.cil0 = 0; // where bodies touch, every body is simulated: even one that cannot move can be pushed
@@ -166,6 +172,8 @@
       if (o.shore != null && o.shore !== this.shore) { this.shore = o.shore; this.log('世界の設定を変更：海域の境界を' + (o.shore > 0 ? 'なだらかにした（幅 ' + o.shore + '）' : '段差に戻した')); }
       if (o.contact != null && !!o.contact !== !!this.contact) { this.contact = o.contact ? 1 : 0; this.log('世界の設定を変更：身体の接触と、口による組織の摂取を' + (o.contact ? '有効にした' : '無効にした')); for (const b of this.bodies) b.passive = !this.contact && !b.b.hasCilia && b.b.rigid; for (const k of ['killed', 'flesh', 'torn']) if (this.counts[k] == null) this.counts[k] = 0; }
       if ((this.vision || this.contact) && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
+      if (o.nerve2 != null && !!o.nerve2 !== !!this.nerve2) { this.nerve2 = o.nerve2 ? 1 : 0; this.log('世界の設定を変更：体節あたり複数の神経（相対位置の結合）を' + (o.nerve2 ? '有効にした' : '無効にした')); }
+      if (o.recycle != null && !!o.recycle !== !!this.recycle) { this.recycle = o.recycle ? 1 : 0; this.log('世界の設定を変更：身体が失った物質を、その場の溶存栄養に戻す規則を' + (o.recycle ? '有効にした' : '無効にした')); }
       if (o.metamut != null && !!o.metamut !== !!this.metamut) { this.metamut = o.metamut ? 1 : 0; this.log('世界の設定を変更：変異の強さが遺伝し、それ自体も変異する規則を' + (o.metamut ? '有効にした' : '無効にした')); }
       if (o.nibble != null && !!o.nibble !== !!this.nibble) { this.nibble = o.nibble ? 1 : 0; this.log('世界の設定を変更：飲み込めない粒を口が削って食べられる規則を' + (o.nibble ? '有効にした' : '無効にした')); }
       if (o.budget != null && !!o.budget !== !!this.budget) { this.budget = o.budget ? 1 : 0; this.log('世界の設定を変更：出生の収支を合わせる規則（子は卵の予算で作れる段階で生まれる）を' + (o.budget ? '有効にした' : '無効にした')); }
@@ -271,7 +279,7 @@
       const per = C.flesh * C.build + (Math.max(0, v.E) + v.G) / v.prof.V; if (dv * per > room) dv = room / per;
       const share = Math.min(1, dv / v.prof.V), eE = Math.max(0, v.E) * share, eG = v.G * share, got = C.flesh * C.build * dv + eE + eG;
       v.E -= eE; v.G -= eG; hp[j] -= dv / vol; if (hp[j] < 1e-6) hp[j] = 0; q.torn += dv / vol / dt;
-      if (this.ledger) this.ledger.bite += (1 - C.flesh) * C.build * dv;
+      if (this.ledger) this.ledger.bite += (1 - C.flesh) * C.build * dv; if (this.recycle) this.giveBack(q.bx, q.by, (1 - C.flesh) * C.build * dv);
       e.G += got; e.flesh = (e.flesh || 0) + got; e.eaten += got; this.counts.flesh += got; this.counts.torn += got; v.lost = (v.lost || 0) + got; v.biter = e.id;
       return true;
     }
@@ -290,7 +298,7 @@
     see(o) {
       const b = o.b, segs = b.segs, off = o.sightless || this.sightless, cell = this.cell, W = this.W;
       for (let i = 0; i < segs.length; i++) {
-        const q = segs[i], p = q.p; if (p.eye <= 0.1 || p.vE === 0) continue;
+        const q = segs[i], p = q.p; if (p.eye <= 0.1 || (p.vE === 0 && !(p.nn && A.neural.compile(p.nn).sees))) continue;
         if (off) { q.v = 0; continue; }
         const sgn = i === 0 ? -1 : 1, ca = Math.cos(p.gaze), sa = Math.sin(p.gaze), ux = sgn * (q.dx * ca - q.dy * sa), uy = sgn * (q.dx * sa + q.dy * ca);
         const ex = (q.ax + q.bx) * 0.5, ey = (q.ay + q.by) * 0.5, R = 4 + 22 * Math.sqrt(p.eye * Math.max(q.r0, q.r1)), cosHalf = Math.cos(1.2 - 0.8 * p.eye), tune = p.tune;
@@ -330,6 +338,8 @@
     // ---- the energy ledger (audit: 1) ----
     // Everything that holds energy at this moment: dissolved food, grains, and in every body its reserve, gut contents, savings for growth and eggs, and the cost of the tissue it has.
     stored() { let s = 0; for (let i = 0; i < this.nut.length; i++) s += this.nut[i]; for (const f of this.food) if (f.e > 0) s += f.e; for (const o of this.bodies) s += o.E + o.G + o.grow + o.egg + o.prof.buildCost; return s; }
+    // matter a body loses goes into the water at that place (recycle: 1). In the ledger it stays listed under what it was lost as, and again as inflow under 'recycled'.
+    giveBack(x, y, e) { if (!(e > 0)) return; this.nut[this.cellAt(x, clamp(y, 0, this.H - 0.01))] += e; if (this.ledger) this.ledger.recycled += e; }
     grainClass(k) { if (!this.rainSizes) { this.rainSizes = new Set([...this.grainSizes, ...this.bottomSize].map(String)); if (this.regions) for (const q of this.regions) for (const z of q.grains.sizes) this.rainSizes.add(String(z)); } if (!this.rainSizes.has(k)) k = '死骸'; return this.grains[k] || (this.grains[k] = { in: 0, eaten: 0, expired: 0, tooBig: 0, gutFull: 0 }); } // grains of any other size came from dead bodies
     addFood(x, y, size, e, fixed, life) { const f = { x: ((x % this.W) + this.W) % this.W, y: clamp(y, 0.5, this.H - 0.5), size, e, fixed, die: this.t + life }; if (this.ledger) { if (!this.corpse) this.ledger.rain += e; f.c = this.corpse ? '死骸' : String(size); this.grainClass(f.c).in += e; } this.food.push(f); }
 
@@ -492,11 +502,11 @@
             if (Math.sqrt(dx * dx + (f.y - s.by) * (f.y - s.by)) < m.gape + f.size * 0.5) { if (lg) this.grainClass(f.c || String(f.size)).eaten += f.e; o.G += f.e; o.eaten += f.e; this.counts.eaten += f.e; f.e = 0; }
           }
         }
-        const dg = Math.min(o.G, pr.digest * dt); o.G -= dg; o.E += dg * pr.eta; if (lg) lg.digest += dg * (1 - pr.eta);
+        const dg = Math.min(o.G, pr.digest * dt); o.G -= dg; o.E += dg * pr.eta; if (lg) lg.digest += dg * (1 - pr.eta); if (this.recycle) this.giveBack(o.cx, o.cy, dg * (1 - pr.eta));
         // spending
         if (lg) { lg.basal += pr.basal * dt; lg.work += C.work * (b.work - o.work0); lg.cilia += C.ciliaWork * (b.ciliaUse - o.cil0); lg.nerve += C.spike * (b.nerveUse - o.nerve0); }
         o.E -= pr.basal * dt + C.work * (b.work - o.work0) + C.ciliaWork * (b.ciliaUse - o.cil0) + C.spike * (b.nerveUse - o.nerve0); o.work0 = b.work; o.cil0 = b.ciliaUse; o.nerve0 = b.nerveUse;
-        if (o.E > pr.Emax) { if (lg) lg.clip += o.E - pr.Emax; o.E = pr.Emax; }
+        if (o.E > pr.Emax) { if (lg) lg.clip += o.E - pr.Emax; if (this.recycle) this.giveBack(o.cx, o.cy, o.E - pr.Emax); o.E = pr.Emax; }
         o.age += dt;
         if (o.E <= 0) { o.dead = 'starved'; continue; }
         if (o.age > o.life) { o.dead = 'aged'; continue; }
@@ -519,7 +529,7 @@
       }
       for (const o of born) {
         const mm = this.metamut ? (o.g.mut == null ? 1 : o.g.mut) : 1;
-        const g = this.rand() < this.mutation * mm ? A.genome.mutate(o.g, this.rand, this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut ? 'm' : '') + (this.contact ? 'c' : '')) : A.genome.copy(o.g);
+        const g = this.rand() < this.mutation * mm ? A.genome.mutate(o.g, this.rand, this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut ? 'm' : '') + (this.contact ? 'c' : '') + (this.nerve2 ? 'n' : '')) : A.genome.copy(o.g);
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
         const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1, bx = o.cx + Math.cos(a) * d, by = clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), B = o.eggCost - C.eggFixed; // B: what the egg holds
@@ -528,7 +538,7 @@
           stage = this.afford(g, B);
           if (stage == null) { // the egg cannot make even a bud of this body: it is lost, and what a dead thing leaves of it lies where it was laid
             let e = C.carrion * B; const e0 = e; this.corpse = true; while (e > 0.05) { const size = 0.25 + this.rand() * 0.25, pe = Math.min(e, this.grainEnergy * size ** 3); this.addFood(bx + this.rand.gauss() * 0.5, by + this.rand.gauss() * 0.5, size, pe, this.isGround(bx, by), this.grainLife); e -= pe; } this.corpse = false;
-            this.counts.stillborn++; o.kids--; if (lg) { lg.eggFixed += C.eggFixed; lg.stillborn += B - (e0 - e); } continue;
+            this.counts.stillborn++; o.kids--; if (lg) { lg.eggFixed += C.eggFixed; lg.stillborn += B - (e0 - e); } if (this.recycle) this.giveBack(bx, by, B - (e0 - e)); continue;
           }
         }
         const kid = this.spawn(g, bx, by, stage, o); this.counts.births++;
@@ -546,7 +556,7 @@
           const node = this.tree.get(o.id); if (node) { node.died = this.t; node.cause = o.dead; node.life = { eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, stage: o.stage }; }
           const had = o.E + o.G + o.grow + o.egg + o.prof.buildCost; let e = C.carrion * (o.prof.buildCost * 0.5 + Math.max(0, o.E) + o.G); const e0 = e; this.corpse = true;
           while (e > 0.05) { const size = 0.25 + this.rand() * 0.25, pe = Math.min(e, this.grainEnergy * size ** 3); this.addFood(o.cx + this.rand.gauss() * 0.5, o.cy + this.rand.gauss() * 0.5, size, pe, this.isGround(o.cx, o.cy), this.grainLife); e -= pe; }
-          this.corpse = false; if (lg) lg.death += had - (e0 - e);
+          this.corpse = false; if (lg) lg.death += had - (e0 - e); if (this.recycle) this.giveBack(o.cx, o.cy, had - (e0 - e));
         }
         this.bodies = this.bodies.filter(o => !o.dead);
       }
@@ -573,7 +583,7 @@
         bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home, v0: o.V0, s0: o.stage0, hp: o.hp || undefined, flesh: o.flesh || undefined, lost: o.lost || undefined,
           sig: b.hasCircuit ? b.segs.map(q => q.a) : undefined,
           st: { x: Array.from(b.x), y: Array.from(b.y), vx: Array.from(b.vx), vy: Array.from(b.vy), t: b.t, work: b.work, heat: b.heat, cilia: b.ciliaUse, nerve: b.nerveUse, om: b.om || 0, th: b.th || 0, loc: b.loc ? Array.from(b.loc) : null, inertia: b.inertia == null ? null : b.inertia, carried: b.carried == null ? null : b.carried, cmd: b.cmd,
-            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB, q.v == null ? null : q.v, q.mV == null ? null : q.mV, q.mo == null ? null : q.mo]), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
+            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB, q.v == null ? null : q.v, q.mV == null ? null : q.mV, q.mo == null ? null : q.mo, q.na ? Array.from(q.na) : null, q.na ? [q.nA == null ? null : q.nA, q.nB == null ? null : q.nB, q.nV == null ? null : q.nV] : null]), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
       };
     }
     // Older saves (without `exact`) lack pose, velocities, rhythm phase, sensory memory and birth region: bodies then restart from rest.
@@ -592,7 +602,7 @@
         if (st) { // put the body back exactly as it was
           const b = o.b; b.x.set(st.x); b.y.set(st.y); b.vx.set(st.vx); b.vy.set(st.vy); b.t = st.t; b.work = st.work; b.heat = st.heat; b.ciliaUse = st.cilia; b.nerveUse = st.nerve; b.carried = st.carried == null ? undefined : st.carried; b.cmd = st.cmd;
           if (b.rigid && st.loc) { b.om = st.om; b.th = st.th; b.loc.set(st.loc); b.inertia = st.inertia; } // the same numbers, not the same quantities recomputed in another orientation
-          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; if (v[11] != null) q.v = v[11]; if (v[12] != null) q.mV = v[12]; if (v[13] != null) q.mo = v[13]; });
+          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; if (v[11] != null) q.v = v[11]; if (v[12] != null) q.mV = v[12]; if (v[13] != null) q.mo = v[13]; if (v[14]) { q.na = Float64Array.from(v[14]); q.nb = new Float64Array(q.na.length); } if (v[15]) { if (v[15][0] != null) q.nA = v[15][0]; if (v[15][1] != null) q.nB = v[15][1]; if (v[15][2] != null) q.nV = v[15][2]; } });
           A.physics.pose(b); o.cx = s.x; o.cy = s.y;
           Object.assign(o, { noise: st.noise, wander: st.wander, seen: st.seen, sx: st.sx, sy: st.sy, sdt: st.sdt, taxDot: st.taxDot, taxLen: st.taxLen, taxN: st.taxN, work0: st.work0, cil0: st.cil0, nerve0: st.nerve0, nextCost: st.nextCost, nextStage: st.nextStage });
         }
@@ -620,7 +630,7 @@
         multi: n ? segs.filter(s => s > 1).length / n : 0, volume: mean(o => o.prof.V), speed: mean(o => o.age > 5 ? o.path / o.age : 0),
         mouthShare: mean(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), eyes: mean(o => o.prof.eye > 0 ? 1 : 0),
         bottom: mean(o => this.isGround(o.cx, o.cy) ? 1 : 0),
-        mutGene: mean(o => (o.g.mut == null ? 1 : o.g.mut)),
+        mutGene: mean(o => (o.g.mut == null ? 1 : o.g.mut)), neurons: mean(o => o.b.segs.reduce((a, q) => a + (q.p.nn ? q.p.nn.length : 0), 0)), neuronBodies: mean(o => o.b.segs.some(q => q.p.nn) ? 1 : 0),
         birthV: (l => l.length ? l.reduce((a, o) => a + o.V0, 0) / l.length : 0)(this.bodies.filter(o => o.V0 != null && o.gen > 0)), birthStage: (l => l.length ? l.reduce((a, o) => a + o.stage0, 0) / l.length : 0)(this.bodies.filter(o => o.stage0 != null && o.gen > 0)), birthGene: mean(o => o.g.birth), eggCost: mean(o => o.eggCost), adultV: mean(o => o.full.V),
         partsTotal: mean(o => o.gu.parts), partsReach: mean(o => o.gu.reach), partsUsed: mean(o => o.gu.expr), multiPart: mean(o => o.gu.expr > 1 ? 1 : 0), zoned: mean(o => o.gu.zones > 0 ? 1 : 0), differed: mean(o => o.gu.zones > 0 && o.gu.div > 0.05 ? 1 : 0),
         fleshShare: mean(o => o.eaten > 0 ? (o.flesh || 0) / o.eaten : 0), fleshEaters: mean(o => (o.flesh || 0) > 0.2 * o.eaten && o.eaten > 0 ? 1 : 0), wounded: mean(o => o.hp ? 1 : 0), armor: mean(o => o.g.parts.reduce((a, p) => a + p.armor, 0) / o.g.parts.length),

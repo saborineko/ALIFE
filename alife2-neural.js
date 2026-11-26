@@ -22,7 +22,7 @@
       s.osc = phi; s.dir = dir;
       if (i === 0) continue;
       const w = Math.sin(phi + p.skew * Math.sin(phi));
-      const swing = s.mir * (cmd.drive * p.amp * dir * w + p.bias + (s.circ ? p.mJoint * s.a : 0)) + (s.axial ? cmd.turn * 0.5 : 0);
+      const swing = s.mir * (cmd.drive * p.amp * dir * w + p.bias + (s.circ ? p.mJoint * s.a + (s.nj || 0) : 0)) + (s.axial ? cmd.turn * 0.5 : 0);
       s.target = s.rest + p.range * clamp(swing, -1, 1);
     }
     for (let i = 0; i < segs.length; i++) {
@@ -59,7 +59,27 @@
       const cd = 1 + p.mCil * s.a; s.cd = cd < 0 ? 0 : cd > 2 ? 2 : cd; s.ct = p.mTurn * s.a;
       if (con && p.mBite !== 0) { const mo = 1 + p.mBite * s.a; s.mo = mo < 0 ? 0 : mo > 1 ? 1 : mo; }
       use += s.a < 0 ? -s.a : s.a;
+      if (p.nn) { // several neurons in this segment. Each reads what it is wired to (its own senses; neurons here, in the parent, in the children, in its mirror twin: their values of a moment ago) and acts on this segment
+        const nn = compile(p.nn), n = nn.length; if (!s.na || s.na.length !== n) { s.na = new Float64Array(n); s.nb = new Float64Array(n); }
+        const na = s.na, nb = s.nb, parentSeg = s.parent >= 0 ? segs[s.parent] : null, twin = s.twin >= 0 ? segs[s.twin] : null; let eC = 0, eT = 0, eJ = 0, eM = 0, any = 0;
+        for (let q = 0; q < n; q++) { const N = nn[q]; let y = N.b;
+          for (let e = 0; e < N.src.length; e++) { let v = 0; const j = N.idx[e];
+            switch (N.src[e]) {
+              case 0: v = sense; break; case 1: v = smA ? smell(s, 'nA', smA[i], p.adapt) : 0; break; case 2: v = smB ? smell(s, 'nB', smB[i], p.adapt) : 0; break;
+              case 3: v = vis && s.v != null ? smell(s, 'nV', s.v, p.adapt, 0.3) : 0; break; case 4: v = con ? s.tch / (s.tch + 0.05) : 0; break;
+              case 5: if (con) { const w = 5 * s.torn + 1 - (s.hp == null ? 1 : s.hp); v = w > 1 ? 1 : w; } break; case 6: v = hunger; break;
+              case 7: v = i > 0 ? (s.theta - s.rest) / (p.range || 1) : 0; break; case 8: v = Math.sin(s.osc); break; case 9: v = 1; break; case 10: v = s.a; break;
+              case 11: v = j < n ? na[j] : 0; break; case 12: v = other(parentSeg, j); break;
+              case 13: if (kids.length) { for (let c2 = 0; c2 < kids.length; c2++) v += other(segs[kids[c2]], j); v /= kids.length; } break;
+              case 14: v = other(twin, j); break;
+            }
+            y += N.w[e] * v; }
+          const v2 = na[q] + N.k * (Math.tanh(y) - na[q]); nb[q] = v2; use += v2 < 0 ? -v2 : v2;
+          for (let e = 0; e < N.eff.length; e++) { const z = N.ew[e] * v2; any = 1; switch (N.eff[e]) { case 0: eC += z; break; case 1: eT += z; break; case 2: eJ += z; break; case 3: eM += z; } } }
+        if (any) { const c3 = s.cd + eC; s.cd = c3 < 0 ? 0 : c3 > 2 ? 2 : c3; s.ct += eT; s.nj = eJ; if (eM !== 0) { const mo = (s.mo == null ? 1 : s.mo) + eM; s.mo = mo < 0 ? 0 : mo > 1 ? 1 : mo; } }
+      }
     }
+    for (let i = 0; i < segs.length; i++) { const s = segs[i]; if (s.na && s.nb) { const t = s.na; s.na = s.nb; s.nb = t; } } // all neurons step together
     return use;
   }
   // One smell receptor: the same two readings as taste (how much there is; or, as far as it adapts, the change against a slow average).
@@ -69,8 +89,13 @@
     return (1 - adapt) * (2 * c / (c + (half || 0.1)) - 1) + adapt * rel;
   }
   const CIRCUIT = ['nC', 'nP', 'nK', 'nH', 'nB', 'mCil', 'mTurn', 'mJoint', 'adapt', 'sA', 'sB', 'vE', 'sT', 'sW', 'mBite'];
-  const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); return w; };
+  // what a part's wiring costs to keep: the strengths of the single signal's connections, and for each neuron its connections and a share for the cell itself
+  const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) w += Math.abs(e[1]); for (const e of q.out) w += Math.abs(e[1]); } return w; };
+  // neurons, made ready to run: sources and targets as numbers. Done once per part.
+  const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14 }, EFF = { C: 0, T: 1, J: 2, M: 3 }, ready = new WeakMap();
+  function compile(nn) { let c = ready.get(nn); if (!c) { c = nn.map(q => ({ b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? +e[0][1] : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]) })); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); ready.set(nn, c); } return c; }
+  const other = (seg, i) => (seg && seg.na && i < seg.na.length ? seg.na[i] : 0);
 
-  A.neural = { cpg, command, local, wiring, CIRCUIT };
+  A.neural = { cpg, command, local, wiring, CIRCUIT, compile };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

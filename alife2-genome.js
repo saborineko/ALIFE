@@ -112,6 +112,7 @@
       p[k] = kind === 'a' ? wrapPi(v) : clamp(v, lo, hi);
     }
     // zones along an axis: after `span` segments of this part, a chain goes on as part `next` (-1 or absent: it does not change)
+    for (const p of g.parts) sanitizeNN(p);
     g.parts.forEach((p, i) => { if (p.next == null) return; p.next = Math.round(p.next); if (!(p.next >= 0 && p.next < g.parts.length) || p.next === i) p.next = -1; p.span = clamp(Math.round(p.span || 1), 1, MAX_REPEAT + 1); });
     g.links = g.links.slice(0, STORE_LINKS).filter(l => l.from < g.parts.length && l.to < g.parts.length && l.from >= 0 && l.to >= 0);
     for (const l of g.links) {
@@ -178,6 +179,44 @@
     for (let j = mine.length - 1; j >= 0; j--) { const i = mine[j], l = g.links[i], c = copy(l); if (l.fam == null) l.fam = l.id; c.fam = l.fam; c.id = newId(r); c.src = l.id; c.from = Q; g.links.splice(i + 1, 0, c); } // each copy right after its source: the order in which a segment grows its children stays the same
     return Q;
   }
+  // ---- neurons (worlds with 'n') ----
+  // A part may carry up to NN_MAX neurons; every segment built from the part gets its own copy of them.
+  // A neuron: { b: resting level, k: how fast it follows its input (1 = at once), in: [[source, weight]...], out: [[target, weight]...] }.
+  // Sources are named by where they are, seen from the neuron's own segment (after Framsticks' relative references):
+  //   own senses    c taste, A B the two leaked substances, v eye, t push, w wound, h hunger, j bend of own joint, o own rhythm, 1 a constant, a the segment's older single signal
+  //   other neurons s0..s3 in the same segment, p0..p3 in the segment it grows from, k0..k3 the mean over segments growing from it, m0..m3 its mirror twin on the other side
+  // Targets, all in its own segment: C how hard the cilia beat, T their turning, J the joint's bend, M how far the mouth is open.
+  const NN_MAX = 4, NN_IN = 6, NN_OUT = 3, NN_SENSE = ['c', 'A', 'B', 'v', 't', 'w', 'h', 'j', 'o', '1', 'a'], NN_REF = ['s', 'p', 'k', 'm'], NN_EFF = ['C', 'T', 'J', 'M'];
+  const nnSource = r => (r() < 0.6 ? NN_SENSE[r.int(NN_SENSE.length)] : NN_REF[r.int(NN_REF.length)] + r.int(NN_MAX));
+  const nnValid = c => typeof c === 'string' && (NN_SENSE.includes(c) || (c.length === 2 && NN_REF.includes(c[0]) && c[1] >= '0' && c[1] < String(NN_MAX)));
+  function sanitizeNN(p) {
+    if (p.nn == null) return; if (!Array.isArray(p.nn)) { delete p.nn; return; }
+    p.nn = p.nn.slice(0, NN_MAX).filter(q => q && typeof q === 'object').map(q => ({
+      b: clamp(Number.isFinite(q.b) ? q.b : 0, -2, 2), k: clamp(Number.isFinite(q.k) ? q.k : 1, 0.02, 1),
+      in: (Array.isArray(q.in) ? q.in : []).filter(e => Array.isArray(e) && nnValid(e[0]) && Number.isFinite(e[1])).slice(0, NN_IN).map(e => [e[0], clamp(e[1], -4, 4)]),
+      out: (Array.isArray(q.out) ? q.out : []).filter(e => Array.isArray(e) && NN_EFF.includes(e[0]) && Number.isFinite(e[1])).slice(0, NN_OUT).map(e => [e[0], clamp(e[1], -2, 2)])
+    }));
+    if (!p.nn.length) delete p.nn;
+  }
+  function mutateNN(p, r, s) {
+    const nn = p.nn || [];
+    for (const q of nn) {
+      if (r() < 0.12) q.b += r.gauss() * 0.3 * s; if (r() < 0.12) q.k += r.gauss() * 0.07 * s;
+      for (const e of q.in) if (r() < 0.12) e[1] += r.gauss() * 0.5 * s; for (const e of q.out) if (r() < 0.12) e[1] += r.gauss() * 0.3 * s;
+      if (r() < 0.05 * s && q.in.length < NN_IN) q.in.push([nnSource(r), r.gauss()]);
+      if (r() < 0.03 * s && q.in.length > 1) q.in.splice(r.int(q.in.length), 1);
+      if (r() < 0.03 * s && q.in.length) q.in[r.int(q.in.length)][0] = nnSource(r);
+      if (r() < 0.03 * s && q.out.length < NN_OUT) q.out.push([NN_EFF[r.int(NN_EFF.length)], r.gauss() * 0.5]);
+      if (r() < 0.02 * s && q.out.length) q.out.splice(r.int(q.out.length), 1);
+    }
+    if (r() < 0.04 * s && nn.length < NN_MAX) {
+      // a new neuron: half the time a copy of one that is there, with all its connections (it can then drift apart); otherwise a fresh one with a sense and an effect
+      if (nn.length && r() < 0.5) nn.push(copy(nn[r.int(nn.length)])); else nn.push({ b: 0, k: 1, in: [[nnSource(r), r.gauss()]], out: [[NN_EFF[r.int(NN_EFF.length)], r.gauss() * 0.5]] });
+    }
+    if (r() < 0.02 * s && nn.length) nn.splice(r.int(nn.length), 1);
+    if (nn.length) p.nn = nn; else delete p.nn;
+  }
+
   // remove a part no rule leads to, with the rules that touch it
   function dropPart(g, i) {
     g.parts.splice(i, 1); g.links = g.links.filter(l => l.from !== i && l.to !== i); for (const l of g.links) { if (l.from > i) l.from--; if (l.to > i) l.to--; }
@@ -199,6 +238,7 @@
       }
     };
     for (const p of g.parts) num(p, PART_FIELDS);
+    if (extra === true || (extra && extra.includes('n'))) for (const p of g.parts) mutateNN(p, r, s);
     for (const l of g.links) {
       num(l, LINK_FIELDS);
       if (r() < 0.14 * s) l.repeat += r() < 0.5 ? -1 : 1;
@@ -254,6 +294,6 @@
     return sanitize(g);
   }
 
-  A.genome = { BRAIN_IN, BRAIN_OUT, PART_FIELDS, LINK_FIELDS, MAX_PARTS, MAX_LINKS, STORE_PARTS, STORE_LINKS, part, link, create, primordial, sanitize, mutate, crossover, chainScale, rng, copy, clamp, wrapPi, ensureIds, reach, zones, axisOf, splitZone, dropPart, divergence, nextOf };
+  A.genome = { BRAIN_IN, BRAIN_OUT, PART_FIELDS, LINK_FIELDS, MAX_PARTS, MAX_LINKS, STORE_PARTS, STORE_LINKS, part, link, create, primordial, sanitize, mutate, crossover, chainScale, rng, copy, clamp, wrapPi, ensureIds, reach, zones, axisOf, splitZone, dropPart, divergence, nextOf, NN_MAX, NN_SENSE, NN_REF, NN_EFF };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
