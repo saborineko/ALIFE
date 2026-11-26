@@ -120,6 +120,17 @@
     // counts for taxis only if it went somewhere by itself: at least 2 units while perceiving food, at 0.02 units/s or more over its life
     traveller(o) { return o.taxLen >= 2 && o.age > 5 && o.path / o.age >= 0.02; }
     motile(g) { const p = A.development.develop(g, { maxSegs: this.maxSegs }); return p.segs.some(q => q.id > 0 && q.p.amp > 0.02 && q.p.muscle > 0.02); }
+    // Turn sight, smell or the old food-direction shortcut on or off in a world that is already running.
+    // The bodies, their genomes and the genealogy carry on; only what the world lets them sense changes from here.
+    // The new genes of living bodies start at their neutral values (no wire from eye or nose), so nothing behaves
+    // differently until mutation finds a use. It is a branch: the world no longer continues as it would have.
+    enable(o) {
+      const F = A.genome.PART_FIELDS, n = this.cols * this.rows, names = { vision: '視覚', scent: '他個体の匂い', blind: '餌の方向の近道の切断' };
+      for (const k of ['vision', 'scent', 'blind']) { if (o[k] == null || !!o[k] === !!this[k]) continue; this[k] = o[k] ? 1 : 0; this.log('世界の設定を変更：' + names[k] + (o[k] ? 'を有効にした' : 'を無効にした')); }
+      if (this.scent && !this.scA) { this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
+      if (this.vision && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
+      for (const b of this.bodies) { A.genome.sanitize(b.g); for (const q of b.b.segs) for (const k in F) if (!Number.isFinite(q.p[k])) q.p[k] = F[k][2]; }
+    }
     log(text, id) { this.events.push({ t: Math.round(this.t), text, id }); if (this.events.length > 400) this.events.shift(); }
     // things that happen for the first time in this world (observation only; nothing is rewarded)
     note(o) {

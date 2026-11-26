@@ -243,7 +243,7 @@
   $('oldest').onclick = () => { const count = new Map(); for (const o of w.bodies) for (const n of w.ancestors(o.id)) count.set(n.id, (count.get(n.id) || 0) + 1); pick(o => count.get(o.id) || 0, '最多の子孫'); rule = o => w.ancestors(o.id).length ? w.bodies.filter(b => w.ancestors(b.id).some(n => n.id === o.id)).length : 0; };
   $('follow').onclick = () => { follow = !follow && !!sel; $('follow').textContent = follow ? '追跡中' : '追跡'; if (follow) view.scale = Math.max(view.scale, 30); };
   const fresh = () => { start(); $('saveNote').textContent = $('auto').checked ? '新しい世界を始めた。次の自動保存で、前の自動保存は上書きされる。' : '新しい世界を始めた。'; if ($('auto').checked) lastSave = performance.now(); };
-  $('restart').onclick = fresh; $('map').onchange = fresh; $('scent').onchange = fresh; $('vision').onchange = fresh; $('blind').onchange = fresh; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
+  $('restart').onclick = fresh; $('map').onchange = fresh; for (const k of ['scent', 'vision', 'blind']) $(k).onchange = () => { w.enable({ [k]: $(k).checked ? 1 : 0 }); lastPanels = 0; $('saveNote').textContent = 'いまの世界のまま設定を変えた（記録は「進化の記録」に残る）。ここから先は、変えなかった場合とは別の歴史になる。'; }; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; };
   $('founder').onchange = () => { if ($('founder').value === 'file') $('file').click(); else { loaded = null; start(); } };
   $('file').onchange = async e => { loaded = JSON.parse(await e.target.files[0].text()); start(); };

@@ -292,3 +292,14 @@ test('an eye is a receptor that looks one way and answers to its colour: bodies 
   const snap = x => JSON.stringify(x.bodies.map(o => [o.cx, o.cy, o.E, o.b.segs[0].a, o.b.segs[0].v, o.b.segs[0].mV]));
   assert.strictEqual(snap(w2), snap(w)); assert.ok(w.bodies.some(o => o.b.segs[0].v > 0), 'something was seen');
 });
+
+test('sight and smell can be switched on in a world that is already running: the bodies carry on and nothing changes until then', () => {
+  const a = new A.engine.World({ seed: 12 }), b = new A.engine.World({ seed: 12 }); a.seedWith(A.genome.primordial(12)); b.seedWith(A.genome.primordial(12));
+  for (let i = 0; i < 3000; i++) { a.step(); b.step(); }
+  const ids = a.bodies.map(o => o.id).join(), n = a.bodies.length;
+  b.enable({ vision: 1, scent: 1 });
+  assert.strictEqual(b.bodies.map(o => o.id).join(), ids); assert.ok(n > 20 && b.events.some(e => /視覚を有効/.test(e.text)));
+  for (let i = 0; i < 3000; i++) b.step();
+  assert.ok(b.bodies.length > 10 && b.bodies.every(o => Number.isFinite(o.cx + o.E) && o.b.segs.every(q => Number.isFinite(q.a))), 'still alive and finite');
+  assert.ok(b.scA.some(v => v > 0) && b.bodies.some(o => Number.isFinite(o.g.odor)));
+});
