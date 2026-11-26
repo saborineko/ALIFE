@@ -833,7 +833,7 @@
       const d = old.save(), opt = Object.assign({}, d.opt, { map: map || '' }); delete opt.cap; delete opt.founders;
       if (!map) Object.assign(opt, { W: DEFAULTS.W, H: DEFAULTS.H, cap: DEFAULTS.cap, founders: DEFAULTS.founders });
       const fresh = new World(opt), name = m => m ? (MAPS[m] && MAPS[m].name) || m : '小さな水槽';
-      Object.assign(d, { opt: Object.fromEntries(Object.keys(DEFAULTS).map(k => [k, fresh[k]])), nut: Array.from(fresh.nut), food: [], patch: fresh.patch, regionState: null, scA: undefined, scB: undefined, grainDebt: 0, bottomDebt: 0 });
+      Object.assign(d, { opt: Object.fromEntries(Object.keys(DEFAULTS).map(k => [k, fresh[k]])), nut: Array.from(fresh.nut), food: [], patch: fresh.patch, regionState: null, scA: undefined, scB: undefined, snd: undefined /* (the new map's water starts with its own sound) */, grainDebt: 0, bottomDebt: 0 });
       for (const s of d.bodies) { s.x = s.x / old.W * fresh.W; s.y = clamp(s.y / old.H * fresh.H, 2, fresh.H - 2); delete s.st; s.home = 0; }
       const w = World.restore(d); w.log('世界を移した：' + name(old.map) + ' → ' + name(map) + '（' + w.bodies.length + ' 個体）'); return w;
     }
