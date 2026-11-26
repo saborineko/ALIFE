@@ -498,3 +498,22 @@ test('adhere: a pressed pad grips another body without creating momentum; reserv
   const open = seep(0, 0), covered = seep(1, 0), cut = seep(0, 1);
   assert.ok(open.moved > 0.01 && open.lost < 1e-9 && open.fa > open.fb, JSON.stringify(open)); assert.strictEqual(covered.moved, 0); assert.strictEqual(cut.moved, 0);
 });
+
+test('islands: a body that leaves one world and arrives in another keeps what it is; both ledgers balance; nothing is created', () => {
+  const mk = seed => { const w = new A.engine.World({ seed, audit: 1, contact: 1, genome2: 1, budget: 1 }); w.seedWith(A.genome.primordial(seed)); for (let i = 0; i < 900; i++) w.step(); for (const k in w.ledger) w.ledger[k] = 0; return w; };
+  const IN = ['rain', 'regrow', 'placed', 'mutation', 'recycled', 'arrived'], gap = (w, s0) => { const L = w.ledger, inflow = IN.reduce((x, k) => x + (L[k] || 0), 0), out = Object.keys(L).filter(k => !IN.includes(k)).reduce((x, k) => x + L[k], 0); return [(w.stored() - s0) - (inflow - out), inflow]; };
+  const a = mk(11), b = mk(12), sa = a.stored(), sb = b.stored(), na = a.bodies.length, nb = b.bodies.length, before = new Map(a.bodies.map(o => [o.id, { E: o.E, age: o.age, gen: o.gen, g: JSON.stringify(o.g), stage: o.stage, V: o.prof.V }]));
+  const out = JSON.parse(JSON.stringify(a.emigrate(5))); // (as it would cross between threads)
+  assert.strictEqual(out.length, 5); assert.strictEqual(a.bodies.length, na - 5); assert.strictEqual(a.counts.left, 5);
+  for (const s of out) { const n = a.tree.get(s.from.id); assert.strictEqual(n.cause, 'left'); assert.ok(n.died != null && !a.bodies.some(o => o.id === s.from.id)); }
+  const got = b.immigrate(out, 3); assert.strictEqual(b.bodies.length, nb + 5); assert.strictEqual(b.counts.arrived, 5);
+  got.forEach((o, i) => { const was = before.get(out[i].from.id), n = b.tree.get(o.id);
+    assert.strictEqual(o.E, was.E); assert.strictEqual(o.age, was.age); assert.strictEqual(o.gen, was.gen); assert.strictEqual(n.gen, was.gen); assert.strictEqual(o.stage, was.stage); assert.strictEqual(JSON.stringify(o.g), was.g);
+    assert.ok(Math.abs(o.prof.V - was.V) < 1e-12); assert.strictEqual(n.from.id, out[i].from.id); assert.strictEqual(n.from.island, 3); assert.strictEqual(o.parent, 0); });
+  assert.ok(Math.abs(a.ledger.left - b.ledger.arrived) < 1e-9 && a.ledger.left > 0, 'what left is what arrived: ' + a.ledger.left + ' / ' + b.ledger.arrived);
+  for (let i = 0; i < 600; i++) { a.step(); b.step(); }
+  const ga = gap(a, sa), gb = gap(b, sb); assert.ok(Math.abs(ga[0]) < 1e-6 * ga[1], 'source: unexplained ' + ga[0]); assert.ok(Math.abs(gb[0]) < 1e-6 * gb[1], 'destination: unexplained ' + gb[0]);
+  const r = A.engine.World.restore(JSON.parse(JSON.stringify(b.save()))); for (let i = 0; i < 60; i++) { b.step(); r.step(); }
+  assert.strictEqual(JSON.stringify(r.bodies.map(o => [o.id, o.cx, o.E])), JSON.stringify(b.bodies.map(o => [o.id, o.cx, o.E])), 'a world with arrivals saves and continues exactly');
+  const lone = new A.engine.World({ seed: 5 }); lone.spawn(A.genome.primordial(5), 10, 10, 1, null); assert.strictEqual(lone.emigrate(3).length, 0, 'the last body of a world does not leave');
+});

@@ -635,6 +635,38 @@
       }
       w.tree = nodes; w.nextId = d.nextId; w.rand.state(d.rng); return w;
     }
+    // ---- islands: bodies leave this world for another one, or arrive from one ----
+    // A body moves with everything it is: genome, age, size, reserves, wounds. Its pose, speed and nerve state start from rest in the new place,
+    // at the same relative position, and its record there begins a new line (where it came from is kept). Nothing is created or lost:
+    // what leaves is booked as leaving, what arrives as arriving. Which bodies leave is drawn from this world's own random numbers.
+    // A world that never calls these two is not changed by their existence.
+    emigrate(n) {
+      const out = [], lg = this.ledger;
+      for (let k = 0; k < n && this.bodies.length > 1; k++) {
+        const i = this.rand.int(this.bodies.length), o = this.bodies[i]; this.bodies.splice(i, 1); o.dead = 'left'; this.counts.left = (this.counts.left || 0) + 1;
+        const cl = this.clades.get(o.clade);
+        if (cl) { cl.alive--; cl.dead++; cl.causes.left = (cl.causes.left || 0) + 1; cl.eaten += o.eaten; cl.absorbed += o.absorbed; cl.path += o.path; cl.lived += o.age; cl.kids += o.kids; if (cl.alive === 0) { cl.ended = this.t; if (cl.members <= 2) cl.g = null; } }
+        const node = this.tree.get(o.id); if (node) { node.died = this.t; node.cause = 'left'; node.life = { eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, stage: o.stage }; }
+        if (lg) lg.left = (lg.left || 0) + o.E + o.G + o.grow + o.egg + o.prof.buildCost;
+        out.push({ g: A.genome.copy(o.g), stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, life: o.life, gen: o.gen, x: o.cx / this.W, y: o.cy / this.H, hp: o.hp ? Array.from(o.hp) : null, flesh: o.flesh || 0, lost: o.lost || 0,
+          eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, v0: o.V0, s0: o.stage0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage, from: { id: o.id, line: o.line, t: this.t } });
+      }
+      return out;
+    }
+    immigrate(list, island) {
+      const lg = this.ledger, got = [];
+      for (const s of list || []) {
+        const o = this.spawn(A.genome.copy(s.g), ((s.x * this.W) % this.W + this.W) % this.W, clamp(s.y * this.H, 2, this.H - 2), s.stage, null);
+        if (lg) lg.placed -= o.E + o.prof.buildCost; // (spawn booked it as a founder; it is booked below as an arrival, with what it really carries)
+        if (s.hp && s.hp.length === o.b.segs.length && s.hp.some(h => h < 1)) { o.hp = Array.from(s.hp); this.wound(o); }
+        Object.assign(o, { age: s.age, life: s.life, gen: s.gen, E: s.E, G: s.G, egg: s.egg, grow: s.grow, eaten: s.eaten, absorbed: s.absorbed, path: s.path, kids: s.kids, flesh: s.flesh || 0, lost: s.lost || 0, V0: s.v0, stage0: s.s0, nextCost: s.nextCost == null ? undefined : s.nextCost, nextStage: s.nextStage == null ? undefined : s.nextStage });
+        const node = this.tree.get(o.id); node.gen = s.gen; node.from = Object.assign({ island: island == null ? null : island }, s.from);
+        const cl = this.clades.get(o.clade); if (cl && cl.id === o.id) { cl.gen0 = cl.genMax = s.gen; } else if (cl && s.gen > cl.genMax) cl.genMax = s.gen;
+        if (lg) lg.arrived = (lg.arrived || 0) + o.E + o.G + o.grow + o.egg + o.prof.buildCost;
+        this.counts.arrived = (this.counts.arrived || 0) + 1; got.push(o);
+      }
+      return got;
+    }
     // Move a world's living population, with its genomes, genealogy and records, into another map.
     // Bodies land at the same relative place (left-right and depth), at rest. Food and dissolved food are the new map's own.
     // It is a migration, not a continuation: many may die where they land.
