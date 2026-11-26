@@ -272,6 +272,15 @@
 
   function step(b, dt, sub) { const n = sub || K.substeps; if (b.rigid) return rigidStep(b, dt, n); for (let i = 0; i < n; i++) substep(b, dt / n); pose(b); }
 
+  // A push from outside (another body): an impulse on the particle at a segment's far end.
+  // A rigid body takes it as a whole (linear and angular); a jointed one on that particle, and its joints pass it on.
+  function impulse(b, k, jx, jy) {
+    if (b.rigid) {
+      const M = b.mass; let cx = 0, cy = 0; for (let i = 0; i < b.np; i++) { cx += b.x[i] * b.m[i]; cy += b.y[i] * b.m[i]; } cx /= M; cy /= M;
+      const dw = ((b.x[k] - cx) * jy - (b.y[k] - cy) * jx) / b.inertia; b.om += dw;
+      for (let i = 0; i < b.np; i++) { b.vx[i] += jx / M - dw * (b.y[i] - cy); b.vy[i] += jy / M + dw * (b.x[i] - cx); }
+    } else { b.vx[k] += jx / b.m[k]; b.vy[k] += jy / b.m[k]; }
+  }
   function com(b) { let x = 0, y = 0; for (let k = 0; k < b.np; k++) { x += b.x[k] * b.m[k]; y += b.y[k] * b.m[k]; } return [x / b.mass, y / b.mass]; }
   function momentum(b) { let x = 0, y = 0, L = 0; for (let k = 0; k < b.np; k++) { x += b.vx[k] * b.m[k]; y += b.vy[k] * b.m[k]; L += b.m[k] * (b.x[k] * b.vy[k] - b.y[k] * b.vx[k]); } return [x, y, L]; }
   function finite(b) { for (let k = 0; k < b.np; k++) if (!Number.isFinite(b.x[k]) || !Number.isFinite(b.y[k])) return false; return true; }
@@ -290,6 +299,6 @@
     return { ok: finite(b), distance: dist, path, speed: dist / T, work, power: work / T, mass: b.mass, costOfTransport: dist > 1e-6 ? work / (b.mass * dist) : Infinity, maxBend, body: b };
   }
 
-  A.physics = { K, build, step, pose, com, momentum, finite, trial, environment };
+  A.physics = { K, build, step, pose, com, momentum, finite, trial, environment, impulse };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

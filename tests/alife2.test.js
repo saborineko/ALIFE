@@ -326,3 +326,34 @@ test('with a sloping border the load on the floor is continuous across every bor
   for (let i = 0; i < 600; i++) { w.step(); w2.step(); }
   const snap = x => JSON.stringify(x.bodies.map(o => [o.id, o.cx, o.cy, o.E])); assert.strictEqual(snap(w2), snap(w));
 });
+
+test('bodies that touch push each other apart without gaining momentum; a mouth takes exactly what the other body loses; lost tissue is lost function', () => {
+  const C = A.organs.C, mk = o => { const g = A.genome.primordial(1); Object.assign(g.parts[0], o); return g; };
+  const quiet = { seed: 2, founders: 0, cap: 0, contact: 1, flow: 0, grainRate: 0, bottomRate: 0, jitter: 0, nutrientStart: 0, nutrientRegrow: 0 };
+  { // pushing: a rigid body and a jointed one, overlapping
+    const w = new A.engine.World(Object.assign({}, quiet, { noBite: 1 })), a = w.spawn(mk({ cilia: 0, mouth: 0 }), 80, 30, 1, null);
+    const b = w.spawn(design(Object.assign({}, SAMPLES[0].params, { length: 3, width: 0.7, segments: 5, limbs: 0, tail: 0.3, tailSegs: 2 })), 80.4, 30.2, 1, null);
+    const mom = () => { const p = P.momentum(a.b), q = P.momentum(b.b); return [p[0] + q[0], p[1] + q[1]]; }, m0 = mom(); w.index(); w.touch(w.dt); const m1 = mom();
+    assert.ok(Math.hypot(m1[0] - m0[0], m1[1] - m0[1]) < 1e-9, 'momentum before ' + m0 + ' after ' + m1);
+    const gap = () => Math.min(...b.b.segs.map(s => Math.hypot(s.bx - a.b.segs[0].bx, s.by - a.b.segs[0].by) - s.r1 - a.b.segs[0].r1)), g0 = gap(); for (let i = 0; i < 240; i++) w.step();
+    assert.ok(g0 < -0.1 && gap() > -0.05, 'overlap ' + g0 + ' -> ' + gap()); assert.ok(!a.hp && !b.hp, 'no bite where mouths take nothing');
+  }
+  { // biting: the eater's gut gets exactly what the other loses, at every moment, until it dies of it
+    const w = new A.engine.World(quiet), big = w.spawn(mk({ len: 1.4, r0: 1, r1: 1, mouth: 1, gut: 0.5, muscle: 0.3, cilia: 0 }), 80, 30, 1, null);
+    const small = w.spawn(mk({ cilia: 0, mouth: 0 }), big.b.segs[0].bx + 0.3, big.b.segs[0].by, 1, null), has = o => Math.max(0, o.E) + o.G + C.flesh * o.prof.buildCost;
+    w.index(); let n = 0, worst = 0; const v0 = small.prof.V;
+    while (!small.dead && n < 3000) { const s0 = has(small), g0 = big.G; w.touch(w.dt); worst = Math.max(worst, Math.abs((s0 - has(small)) - (big.G - g0))); big.G = Math.max(0, big.G - 0.02); n++; }
+    assert.ok(worst < 1e-9, 'largest mismatch ' + worst); assert.strictEqual(small.dead, 'killed'); assert.ok(n > 5, 'not in an instant: ' + n + ' steps');
+    assert.ok(Math.abs(w.counts.flesh - big.flesh) < 1e-9 && Math.abs(small.lost - big.flesh) < 1e-9 && small.prof.V < 0.31 * v0);
+  }
+  { // wounds: half the tissue of a segment gone = half of what it did
+    const w = new A.engine.World(quiet), o = w.spawn(mk({ cilia: 0.5, beat: -1, eye: 0.5, gonad: 0.3 }), 80, 30, 1, null), p0 = o.prof, c0 = o.b.segs[0].cil;
+    o.hp = [0.5]; w.wound(o); for (const k of ['V', 'gutCap', 'gape', 'eye', 'gonadRate', 'Emax']) assert.ok(Math.abs(o.prof[k] / p0[k] - 0.5) < 1e-9, k);
+    assert.ok(Math.abs(o.b.segs[0].cil / c0 - 0.5) < 1e-9 && !o.dead); o.E = o.prof.Emax; const e0 = o.E; for (let i = 0; i < 30; i++) w.step(); assert.ok(o.hp === null || o.hp[0] > 0.5, 'it mends when it has reserves');
+  }
+  { // such a world restores exactly, wounds included
+    const w = new A.engine.World({ seed: 5, contact: 1 }); w.seedWith(A.genome.primordial(5)); for (let i = 0; i < 6; i++) w.spawn(mk({ len: 1.2, r0: 0.9, r1: 0.9, mouth: 1, gut: 0.5, muscle: 0.3, cilia: 0.5, beat: -1 }), 20 + i * 25, 40, 1, null);
+    for (let i = 0; i < 1500; i++) w.step(); const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); for (let i = 0; i < 600; i++) { w.step(); w2.step(); }
+    const snap = x => JSON.stringify([x.bodies.map(o => [o.id, o.cx, o.cy, o.E, o.G, o.hp]), x.counts]); assert.strictEqual(snap(w2), snap(w));
+  }
+});

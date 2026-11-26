@@ -27,21 +27,24 @@
     gonad: 0.6,           // energy per second a unit of gonad can put into an egg
     work: 2e-4,           // energy per unit of muscle work
     birthStage: 0.3, eggReserve: 0.5, growReserve: 0.35, reproReserve: 0.45,
-    life: 400, carrion: 0.5
+    life: 400, carrion: 0.5,
+    bite: 0.5,            // body volume a mouth can tear from tissue it touches, per second, per gape squared (before its jaw muscle and the other's armour)
+    flesh: 0.5            // share of the cost of building tissue that is still in it as food (the same share a dead body leaves)
   };
 
   function profile(plan) {
     const o = { V: 0, area: 0, Vgut: 0, Vgonad: 0, Vmuscle: 0, Vnerve: 0, Emax: 0, basal: 0, absorb: [], mouths: [], eye: 0, cilia: 0, wiring: 0, segs: plan.segs.length };
     for (const s of plan.segs) {
-      const p = s.p, rm = (s.r0 + s.r1) / 2, zm = (s.z0 + s.z1) / 2, v = PI * rm * zm * s.len, a = PI * (rm + zm) * s.len, u = C.upkeep;
+      // hp: how much of this segment's tissue is left (1 = whole). What is gone does nothing and costs nothing.
+      const p = s.p, hp = s.hp == null ? 1 : s.hp, rm = (s.r0 + s.r1) / 2, zm = (s.z0 + s.z1) / 2, v = PI * rm * zm * s.len * hp, a = PI * (rm + zm) * s.len * hp, u = C.upkeep;
       o.V += v; o.area += a; o.Vgut += v * p.gut; o.Vgonad += v * p.gonad; o.Vmuscle += v * p.muscle; o.Vnerve += v * p.nerve;
       o.Emax += v * (C.store0 + C.store1 * p.store);
       o.basal += v * (C.basal + u.muscle * p.muscle + u.nerve * p.nerve + u.gut * p.gut + u.vessel * p.vessel + u.gonad * p.gonad + u.store * p.store + u.eye * p.eye + u.armor * p.armor + u.mouth * p.mouth);
       o.basal += a * C.surface + a * (p.cilia || 0) * C.ciliaUpkeep; o.cilia += a * (p.cilia || 0);
       const wire = A.neural ? A.neural.wiring(p) : 0; o.wiring += wire; o.basal += wire * C.synapse; // every wired segment pays for its connections
       o.absorb.push(a * Math.max(0, 1 - p.skin - p.armor));
-      if (p.mouth > 0.1 && s.tip) o.mouths.push({ seg: s.id, gape: s.r1 * (0.3 + 0.7 * p.mouth) });
-      if (p.eye > 0.1) o.eye = Math.max(o.eye, p.eye * Math.max(s.r0, s.r1));
+      if (p.mouth > 0.1 && s.tip) o.mouths.push({ seg: s.id, gape: s.r1 * (0.3 + 0.7 * p.mouth) * hp });
+      if (p.eye > 0.1) o.eye = Math.max(o.eye, p.eye * Math.max(s.r0, s.r1) * hp);
     }
     o.basal += C.fixed;
     const hasGut = o.Vgut > 1e-6;
