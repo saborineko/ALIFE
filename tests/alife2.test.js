@@ -640,3 +640,37 @@ test('sound: it spreads, fades and adds up; low pitch carries further; ears hear
   assert.ok(gotE && gotV && codes, 'ears, voices and their neuron connections arise: ' + [gotE, gotV, codes]); assert.ok(off.parts.every(p => p.ear === 0 && p.voice === 0 && p.hE === 0 && p.mVoice === 0 && !(p.nn || []).some(n => n.in.some(e => e[0] === 'e') || n.out.some(e => 'VQ'.includes(e[0])))), 'and never where sound does not exist');
   const m1 = G.ensureIds(G.primordial(1)), m2 = G.copy(m1); m2.parts[0].ear = 0.9; m2.parts[0].len = 0.9; let leaked = 0; for (let i = 0; i < 100; i++) if (G.recombine(m1, m2, r).parts[0].ear !== 0) leaked++; assert.strictEqual(leaked, 0, 'mixing in a world without sound does not touch the genes of sound');
 });
+test('the record of sound is only a notebook: wiping it changes nothing in the world; it tells bodies that respond to a call from bodies that merely differ; order is counted within a body; older saves load', () => {
+  const G = A.genome, W = o => new A.engine.World(Object.assign({ seed: 5, founders: 0, cap: 0, sound: 1, nerve2: 1, blind: 1 }, o || {}));
+  const one = (o, nn, fr) => { const g = G.create({ freq: fr || 1, parts: [G.part(Object.assign({ len: 0.6, r0: 0.3, r1: 0.3, nerve: 0.5, store: 0.5 }, o))], links: [] }); if (nn) g.parts[0].nn = nn; return g; };
+  const caller = () => one({ voice: 0.3, pitch: 0.2, freq: 0.25 }, [{ b: -2.7, k: 1, in: [['o', 3]], out: [['V', 1]] }], 0.2); // a few seconds of sound every twenty
+  const HEAR = [{ b: -1, k: 1, in: [['e', 4]], out: [['C', 1]] }];
+  const kinds = { respond: [() => one({ ear: 0.6, hTune: 0.2, hWide: 0.3, adapt: 1, cilia: 0.4, beat: -1 }, HEAR), () => one({ cilia: 0.4, beat: -1 }, HEAR)], // swims when it hears | the same body without the ear
+    differ: [() => one({ ear: 0.6, hTune: 0.2, hWide: 0.3, adapt: 1, cilia: 0.4, beat: 1 }), () => one({})] };                                              // always swims, its ear wired to nothing | sits still
+  const scene = (kind, steps, each) => { const w = W(), L = [], [eared, earless] = kinds[kind]; for (let i = 0; i < 200; i++) w.step();
+    for (let i = 0; i < 4; i++) { const x0 = 20 + i * 38; L.push(w.spawn(caller(), x0, 30, 1, null)); for (let j = 0; j < 4; j++) { L.push(w.spawn(eared(), x0 - 6 + j * 4, 34, 1, null)); L.push(w.spawn(earless(), x0 - 6 + j * 4, 26, 1, null)); } }
+    for (let i = 0; i < steps; i++) { w.step(); for (const o of L) if (!o.dead) o.E = o.prof.Emax; if (each) each(w, i); } return w; };
+  // 1. the notebook is not part of the world
+  const print = w => JSON.stringify([w.t, w.rand.state ? w.rand.state() : 0, w.bodies.map(o => [o.id, o.cx, o.cy, o.E, o.path, o.b.segs.map(q => [q.e, q.vo])]), Array.from(w.snd[0].subarray(0, 400)), Array.from(w.sndV[1].subarray(0, 400))]);
+  const kept = scene('respond', 2400), wiped = scene('respond', 2400, (w, i) => { if (i % 37 === 0) { w.aco = w.acoNew(); w.sndPend = []; for (const o of w.bodies) for (const k of Object.keys(o)) if (/^vo[A-Z]|^vs\d/.test(k)) delete o[k]; } });
+  assert.ok(kept.aco.onsets >= 8 && kept.aco.out.voice > 0, 'voices sounded: ' + kept.aco.onsets); assert.ok(wiped.aco.onsets < kept.aco.onsets, 'and the notebook really was wiped');
+  assert.strictEqual(print(wiped), print(kept), 'a world whose record is wiped again and again goes on exactly as one whose record is kept');
+  // 2. listeners: bodies that swim when they hear are found; bodies of two kinds, neither of which responds, are not
+  const rw = scene('respond', 9000), r = rw.census(), d = scene('differ', 9000).census();
+  assert.ok(r.lisEffect > 1 && r.lisOf === '動く' && r.lisControl === 'both' && r.lisMovedAfter > 1.5 * r.lisMovedBefore, 'responders are found: ' + JSON.stringify([r.lisEffect, r.lisOf, r.lisControl, r.lisN, r.lisMovedBefore, r.lisMovedAfter]));
+  assert.ok(Math.abs(d.lisEffect) < 0.25 && d.lisMovedBefore > 0.3, 'bodies that merely differ are not taken for listeners: ' + JSON.stringify([d.lisEffect, d.lisOf, d.lisN, d.lisMovedBefore, d.lisMovedAfter]));
+  assert.ok(r.callShapes >= 1 && r.sequenceN === 0 && r.dialectBits === 0, 'one shape of call, so nothing to say about order');
+  // 3. order: within a body, against its own repertoire
+  { const w = W(); let z = 12345; const rnd = () => (z = (z * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const seq = fn => { w.aco = w.acoNew(); for (let b = 0; b < 40; b++) { const o = { gen: 1, cx: 10 }; for (let i = 0; i < 60; i++) w.voiceShape(o, fn(b, i)); } return w.soundDerived(); };
+    const own = seq(b => b % 6), iid = seq(() => (rnd() < 0.6 ? 1 : 4)), alt = seq((b, i) => (i % 2 ? 1 : 4)), runs = seq((b, i) => (Math.floor(i / 5) % 2 ? 1 : 4));
+    assert.strictEqual(own.sequenceN, 0, 'bodies that each keep to one shape say nothing about order'); assert.ok(own.callShapes === 6);
+    assert.ok(Math.abs(iid.sequenceOrder) < 0.03 && iid.sequenceN > 1000, 'shapes drawn without regard to the last: ' + iid.sequenceOrder);
+    assert.ok(alt.sequenceOrder < -0.4 && runs.sequenceOrder > 0.25, 'taking turns ' + alt.sequenceOrder + ', runs ' + runs.sequenceOrder); }
+  // 4. firsts are logged only after five censuses in a row, and a save from before the notebook grew still loads
+  { const w = rw, F = w.events.filter(e => /音（観測）/.test(e.text)); assert.ok(F.length >= 2 && F.every(e => e.t >= 150) && F.some(e => /聞こえる個体のふるまい/.test(e.text)), 'firsts: ' + F.map(e => e.t + ' ' + e.text).join(' / '));
+    const d0 = JSON.parse(JSON.stringify(w.save())); for (const k of ['lis', 'seqN', 'seqRep', 'seqExp', 'on', 'replied', 'hearN', 'hearYes', 'shape', 'gen', 'reg', 'first', 'pool', 'resD', 'resN', 'chD', 'chN']) delete d0.snd.aco[k];
+    const old = A.engine.World.restore(d0); for (let i = 0; i < 900; i++) old.step(); const c = old.census();
+    for (const k of ['lisEffect', 'alternation', 'sequenceOrder', 'dialectBits', 'resemble', 'answer', 'callsEnded']) assert.ok(Number.isFinite(c[k]), k + ' after loading an older save: ' + c[k]); }
+});
+
