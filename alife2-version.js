@@ -1,7 +1,7 @@
 // ALIFE 2.0 build number. Written by tools/alife2-bump.js; do not edit by hand.
 (function (G) {
   const A = G.ALIFE2 = G.ALIFE2 || {};
-  A.version = { build: 31, label: 'v2.0.31', at: '2026-11-26T10:58:13.935Z', when: '2026-11-26 10:58 UTC', note: "出生の収支を合わせる規則、成長で神経の状態を引き継ぐ規則、全部入りの開始ボタン" };
+  A.version = { build: 32, label: 'v2.0.32', at: '2026-11-26T12:04:27.120Z', when: '2026-11-26 12:04 UTC', note: "変異の強さの進化、粒を削って食べる規則、開放性の記録（既存システムの調査から）" };
   // shown in the reader's own time zone
   const local = () => { try { return new Date(A.version.at).toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }); } catch (e) { return A.version.when; } };
   if (typeof document !== 'undefined') addEventListener('DOMContentLoaded', () => { for (const e of document.querySelectorAll('[data-alife2-version]')) e.textContent = A.version.label + '（' + local() + (A.version.note ? '・' + A.version.note : '') + '）'; });

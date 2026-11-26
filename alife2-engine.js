@@ -34,6 +34,9 @@
     vision: 0,                            // 1 = a segment with eye tissue is a receptor that looks one way and sees coloured things: food grains and other bodies alike. 0 = the worlds before this existed
     foodHue: 50,                          // the colour of food grains (degrees). Bodies have the colour their genome gives them
     sightless: 0,                         // control experiment: no eye in this world reports anything
+    metamut: 0,                           // 1 = how often and how strongly a lineage mutates is itself inherited and mutates (gene `mut`, 0.1..3 times the world's rate)
+    nibble: 0,                            // 1 = a mouth that reaches a grain it cannot swallow whole (too big for it, or for the room left in its gut) tears pieces from it,
+                                          // at the rate at which it tears tissue. 0 = the earlier rule: a grain is swallowed whole or not at all
     budget: 0,                            // 1 = an egg holds what its parent put into it, and the young is built from that with its own (mutated) genes: it develops as far
                                           // as the egg pays for (never past the stage its genes aim at), keeps what is left as yolk, and is stillborn if not even a bud can be made.
                                           // 0 = the earlier rule: the young is born at the stage and size its own genes describe, whatever the parent paid
@@ -162,6 +165,8 @@
       if (o.shore != null && o.shore !== this.shore) { this.shore = o.shore; this.log('世界の設定を変更：海域の境界を' + (o.shore > 0 ? 'なだらかにした（幅 ' + o.shore + '）' : '段差に戻した')); }
       if (o.contact != null && !!o.contact !== !!this.contact) { this.contact = o.contact ? 1 : 0; this.log('世界の設定を変更：身体の接触と、口による組織の摂取を' + (o.contact ? '有効にした' : '無効にした')); for (const b of this.bodies) b.passive = !this.contact && !b.b.hasCilia && b.b.rigid; for (const k of ['killed', 'flesh', 'torn']) if (this.counts[k] == null) this.counts[k] = 0; }
       if ((this.vision || this.contact) && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
+      if (o.metamut != null && !!o.metamut !== !!this.metamut) { this.metamut = o.metamut ? 1 : 0; this.log('世界の設定を変更：変異の強さが遺伝し、それ自体も変異する規則を' + (o.metamut ? '有効にした' : '無効にした')); }
+      if (o.nibble != null && !!o.nibble !== !!this.nibble) { this.nibble = o.nibble ? 1 : 0; this.log('世界の設定を変更：飲み込めない粒を口が削って食べられる規則を' + (o.nibble ? '有効にした' : '無効にした')); }
       if (o.budget != null && !!o.budget !== !!this.budget) { this.budget = o.budget ? 1 : 0; this.log('世界の設定を変更：出生の収支を合わせる規則（子は卵の予算で作れる段階で生まれる）を' + (o.budget ? '有効にした' : '無効にした')); }
       if (o.carry != null && !!o.carry !== !!this.carry) { this.carry = o.carry ? 1 : 0; this.log('世界の設定を変更：成長の前後で神経の状態と律動を引き継ぐ規則を' + (o.carry ? '有効にした' : '無効にした')); }
       if (o.genome2 != null && !!o.genome2 !== !!this.genome2) { this.genome2 = o.genome2 ? 1 : 0; this.log('世界の設定を変更：遺伝子の新しい規則（軸の分割・休眠遺伝子・識別子）を' + (o.genome2 ? '有効にした' : '無効にした')); }
@@ -466,6 +471,15 @@
         for (const m of pr.mouths) {
           const s = b.segs[m.seg], ci = this.cellAt(s.bx, clamp(s.by, 0, this.H - 0.01));
           for (const f of this.grid[ci]) {
+            if (this.nibble && f.e > 0 && (f.size > m.gape * 1.3 || o.G + f.e > pr.gutCap) && o.G < pr.gutCap) { // too much to swallow: take a piece
+              let dx = f.x - s.bx; if (dx > this.W / 2) dx -= this.W; else if (dx < -this.W / 2) dx += this.W;
+              if (Math.sqrt(dx * dx + (f.y - s.by) * (f.y - s.by)) < m.gape + f.size * 0.5) {
+                const take = Math.min(f.e, pr.gutCap - o.G, C.bite * m.gape * m.gape * (0.4 + 1.2 * s.p.muscle) * this.grainEnergy * dt);
+                if (lg) this.grainClass(f.c || String(f.size)).eaten += take;
+                f.e -= take; o.G += take; o.eaten += take; this.counts.eaten += take; f.size = Math.cbrt(Math.max(f.e, 0) / this.grainEnergy) || f.size; if (f.e < 1e-9) f.e = 0;
+              }
+              continue;
+            }
             if (lg && f.e > 0 && (f.size > m.gape * 1.3 || o.G + f.e > pr.gutCap)) { // (ledger only) a mouth that reaches a grain it cannot take: note once why
               let dx = f.x - s.bx; if (dx > this.W / 2) dx -= this.W; else if (dx < -this.W / 2) dx += this.W;
               if (Math.sqrt(dx * dx + (f.y - s.by) * (f.y - s.by)) < m.gape + f.size * 0.5) { const gc = this.grainClass(f.c || String(f.size)); if (f.size > m.gape * 1.3) { if (!f.tb) { f.tb = 1; gc.tooBig += f.e; } } else if (!f.gf) { f.gf = 1; gc.gutFull += f.e; } }
@@ -501,7 +515,8 @@
         }
       }
       for (const o of born) {
-        const g = this.rand() < this.mutation ? A.genome.mutate(o.g, this.rand, undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '')) : A.genome.copy(o.g);
+        const mm = this.metamut ? (o.g.mut == null ? 1 : o.g.mut) : 1;
+        const g = this.rand() < this.mutation * mm ? A.genome.mutate(o.g, this.rand, this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut ? 'm' : '')) : A.genome.copy(o.g);
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
         const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1, bx = o.cx + Math.cos(a) * d, by = clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), B = o.eggCost - C.eggFixed; // B: what the egg holds
@@ -602,6 +617,7 @@
         multi: n ? segs.filter(s => s > 1).length / n : 0, volume: mean(o => o.prof.V), speed: mean(o => o.age > 5 ? o.path / o.age : 0),
         mouthShare: mean(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), eyes: mean(o => o.prof.eye > 0 ? 1 : 0),
         bottom: mean(o => this.isGround(o.cx, o.cy) ? 1 : 0),
+        mutGene: mean(o => (o.g.mut == null ? 1 : o.g.mut)),
         birthV: (l => l.length ? l.reduce((a, o) => a + o.V0, 0) / l.length : 0)(this.bodies.filter(o => o.V0 != null && o.gen > 0)), birthStage: (l => l.length ? l.reduce((a, o) => a + o.stage0, 0) / l.length : 0)(this.bodies.filter(o => o.stage0 != null && o.gen > 0)), birthGene: mean(o => o.g.birth), eggCost: mean(o => o.eggCost), adultV: mean(o => o.full.V),
         partsTotal: mean(o => o.gu.parts), partsReach: mean(o => o.gu.reach), partsUsed: mean(o => o.gu.expr), multiPart: mean(o => o.gu.expr > 1 ? 1 : 0), zoned: mean(o => o.gu.zones > 0 ? 1 : 0), differed: mean(o => o.gu.zones > 0 && o.gu.div > 0.05 ? 1 : 0),
         fleshShare: mean(o => o.eaten > 0 ? (o.flesh || 0) / o.eaten : 0), fleshEaters: mean(o => (o.flesh || 0) > 0.2 * o.eaten && o.eaten > 0 ? 1 : 0), wounded: mean(o => o.hp ? 1 : 0), armor: mean(o => o.g.parts.reduce((a, p) => a + p.armor, 0) / o.g.parts.length),

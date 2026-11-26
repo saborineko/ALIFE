@@ -431,3 +431,14 @@ test('carry: a segment keeps its nerve signal, its sensory adaptation and the bo
     const kept = o.plan.segs.filter((s, i) => before.has(s.addr) && o.b.segs[i].a === before.get(s.addr)[0] && o.b.segs[i].m === before.get(s.addr)[1]).length, had = o.plan.segs.filter(s => before.has(s.addr)).length;
     if (carry) { assert.ok(had > 2 && kept === had, kept + ' of ' + had + ' kept'); assert.strictEqual(o.b.t, t); } else { assert.ok(o.b.segs.every(q => q.a === 0 && q.m === null) && o.b.t !== t, 'earlier rule: starts from nothing'); } }
 });
+
+test('mutation strength can itself evolve; a mouth can take pieces of a grain too big to swallow; neither touches worlds without the setting', () => {
+  const G = A.genome; let g = G.primordial(2); const r = G.rng(3); for (let i = 0; i < 200; i++) g = G.mutate(g, r, 1, 'xvg'); assert.strictEqual(g.mut, undefined);
+  let h = G.primordial(2); const r2 = G.rng(3); for (let i = 0; i < 200; i++) h = G.mutate(h, r2, h.mut == null ? 1 : h.mut, 'm'); assert.ok(h.mut !== 1 && h.mut >= 0.1 && h.mut <= 3, 'mut ' + h.mut);
+  const w = new A.engine.World({ seed: 5, metamut: 1 }); w.seedWith(G.primordial(5)); for (let i = 0; i < 3000; i++) w.step(); const c = w.census(); assert.ok(w.bodies.some(o => o.g.mut != null && o.g.mut !== 1) && c.mutGene > 0.1);
+  // nibbling: a small mouth held on a big fixed grain
+  const run = nibble => { const x = new A.engine.World({ seed: 2, founders: 0, cap: 0, nibble, audit: 1, flow: 0, grainRate: 0, bottomRate: 0, jitter: 0, nutrientStart: 0, nutrientRegrow: 0 });
+    const g2 = G.primordial(1); Object.assign(g2.parts[0], { cilia: 0 }); const o = x.spawn(g2, 80, 90, 1, null); o.passive = true; x.step(); const s = o.b.segs[0]; x.addFood(s.bx, s.by, 1.2, 40 * 1.2 ** 3, true, 1e9); const e0 = x.food[0].e;
+    for (let i = 0; i < 300; i++) x.step(); return { eaten: o.eaten, left: x.food.length ? x.food[0].e : 0, e0, size: x.food.length ? x.food[0].size : 0 }; };
+  const off = run(0), on = run(1); assert.strictEqual(off.eaten, 0, 'whole or nothing: nothing'); assert.ok(on.eaten > 0.05 && Math.abs(on.e0 - on.left - on.eaten) < 1e-9 && on.size < 1.2, JSON.stringify(on));
+});
