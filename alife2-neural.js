@@ -37,7 +37,8 @@
   // Local circuits. Each segment has one signal. It hears its own sense (taste[i] = dissolved food where that
   // segment is, 0..1), its neighbours along the body, and the body's hunger; it speaks to its own cilia and joint.
   // Nothing here knows what the signal is for. Returns the summed activity (it costs energy).
-  function local(body, taste, hunger) {
+  // smA, smB (optional): how much of the two substances bodies leak is in the water at each segment.
+  function local(body, taste, hunger, smA, smB) {
     const segs = body.segs; let use = 0;
     for (let i = 0; i < segs.length; i++) {
       const s = segs[i]; if (!s.circ) continue;
@@ -48,14 +49,21 @@
       const c = taste[i]; if (s.m == null) s.m = c; s.m += 0.03 * (c - s.m);
       let rel = (c - s.m) / (0.03 + 0.15 * s.m); rel = rel < -1 ? -1 : rel > 1 ? 1 : rel;
       const sense = (1 - p.adapt) * (c - 0.5) * 2 + p.adapt * rel;
-      const x = p.nC * gain * sense + p.nP * par + p.nK * kid + p.nH * hunger + p.nB;
+      let x = p.nC * gain * sense + p.nP * par + p.nK * kid + p.nH * hunger + p.nB;
+      if (smA && (p.sA !== 0 || p.sB !== 0)) x += gain * (p.sA * smell(s, 'mA', smA[i], p.adapt) + p.sB * smell(s, 'mB', smB[i], p.adapt));
       s.a += p.leak * (Math.tanh(x) - s.a);
       const cd = 1 + p.mCil * s.a; s.cd = cd < 0 ? 0 : cd > 2 ? 2 : cd; s.ct = p.mTurn * s.a;
       use += s.a < 0 ? -s.a : s.a;
     }
     return use;
   }
-  const CIRCUIT = ['nC', 'nP', 'nK', 'nH', 'nB', 'mCil', 'mTurn', 'mJoint', 'adapt'];
+  // One smell receptor: the same two readings as taste (how much there is; or, as far as it adapts, the change against a slow average).
+  function smell(s, key, c, adapt) {
+    if (s[key] == null) s[key] = c; s[key] += 0.03 * (c - s[key]);
+    let rel = (c - s[key]) / (0.02 + 0.15 * s[key]); rel = rel < -1 ? -1 : rel > 1 ? 1 : rel;
+    return (1 - adapt) * (2 * c / (c + 0.1) - 1) + adapt * rel;
+  }
+  const CIRCUIT = ['nC', 'nP', 'nK', 'nH', 'nB', 'mCil', 'mTurn', 'mJoint', 'adapt', 'sA', 'sB'];
   const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); return w; };
 
   A.neural = { cpg, command, local, wiring, CIRCUIT };

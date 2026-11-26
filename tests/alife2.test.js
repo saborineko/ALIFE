@@ -251,3 +251,26 @@ test('a restored world continues exactly as the saved one would have (pose, velo
     assert.ok(w.bodies.length > 10 && w.counts.births > 0);
   }
 });
+
+test('worlds without the leaked substances never touch the genes for sensing them', () => {
+  let g = A.genome.primordial(4); const r = A.genome.rng(9);
+  for (let i = 0; i < 400; i++) g = A.genome.mutate(g, r);
+  assert.ok(g.parts.every(p => p.sA === 0 && p.sB === 0) && g.odor === 0.5, 'unchanged after 400 mutations');
+  let h = A.genome.primordial(4); const r2 = A.genome.rng(9);
+  for (let i = 0; i < 400; i++) h = A.genome.mutate(h, r2, undefined, true);
+  assert.ok(h.parts.some(p => p.sA !== 0 || p.sB !== 0) && h.odor !== 0.5, 'they do change where bodies leak');
+});
+
+test('bodies leak into the water, a wired segment senses it, the cut sense does not, and such a world restores exactly', () => {
+  const mk = (o, odor) => { const g = A.genome.primordial(3); Object.assign(g.parts[0], { cilia: 0.5, beat: -1, nerve: 0.5 }, o); g.odor = odor; return g; };
+  const run = cut => { const w = new A.engine.World({ seed: 3, founders: 0, cap: 0, scent: 1, anosmic: cut });
+    const me = w.spawn(mk({ sB: 4 }, 0.95), 80, 30, 1, null); for (let i = 0; i < 10; i++) w.spawn(mk({ cilia: 0 }, 0.05), 80 + Math.cos(i) * 2, 30 + Math.sin(i) * 2, 1, null);
+    for (let i = 0; i < 30 * 20; i++) w.step(); return { w, me }; };
+  const a = run(0), b = run(1);
+  assert.ok(a.w.nutAt(80, 30, a.w.scB) > 5 * a.w.nutAt(80, 30, a.w.scA) && a.w.nutAt(80, 30, a.w.scB) > 20 * a.w.nutAt(10, 60, a.w.scB), 'the crowd of B bodies can be smelt where it is');
+  assert.ok(a.me.b.segs[0].a > 0.1 && b.me.b.segs[0].a < -0.9, 'sensed ' + a.me.b.segs[0].a + ', cut ' + b.me.b.segs[0].a);
+  const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(a.w.save())));
+  for (let i = 0; i < 300; i++) { a.w.step(); w2.step(); }
+  const snap = x => JSON.stringify([x.bodies.map(o => [o.cx, o.cy, o.E, o.b.segs[0].a, o.b.segs[0].mB]), Array.from(x.scA), Array.from(x.scB)]);
+  assert.strictEqual(snap(w2), snap(a.w));
+});

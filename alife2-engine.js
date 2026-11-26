@@ -27,7 +27,10 @@
     blind: 0,                             // control experiment: nothing in this world is told where food is
     rigid: 1,                             // 0 = never use the rigid-body shortcut (control experiment)
     jostleEvery: 1,                       // 1 = every drifting grain is jostled every step. Larger values are faster but starve stationary feeders (measured: -15% at 4)
-    noCilia: 0                            // control experiment: cilia genes cannot be expressed in this world
+    noCilia: 0,                           // control experiment: cilia genes cannot be expressed in this world
+    scent: 0,                             // 1 = bodies leak two substances into the water as they live, and segments can sense them. 0 = the worlds before this existed
+    scentRate: 1, scentDecay: 0.05,       // leaked per unit of resting metabolism; share lost per second
+    anosmic: 0                            // control experiment: no segment in this world can sense what bodies leak
   };
 
   // Maps: a world can be one continuous place whose regions differ in what they offer.
@@ -59,6 +62,7 @@
       if (M) this.buildMap(M);
       this.counts = { births: 0, starved: 0, aged: 0, broken: 0, blocked: 0, eaten: 0 };
       this.taste = new Float64Array(256);
+      if (this.scent) { const n = this.cols * this.rows; this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
       this.tree = new Map(); this.events = []; this.history = []; this.firsts = {}; this.pruned = 0; this.clades = new Map();
     }
     buildMap(M) {
@@ -133,8 +137,21 @@
     }
     ancestors(id) { const out = []; let n = this.tree.get(id); while (n) { out.push(n); n = this.tree.get(n.parent); } return out; }
     // dissolved food at a point, interpolated between cell centres (so a body can, in principle, tell one side from the other)
-    nutAt(x, y) {
-      const c = this.cell, fx = x / c - 0.5, fy = clamp(y / c - 0.5, 0, this.rows - 1), x0 = Math.floor(fx), y0 = Math.min(this.rows - 2, Math.floor(fy)), tx = fx - x0, ty = fy - y0, n = this.cols, N = this.nut;
+    // What bodies leak spreads through the water and fades. Every living body leaks where it is, in proportion to its resting metabolism.
+    stepScent(dt) {
+      const { cols, rows } = this, k = this.nutrientDiffuse, keep = 1 - this.scentDecay * dt;
+      for (const o of this.bodies) { const i = this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01)), e = this.scentRate * o.prof.basal * dt; this.scA[i] += e * o.g.odor; this.scB[i] += e * (1 - o.g.odor); }
+      for (const key of ['scA', 'scB']) {
+        const a = this[key], b = this.sc2;
+        for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+          const i = y * cols + x, l = y * cols + (x + cols - 1) % cols, rr = y * cols + (x + 1) % cols, u = y ? i - cols : i, d = y < rows - 1 ? i + cols : i;
+          b[i] = (a[i] + k * (a[l] + a[rr] + a[u] + a[d] - 4 * a[i])) * keep;
+        }
+        this[key] = b; this.sc2 = a;
+      }
+    }
+    nutAt(x, y, field) {
+      const c = this.cell, fx = x / c - 0.5, fy = clamp(y / c - 0.5, 0, this.rows - 1), x0 = Math.floor(fx), y0 = Math.min(this.rows - 2, Math.floor(fy)), tx = fx - x0, ty = fy - y0, n = this.cols, N = field || this.nut;
       const a = ((x0 % n) + n) % n, b = (a + 1) % n, r0 = Math.max(0, y0) * n, r1 = Math.max(0, y0 + 1) * n;
       return (N[r0 + a] * (1 - tx) + N[r0 + b] * tx) * (1 - ty) + (N[r1 + a] * (1 - tx) + N[r1 + b] * tx) * ty;
     }
@@ -247,6 +264,7 @@
     step() {
       const dt = this.dt, C = A.organs.C, P = A.physics;
       this.stepFood(dt);
+      if (this.scent && this.tick % 6 === 0) this.stepScent(dt * 6);
       const born = [];
       for (const o of this.bodies) {
         const b = o.b, pr = o.prof;
@@ -256,7 +274,12 @@
         if (b.hasCircuit && !o.passive) { // each wired segment tastes the water where it is; the circuit does the rest
           const taste = this.taste, cut = o.numb || this.numb, segs = b.segs;
           for (let i = 0; i < segs.length; i++) taste[i] = cut || !segs[i].circ ? 0.5 : this.nutAt((segs[i].ax + segs[i].bx) * 0.5, (segs[i].ay + segs[i].by) * 0.5) / this.nutrientCap;
-          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax) * dt;
+          let smA = null, smB = null;
+          if (this.scent) { // and what bodies have leaked there
+            smA = this.smA; smB = this.smB; const off = o.anosmic || this.anosmic;
+            for (let i = 0; i < segs.length; i++) { const q = segs[i]; if (off || !q.circ) { smA[i] = smB[i] = 0; continue; } const x = (q.ax + q.bx) * 0.5, y = (q.ay + q.by) * 0.5; smA[i] = this.nutAt(x, y, this.scA); smB[i] = this.nutAt(x, y, this.scB); }
+          }
+          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax, smA, smB) * dt;
         }
         if (o.passive) { if (!ground) for (let k = 0; k < b.np; k++) { b.x[k] += fl[0] * dt; b.y[k] += fl[1] * dt; } P.pose(b); }
         else P.step(b, dt, this.substeps);
@@ -302,7 +325,7 @@
         }
       }
       for (const o of born) {
-        const g = this.rand() < this.mutation ? A.genome.mutate(o.g, this.rand) : A.genome.copy(o.g);
+        const g = this.rand() < this.mutation ? A.genome.mutate(o.g, this.rand, undefined, this.scent) : A.genome.copy(o.g);
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
         const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1; this.spawn(g, o.cx + Math.cos(a) * d, clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), g.birth, o); this.counts.births++;
@@ -336,7 +359,7 @@
     save() {
       return {
         format: 'alife2-world-1', exact: 1, opt: Object.fromEntries(Object.keys(DEFAULTS).map(k => [k, this[k]])), t: this.t, tick: this.tick, nextId: this.nextId, rng: this.rand.state(),
-        nut: Array.from(this.nut), food: this.food.filter(f => f.e > 0).map(f => [f.x, f.y, f.size, f.e, f.fixed ? 1 : 0, f.die]),
+        nut: Array.from(this.nut), scA: this.scent ? Array.from(this.scA) : undefined, scB: this.scent ? Array.from(this.scB) : undefined, food: this.food.filter(f => f.e > 0).map(f => [f.x, f.y, f.size, f.e, f.fixed ? 1 : 0, f.die]),
         patch: this.patch, grainDebt: this.grainDebt || 0, bottomDebt: this.bottomDebt || 0, liveLines: this.liveLines ? [...this.liveLines] : null, regionState: this.regions ? this.regions.map(q => ({ debt: q.debt, patch: q.patch })) : null,
         counts: this.counts, events: this.events, history: this.history, firsts: this.firsts, pruned: this.pruned, tree: [...this.tree.values()],
         // body plans that only one or two bodies ever had keep their numbers but not their genome (worlds begun before this rule still carry them)
@@ -344,13 +367,13 @@
         bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home,
           sig: b.hasCircuit ? b.segs.map(q => q.a) : undefined,
           st: { x: Array.from(b.x), y: Array.from(b.y), vx: Array.from(b.vx), vy: Array.from(b.vy), t: b.t, work: b.work, heat: b.heat, cilia: b.ciliaUse, nerve: b.nerveUse, om: b.om || 0, th: b.th || 0, loc: b.loc ? Array.from(b.loc) : null, inertia: b.inertia == null ? null : b.inertia, carried: b.carried == null ? null : b.carried, cmd: b.cmd,
-            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir]), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
+            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB]), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
       };
     }
     // Older saves (without `exact`) lack pose, velocities, rhythm phase, sensory memory and birth region: bodies then restart from rest.
     static restore(d) {
       if (!d || d.format !== 'alife2-world-1') throw new Error('not an ALIFE 2.0 world');
-      const w = new World(d.opt); w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); w.patch = d.patch; w.counts = d.counts; w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
+      const w = new World(d.opt); w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = d.counts; w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
       for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: d.exact ? f[5] : w.t + f[5] });
       if (d.exact) { w.grainDebt = d.grainDebt; w.bottomDebt = d.bottomDebt; if (d.liveLines) w.liveLines = new Set(d.liveLines); if (d.regionState && w.regions) d.regionState.forEach((q, i) => { w.regions[i].debt = q.debt; w.regions[i].patch = q.patch; }); }
       const nodes = new Map(d.tree.map(n => [n.id, n]));
@@ -363,7 +386,7 @@
         if (st) { // put the body back exactly as it was
           const b = o.b; b.x.set(st.x); b.y.set(st.y); b.vx.set(st.vx); b.vy.set(st.vy); b.t = st.t; b.work = st.work; b.heat = st.heat; b.ciliaUse = st.cilia; b.nerveUse = st.nerve; b.carried = st.carried == null ? undefined : st.carried; b.cmd = st.cmd;
           if (b.rigid && st.loc) { b.om = st.om; b.th = st.th; b.loc.set(st.loc); b.inertia = st.inertia; } // the same numbers, not the same quantities recomputed in another orientation
-          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; });
+          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; });
           A.physics.pose(b); o.cx = s.x; o.cy = s.y;
           Object.assign(o, { noise: st.noise, wander: st.wander, seen: st.seen, sx: st.sx, sy: st.sy, sdt: st.sdt, taxDot: st.taxDot, taxLen: st.taxLen, taxN: st.taxN, work0: st.work0, cil0: st.cil0, nerve0: st.nerve0, nextCost: st.nextCost, nextStage: st.nextStage });
         }

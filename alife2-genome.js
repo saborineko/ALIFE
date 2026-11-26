@@ -60,7 +60,11 @@
     mCil: [-1.5, 1.5, 0, 'n'],     // signal -> how hard this segment's cilia beat
     mTurn: [-1.5, 1.5, 0, 'n'],    // signal -> this segment's cilia beat unevenly, side to side (it turns)
     mJoint: [-1, 1, 0, 'n'],       // signal -> bend of this segment's joint
-    adapt: [0, 1, 0, 'n']          // 0 = the sense reports how rich the water is; 1 = it adapts and reports only change
+    adapt: [0, 1, 0, 'n'],         // 0 = the sense reports how rich the water is; 1 = it adapts and reports only change
+    // Bodies leak two substances into the water (see `odor`). A segment can sense how much of each is where it is.
+    // These two genes only change in worlds where bodies leak (marked 'x'): elsewhere they stay 0 and cost no random draws.
+    sA: [-4, 4, 0, 'n', 'x'],      // from its own sense of substance A
+    sB: [-4, 4, 0, 'n', 'x']       // from its own sense of substance B
   };
   const LINK_FIELDS = {
     at: [0, 1, 1, 'n'],            // where along the parent
@@ -110,6 +114,7 @@
     g.root = clamp(g.root | 0, 0, g.parts.length - 1);
     g.hue = ((g.hue % 360) + 360) % 360;
     g.freq = clamp(Number.isFinite(g.freq) ? g.freq : 1, 0.2, 4);
+    g.odor = clamp(Number.isFinite(g.odor) ? g.odor : 0.5, 0, 1); // what the body leaks: this share as substance A, the rest as B. Inherited, so relatives smell alike
     g.birth = clamp(Number.isFinite(g.birth) ? g.birth : 0.3, 0.2, 0.9); // how developed offspring are when released (bigger young cost more each)
     if (!Array.isArray(g.brain) || g.brain.length !== BRAIN_IN * BRAIN_OUT) g.brain = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     g.brain = g.brain.map(v => clamp(Number.isFinite(v) ? v : 0, -4, 4));
@@ -127,10 +132,11 @@
   }
 
   // Mutation acts on the grammar, never on a finished body.
-  function mutate(g0, r, strength) {
+  function mutate(g0, r, strength, extra) {
     const g = copy(g0), s = strength == null ? 1 : strength;
     const num = (o, F) => {
       for (const k in F) {
+        if (F[k][4] && !extra) continue;
         if (r() > 0.12) continue;
         const [lo, hi, , kind] = F[k], span = kind === 'a' ? 1.2 : hi - lo;
         o[k] += r.gauss() * span * 0.07 * s;
@@ -159,6 +165,7 @@
     g.hue += r.gauss() * 6 * s;
     g.freq += r.gauss() * 0.05 * s;
     if (r() < 0.2) g.birth += r.gauss() * 0.06 * s;
+    if (extra && r() < 0.2) g.odor += r.gauss() * 0.08 * s;
     for (let i = 0; i < g.brain.length; i++) if (r() < 0.2) g.brain[i] += r.gauss() * 0.35 * s;
     g.mutations = (g.mutations || 0) + 1;
     if (g.origin === 'artificial') g.origin = 'artificial-mutated';
@@ -167,7 +174,7 @@
 
   function crossover(a, b, r) {
     const g = copy(a);
-    for (let i = 0; i < g.parts.length && i < b.parts.length; i++) for (const k in PART_FIELDS) if (r() < 0.5) g.parts[i][k] = b.parts[i][k];
+    for (let i = 0; i < g.parts.length && i < b.parts.length; i++) for (const k in PART_FIELDS) { if (PART_FIELDS[k][4] && g.parts[i][k] === b.parts[i][k]) continue; if (r() < 0.5) g.parts[i][k] = b.parts[i][k]; }
     for (let i = 0; i < g.links.length && i < b.links.length; i++) {
       const x = g.links[i], y = b.links[i];
       if (x.from !== y.from || x.to !== y.to) continue;
