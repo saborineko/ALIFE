@@ -75,7 +75,7 @@
     ancestry();
     // extinct body plans
     const f = $('lostFilter').value, all = [...w.clades.values()].filter(c => c.ended != null);
-    let list = all.filter(c => { const k = c.kind.split('/'); return f === 'moved' ? k[3] === '1' || k[4] === '1' : f === 'eye' ? k[2] === '1' : true; });
+    let list = all.filter(c => c.g).filter(c => { const k = c.kind.split('/'); return f === 'moved' ? k[3] === '1' || k[4] === '1' : f === 'eye' ? k[2] === '1' : true; });
     list.sort(f === 'recent' ? (a, b) => b.ended - a.ended : (a, b) => b.members - a.members);
     $('lost').textContent = '';
     for (const c of list.slice(0, 12)) card($('lost'), c.g, c.members + '匹 ' + (c.genMax - c.gen0 + 1) + '世代\n' + kindText(c.kind), () => { shown = c; }, shown === c);

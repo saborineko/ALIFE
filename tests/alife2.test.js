@@ -149,7 +149,7 @@ test('genealogy: every living body traces back to a founder, and the record of e
   // body plans that died out are still on record, with a genome that can be grown again
   for (let i = 0; i < 30 * 400; i++) w.step();
   const lost = [...w.clades.values()].filter(c => c.ended != null); assert.ok(lost.length > 0);
-  for (const c of lost) { assert.strictEqual(c.alive, 0); assert.ok(c.members >= 1 && c.ended >= c.born); assert.strictEqual(Object.values(c.causes).reduce((a, b) => a + b, 0), c.members); assert.ok(develop(c.g).segs.length >= 1); }
+  for (const c of lost) { assert.strictEqual(c.alive, 0); assert.ok(c.members >= 1 && c.ended >= c.born); assert.strictEqual(Object.values(c.causes).reduce((a, b) => a + b, 0), c.members); if (c.members > 2) assert.ok(develop(c.g).segs.length >= 1); else assert.strictEqual(c.g, null); }
   assert.strictEqual([...w.clades.values()].reduce((a, c) => a + c.alive, 0), w.bodies.length);
 });
 
