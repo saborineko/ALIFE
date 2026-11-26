@@ -313,3 +313,16 @@ test('a living population can be moved into another map with its genomes, geneal
   assert.ok(w.bodies.length > 10 && w.bodies.every(o => Number.isFinite(o.cx + o.cy + o.E) && o.cx >= 0 && o.cx <= 480));
   const back = A.engine.World.transplant(w, ''); assert.strictEqual(back.W, 160); assert.strictEqual(back.cap, 400); for (let i = 0; i < 300; i++) back.step(); assert.ok(back.bodies.length > 0);
 });
+
+test('with a sloping border the load on the floor is continuous across every border, and such a world restores exactly', () => {
+  const w = new A.engine.World({ seed: 4, map: 'coast', shore: 24 });
+  let worst = 0; for (let x = 0; x < 480; x += 0.25) worst = Math.max(worst, Math.abs(w.slope(x + 0.25, true) - w.slope(x, true)));
+  assert.ok(worst < 0.01, 'largest jump over a quarter unit: ' + worst);
+  assert.strictEqual(w.slope(100, true), 0); assert.ok(Math.abs(w.slope(250, true) - 0.35) < 1e-9 && Math.abs(w.slope(340, true) - 0.12) < 1e-9);
+  const old = new A.engine.World({ seed: 4, map: 'coast' }); assert.strictEqual(old.borderX(old.regions[0]), 188); assert.strictEqual(old.isGround(189, 50), true); assert.strictEqual(old.isGround(187, 50), false);
+  w.seedWith(A.genome.primordial(4)); for (let i = 0; i < 6; i++) w.spawn(design(Object.assign({}, SAMPLES[0].params, { length: 3, width: 0.7, segments: 5, limbs: 0, tail: 0.3, tailSegs: 2 })), 176 + i * 5, 50, 1, null);
+  for (let i = 0; i < 900; i++) w.step();
+  const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); assert.strictEqual(w2.shore, 24);
+  for (let i = 0; i < 600; i++) { w.step(); w2.step(); }
+  const snap = x => JSON.stringify(x.bodies.map(o => [o.id, o.cx, o.cy, o.E])); assert.strictEqual(snap(w2), snap(w));
+});

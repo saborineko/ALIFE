@@ -33,7 +33,9 @@
     anosmic: 0,                           // control experiment: no segment in this world can sense what bodies leak
     vision: 0,                            // 1 = a segment with eye tissue is a receptor that looks one way and sees coloured things: food grains and other bodies alike. 0 = the worlds before this existed
     foodHue: 50,                          // the colour of food grains (degrees). Bodies have the colour their genome gives them
-    sightless: 0                          // control experiment: no eye in this world reports anything
+    sightless: 0,                         // control experiment: no eye in this world reports anything
+    shore: 0                              // maps with regions: 0 = the floor begins as a step at a border (the worlds before this existed). >0 = over this width, centred on the border,
+                                          // the weight a body rests on the floor with (and so its friction and what its pads can hold) rises smoothly from one region's value to the next
   };
 
   // Maps: a world can be one continuous place whose regions differ in what they offer.
@@ -80,7 +82,17 @@
       for (const q of R) for (let i = 0; i < q.grains.patches; i++) q.patch.push({ x: q.x0 + q.grains.radius + this.rand() * (q.x1 - q.x0 - 2 * q.grains.radius), y: 8 + this.rand() * (this.H - 16), a: this.rand() * TAU });
     }
     regionAt(x) { x = ((x % this.W) + this.W) % this.W; const R = this.regions; for (let i = 0; i < R.length; i++) if (x < R[i].x1) return i; return R.length - 1; }
-    isGround(x, y) { return this.regions ? this.hGround[this.cellAt(x, clamp(y, 0, this.H - 0.01))] === 1 : y >= this.yBottom; }
+    // With a sloping border (shore > 0): how much there is a floor at x (0..1), and the weight a body rests on it with.
+    // Each is the region's own value, blended with the neighbouring region's across the border. Both are continuous in x.
+    slope(x, weighted) {
+      x = ((x % this.W) + this.W) % this.W; const R = this.regions, q = R[this.regionAt(x)], left = x - q.x0 < q.x1 - x, edge = left ? x - q.x0 : q.x1 - x;
+      const v = r => r.ground ? (weighted ? (r.weight == null ? 1 : r.weight) : 1) : 0;
+      if (edge >= this.shore / 2) return v(q);
+      const nb = R[(q.id + (left ? R.length - 1 : 1)) % R.length], k = 0.5 + edge / this.shore; return v(q) * k + v(nb) * (1 - k);
+    }
+    // the first x at which the floor counts, for drawing a stepped border where the physics has it (cells belong to the region their centre is in)
+    borderX(q) { return this.shore > 0 ? q.x1 : Math.ceil(q.x1 / this.cell - 0.5) * this.cell; }
+    isGround(x, y) { return this.regions ? (this.shore > 0 ? this.slope(x, false) > 0.5 : this.hGround[this.cellAt(x, clamp(y, 0, this.H - 0.01))] === 1) : y >= this.yBottom; }
     seedWith(genome, n) { for (let i = 0; i < (n || this.founders); i++) this.spawn(A.genome.copy(genome), this.rand() * this.W, this.rand() * this.H, 1, null); }
 
     spawn(g, x, y, stage, parent) {
@@ -126,6 +138,7 @@
     // differently until mutation finds a use. It is a branch: the world no longer continues as it would have.
     enable(o) {
       const F = A.genome.PART_FIELDS, n = this.cols * this.rows, names = { vision: '視覚', scent: '他個体の匂い', blind: '餌の方向の近道の切断' };
+      if (o.shore != null && o.shore !== this.shore) { this.shore = o.shore; this.log('世界の設定を変更：海域の境界を' + (o.shore > 0 ? 'なだらかにした（幅 ' + o.shore + '）' : '段差に戻した')); }
       for (const k of ['vision', 'scent', 'blind']) { if (o[k] == null || !!o[k] === !!this[k]) continue; this[k] = o[k] ? 1 : 0; this.log('世界の設定を変更：' + names[k] + (o[k] ? 'を有効にした' : 'を無効にした')); }
       if (this.scent && !this.scA) { this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
       if (this.vision && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
@@ -311,8 +324,11 @@
       const born = [];
       for (const o of this.bodies) {
         const b = o.b, pr = o.prof;
-        const ground = this.regions ? this.hGround[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))] === 1 : o.cy >= this.yBottom, fl = this.flowAt(o.cx, o.cy);
-        b.env.ground = ground; b.env.flowX = fl[0]; b.env.flowY = fl[1]; if (this.regions) b.env.gravity = 4 * this.hWeight[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))];
+        const ground0 = this.regions ? this.hGround[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))] === 1 : o.cy >= this.yBottom, fl = this.flowAt(o.cx, o.cy);
+        let ground = ground0;
+        if (this.regions && this.shore > 0) { const L = this.slope(o.cx, true); ground = L > 1e-6; b.env.gravity = 4 * L; } // the load, and with it friction and grip, comes on gradually
+        else if (this.regions) b.env.gravity = 4 * this.hWeight[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))];
+        b.env.ground = ground; b.env.flowX = fl[0]; b.env.flowY = fl[1];
         if ((this.tick + o.id) % 5 === 0) { this.sense(o); if (this.vision && !o.passive) this.see(o); }
         if (b.hasCircuit && !o.passive) { // each wired segment tastes the water where it is; the circuit does the rest
           const taste = this.taste, cut = o.numb || this.numb, segs = b.segs;
@@ -324,7 +340,8 @@
           }
           b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax, smA, smB, this.vision) * dt;
         }
-        if (o.passive) { if (!ground) for (let k = 0; k < b.np; k++) { b.x[k] += fl[0] * dt; b.y[k] += fl[1] * dt; } P.pose(b); }
+        // a body that cannot move itself is simply carried by the water, and lies still on a stepped floor. On a sloping floor it gets the same physics as any body: the current drags it, the floor holds it by its weight
+        if (o.passive && !(ground && this.shore > 0)) { if (!ground) for (let k = 0; k < b.np; k++) { b.x[k] += fl[0] * dt; b.y[k] += fl[1] * dt; } P.pose(b); }
         else P.step(b, dt, this.substeps);
         if (!P.finite(b)) { o.dead = 'broken'; continue; }
         let c = P.com(b);

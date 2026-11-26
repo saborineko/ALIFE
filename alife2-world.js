@@ -27,12 +27,12 @@
   function start(world) {
     if (world) w = world;
     else {
-      w = new A.engine.World({ seed: Number($('seed').value) || 1, map: $('map').value, scent: $('scent').checked ? 1 : 0, vision: $('vision').checked ? 1 : 0, blind: $('blind').checked ? 1 : 0 });
+      w = new A.engine.World({ seed: Number($('seed').value) || 1, map: $('map').value, scent: $('scent').checked ? 1 : 0, vision: $('vision').checked ? 1 : 0, blind: $('blind').checked ? 1 : 0, shore: $('shore').checked ? 24 : 0 });
       if (loaded) for (const k of loaded.top) for (let i = 0; i < Math.max(1, Math.round(k.count / 4)); i++) w.spawn(A.genome.sanitize(A.genome.copy(k.genome)), w.rand() * w.W, w.rand() * w.H, 1, null); // older result files lack newer genes
       else w.seedWith(A.genome.primordial(w.seed));
     }
     if (world) $('map').value = w.map || ''; // a loaded world shows its own map
-    $('blind').checked = !!w.blind; $('vision').checked = !!w.vision; $('scent').checked = !!w.scent; // a loaded world shows what it was made with
+    $('shore').checked = w.shore > 0; $('blind').checked = !!w.blind; $('vision').checked = !!w.vision; $('scent').checked = !!w.scent; // a loaded world shows what it was made with
     fit(); sel = null; shown = null; lastPanels = 0;
   }
   function fit() { view = { cx: w.W / 2, cy: w.H / 2, scale: Math.min(W / w.W, H / w.H) }; }
@@ -110,7 +110,7 @@
     ctx.fillStyle = '#03070d'; ctx.fillRect(0, 0, W, H);
     // dissolved food as a smooth field (the world joins left to right, so it is tiled)
     if (!field || field.width !== w.cols) { field = Object.assign(document.createElement('canvas'), { width: w.cols, height: w.rows }); fimg = field.getContext('2d').createImageData(w.cols, w.rows); }
-    for (let i = 0; i < w.nut.length; i++) { const n = Math.min(1, w.nut[i]), bottom = w.regions ? w.hGround[i] === 1 : Math.floor(i / w.cols) * w.cell >= w.yBottom, j = i * 4; fimg.data[j] = bottom ? 30 + 26 * n : 6 + 14 * n; fimg.data[j + 1] = bottom ? 30 + 30 * n : 22 + 46 * n; fimg.data[j + 2] = bottom ? 24 + 14 * n : 38 + 60 * n; fimg.data[j + 3] = 255; }
+    for (let i = 0; i < w.nut.length; i++) { const n = Math.min(1, w.nut[i]), g = w.regions ? (w.shore > 0 ? w.slope((i % w.cols + 0.5) * w.cell, false) : w.hGround[i]) : (Math.floor(i / w.cols) * w.cell >= w.yBottom ? 1 : 0), j = i * 4; fimg.data[j] = (30 + 26 * n) * g + (6 + 14 * n) * (1 - g); fimg.data[j + 1] = (30 + 30 * n) * g + (22 + 46 * n) * (1 - g); fimg.data[j + 2] = (24 + 14 * n) * g + (38 + 60 * n) * (1 - g); fimg.data[j + 3] = 255; } // the floor is drawn where, and as much as, the physics has it
     field.getContext('2d').putImageData(fimg, 0, 0); ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
     const y0w = Y(0), hw = w.H * sc, ww = w.W * sc, x0w = (-view.cx) * sc + W / 2;
     for (const k of [-1, 0, 1]) ctx.drawImage(field, x0w + k * ww - 0.5, y0w, ww + 1, hw);
@@ -174,7 +174,7 @@
     }
     if (w.regions) { // region names along the top, and the borders between regions
       ctx.font = '13px system-ui'; ctx.textAlign = 'center';
-      for (const q of w.regions) { const xm = X((q.x0 + q.x1) / 2), xb = X(q.x1 % w.W); ctx.fillStyle = 'rgba(235,245,240,.75)'; ctx.fillText(q.name, xm, Math.max(16, y0w + 16)); ctx.strokeStyle = 'rgba(200,225,235,.14)'; ctx.setLineDash([3, 6]); ctx.beginPath(); ctx.moveTo(xb, Math.max(0, y0w)); ctx.lineTo(xb, Math.min(H, Y(w.H))); ctx.stroke(); ctx.setLineDash([]); }
+      for (const q of w.regions) { const xm = X((q.x0 + q.x1) / 2), xb = X(w.borderX(q) % w.W); ctx.fillStyle = 'rgba(235,245,240,.75)'; ctx.fillText(q.name, xm, Math.max(16, y0w + 16)); ctx.strokeStyle = 'rgba(200,225,235,.14)'; ctx.setLineDash([3, 6]); ctx.beginPath(); ctx.moveTo(xb, Math.max(0, y0w)); ctx.lineTo(xb, Math.min(H, Y(w.H))); ctx.stroke(); ctx.setLineDash([]); }
       ctx.textAlign = 'start';
     }
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, W * 0.75); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,4,10,.5)'); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
@@ -246,7 +246,8 @@
   const fresh = () => { start(); $('saveNote').textContent = $('auto').checked ? '新しい世界を始めた。次の自動保存で、前の自動保存は上書きされる。' : '新しい世界を始めた。'; if ($('auto').checked) lastSave = performance.now(); };
   $('restart').onclick = fresh;
   // Choosing another map moves the living population there (genomes, genealogy and records with it). 「最初から」 starts anew.
-  $('map').onchange = () => { const n = w.bodies.length, map = $('map').value; if (!n) return fresh(); start(A.engine.World.transplant(w, map)); $('saveNote').textContent = 'いまの ' + n + ' 個体を、選んだ世界へ移した（遺伝子・系譜・記録ごと）。同じ相対位置に静止して降ろしたので、合わない場所に落ちた個体は死ぬ。原始個体からやり直すなら「最初から」。'; }; for (const k of ['scent', 'vision', 'blind']) $(k).onchange = () => { w.enable({ [k]: $(k).checked ? 1 : 0 }); lastPanels = 0; $('saveNote').textContent = 'いまの世界のまま設定を変えた（記録は「進化の記録」に残る）。ここから先は、変えなかった場合とは別の歴史になる。'; }; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
+  $('map').onchange = () => { const n = w.bodies.length, map = $('map').value; if (!n) return fresh(); start(A.engine.World.transplant(w, map)); $('saveNote').textContent = 'いまの ' + n + ' 個体を、選んだ世界へ移した（遺伝子・系譜・記録ごと）。同じ相対位置に静止して降ろしたので、合わない場所に落ちた個体は死ぬ。原始個体からやり直すなら「最初から」。'; }; $('shore').onchange = () => { w.enable({ shore: $('shore').checked ? 24 : 0 }); $('saveNote').textContent = 'いまの世界のまま、海域の境界を' + ($('shore').checked ? 'なだらかにした。' : '段差に戻した。') + 'ここから先は、変えなかった場合とは別の歴史になる。'; };
+  for (const k of ['scent', 'vision', 'blind']) $(k).onchange = () => { w.enable({ [k]: $(k).checked ? 1 : 0 }); lastPanels = 0; $('saveNote').textContent = 'いまの世界のまま設定を変えた（記録は「進化の記録」に残る）。ここから先は、変えなかった場合とは別の歴史になる。'; }; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; };
   $('founder').onchange = () => { if ($('founder').value === 'file') $('file').click(); else { loaded = null; start(); } };
   $('file').onchange = async e => { loaded = JSON.parse(await e.target.files[0].text()); start(); };
