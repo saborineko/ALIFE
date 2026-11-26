@@ -7,9 +7,11 @@ const snapEvery = opt.snapshots; delete opt.snapshots; // snapshots=<seconds>: w
 const zlib = require('zlib'), snap = (w, t) => require('fs').writeFileSync(String(saveWorld).replace(/\.json(\.gz)?$/, '') + '-t' + t + '.json.gz', zlib.gzipSync(JSON.stringify(w.save()), { level: 9 }));
 let nextSnap = snapEvery || Infinity;
 const saveWorld = opt.saveWorld; delete opt.saveWorld; // saveWorld=<path>: also write the whole final world (every genome and the genealogy), for looking at single individuals
-const w = new A.engine.World(opt), T = Number(seconds) || 600, log = [], t0 = Date.now();
-w.seedWith(A.genome.primordial(opt.seed));
-let next = 0;
+// resume=<world.json or .json.gz>: carry on from a saved world instead of starting from founders (nothing about the world is changed)
+const resume = opt.resume; delete opt.resume;
+const w = resume ? A.engine.World.restore(JSON.parse(resume.endsWith('.gz') ? zlib.gunzipSync(require('fs').readFileSync(resume)) : require('fs').readFileSync(resume))) : new A.engine.World(opt), T = Number(seconds) || 600, log = [], t0 = Date.now();
+if (!resume) w.seedWith(A.genome.primordial(opt.seed)); else { nextSnap = Math.ceil((w.t + 1) / (snapEvery || Infinity)) * (snapEvery || Infinity); }
+let next = resume ? w.t : 0;
 while (w.t < T && w.bodies.length) {
   w.step();
   if (saveWorld && w.t >= nextSnap) { snap(w, Math.round(w.t)); nextSnap += snapEvery; }
