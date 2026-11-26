@@ -303,3 +303,13 @@ test('sight and smell can be switched on in a world that is already running: the
   assert.ok(b.bodies.length > 10 && b.bodies.every(o => Number.isFinite(o.cx + o.E) && o.b.segs.every(q => Number.isFinite(q.a))), 'still alive and finite');
   assert.ok(b.scA.some(v => v > 0) && b.bodies.some(o => Number.isFinite(o.g.odor)));
 });
+
+test('a living population can be moved into another map with its genomes, genealogy and settings', () => {
+  const a = new A.engine.World({ seed: 12, vision: 1 }); a.seedWith(A.genome.primordial(12)); for (let i = 0; i < 3000; i++) a.step();
+  const ids = a.bodies.map(o => o.id).join(), w = A.engine.World.transplant(a, 'coast');
+  assert.strictEqual(w.bodies.map(o => o.id).join(), ids); assert.strictEqual(w.map, 'coast'); assert.strictEqual(w.W, 480); assert.strictEqual(w.cap, 1600); assert.strictEqual(w.vision, 1);
+  assert.strictEqual(w.tree.size, a.tree.size); assert.ok(w.t === a.t && w.events.some(e => /世界を移した/.test(e.text)));
+  for (let i = 0; i < 1500; i++) w.step();
+  assert.ok(w.bodies.length > 10 && w.bodies.every(o => Number.isFinite(o.cx + o.cy + o.E) && o.cx >= 0 && o.cx <= 480));
+  const back = A.engine.World.transplant(w, ''); assert.strictEqual(back.W, 160); assert.strictEqual(back.cap, 400); for (let i = 0; i < 300; i++) back.step(); assert.ok(back.bodies.length > 0);
+});
