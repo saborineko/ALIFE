@@ -27,11 +27,11 @@
   function start(world) {
     if (world) w = world;
     else {
-      w = new A.engine.World({ seed: Number($('seed').value) || 1, map: $('map').value, scent: $('scent').checked ? 1 : 0 });
+      w = new A.engine.World({ seed: Number($('seed').value) || 1, map: $('map').value, scent: $('scent').checked ? 1 : 0, vision: $('vision').checked ? 1 : 0 });
       if (loaded) for (const k of loaded.top) for (let i = 0; i < Math.max(1, Math.round(k.count / 4)); i++) w.spawn(A.genome.sanitize(A.genome.copy(k.genome)), w.rand() * w.W, w.rand() * w.H, 1, null); // older result files lack newer genes
       else w.seedWith(A.genome.primordial(w.seed));
     }
-    $('scent').checked = !!w.scent; // a loaded world shows what it was made with
+    $('vision').checked = !!w.vision; $('scent').checked = !!w.scent; // a loaded world shows what it was made with
     fit(); sel = null; shown = null; lastPanels = 0;
   }
   function fit() { view = { cx: w.W / 2, cy: w.H / 2, scale: Math.min(W / w.W, H / w.H) }; }
@@ -55,7 +55,8 @@
   function panels() {
     const c0 = w.census();
     const smellers = w.scent ? w.bodies.filter(o => o.g.parts.some(p => Math.abs(p.sA) > 0.2 || Math.abs(p.sB) > 0.2)).length : 0;
-    $('stats').textContent = (w.scent ? '【他個体の匂いあり】嗅覚の配線を持つ個体 ' + smellers + ' / ' : '') + '時刻 ' + c0.t + ' 秒 / 個体数 ' + c0.n + ' / 系統 ' + c0.lines + ' / 平均世代 ' + c0.gen.toFixed(1)
+    const seers = w.vision ? w.bodies.filter(o => o.g.parts.some(p => p.eye > 0.1 && Math.abs(p.vE) > 0.2)).length : 0;
+    $('stats').textContent = (w.vision ? '【視覚あり】配線された眼を持つ個体 ' + seers + ' / ' : '') + (w.scent ? '【他個体の匂いあり】嗅覚の配線を持つ個体 ' + smellers + ' / ' : '') + '時刻 ' + c0.t + ' 秒 / 個体数 ' + c0.n + ' / 系統 ' + c0.lines + ' / 平均世代 ' + c0.gen.toFixed(1)
       + '\n成体の体節数：平均 ' + c0.segMean.toFixed(2) + '・最大 ' + c0.segMax + ' / 多体節 ' + (c0.multi * 100).toFixed(0) + '%'
       + '\n平均体積 ' + c0.volume.toFixed(2) + ' / 自力移動 ' + c0.speed.toFixed(3) + ' u/s / 口から ' + (c0.mouthShare * 100).toFixed(0) + '% / 眼 ' + (c0.eyes * 100).toFixed(0) + '% / 底面 ' + (c0.bottom * 100).toFixed(0) + '%'
       + '\n溶存栄養 ' + c0.nutrient.toFixed(2) + ' / 粒 ' + c0.food + ' / 出生 ' + c0.births + ' / 餓死 ' + c0.starved + ' / 老衰 ' + c0.aged + ' / 上限で不成立 ' + c0.blocked
@@ -242,7 +243,7 @@
   $('oldest').onclick = () => { const count = new Map(); for (const o of w.bodies) for (const n of w.ancestors(o.id)) count.set(n.id, (count.get(n.id) || 0) + 1); pick(o => count.get(o.id) || 0, '最多の子孫'); rule = o => w.ancestors(o.id).length ? w.bodies.filter(b => w.ancestors(b.id).some(n => n.id === o.id)).length : 0; };
   $('follow').onclick = () => { follow = !follow && !!sel; $('follow').textContent = follow ? '追跡中' : '追跡'; if (follow) view.scale = Math.max(view.scale, 30); };
   const fresh = () => { start(); $('saveNote').textContent = $('auto').checked ? '新しい世界を始めた。次の自動保存で、前の自動保存は上書きされる。' : '新しい世界を始めた。'; if ($('auto').checked) lastSave = performance.now(); };
-  $('restart').onclick = fresh; $('map').onchange = fresh; $('scent').onchange = fresh; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
+  $('restart').onclick = fresh; $('map').onchange = fresh; $('scent').onchange = fresh; $('vision').onchange = fresh; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; };
   $('founder').onchange = () => { if ($('founder').value === 'file') $('file').click(); else { loaded = null; start(); } };
   $('file').onchange = async e => { loaded = JSON.parse(await e.target.files[0].text()); start(); };

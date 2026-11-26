@@ -30,7 +30,10 @@
     noCilia: 0,                           // control experiment: cilia genes cannot be expressed in this world
     scent: 0,                             // 1 = bodies leak two substances into the water as they live, and segments can sense them. 0 = the worlds before this existed
     scentRate: 1, scentDecay: 0.05,       // leaked per unit of resting metabolism; share lost per second
-    anosmic: 0                            // control experiment: no segment in this world can sense what bodies leak
+    anosmic: 0,                           // control experiment: no segment in this world can sense what bodies leak
+    vision: 0,                            // 1 = a segment with eye tissue is a receptor that looks one way and sees coloured things: food grains and other bodies alike. 0 = the worlds before this existed
+    foodHue: 50,                          // the colour of food grains (degrees). Bodies have the colour their genome gives them
+    sightless: 0                          // control experiment: no eye in this world reports anything
   };
 
   // Maps: a world can be one continuous place whose regions differ in what they offer.
@@ -62,6 +65,7 @@
       if (M) this.buildMap(M);
       this.counts = { births: 0, starved: 0, aged: 0, broken: 0, blocked: 0, eaten: 0 };
       this.taste = new Float64Array(256);
+      if (this.vision) this.bgrid = Array.from({ length: this.cols * this.rows }, () => []);
       if (this.scent) { const n = this.cols * this.rows; this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
       this.tree = new Map(); this.events = []; this.history = []; this.firsts = {}; this.pruned = 0; this.clades = new Map();
     }
@@ -148,6 +152,33 @@
           b[i] = (a[i] + k * (a[l] + a[rr] + a[u] + a[d] - 4 * a[i])) * keep;
         }
         this[key] = b; this.sc2 = a;
+      }
+    }
+    // Sight. Each segment with eye tissue and a wire from it looks along its own direction (turned by `gaze`), over a cone
+    // that is narrower and reaches further the more eye tissue it has. It reports one number: how much of that field is
+    // filled by things of the colour it is tuned to. Food grains and other bodies are the same kind of thing to it.
+    // Nothing hides anything else (no shadows yet).
+    see(o) {
+      const b = o.b, segs = b.segs, off = o.sightless || this.sightless, cell = this.cell, W = this.W;
+      for (let i = 0; i < segs.length; i++) {
+        const q = segs[i], p = q.p; if (p.eye <= 0.1 || p.vE === 0) continue;
+        if (off) { q.v = 0; continue; }
+        const sgn = i === 0 ? -1 : 1, ca = Math.cos(p.gaze), sa = Math.sin(p.gaze), ux = sgn * (q.dx * ca - q.dy * sa), uy = sgn * (q.dx * sa + q.dy * ca);
+        const ex = (q.ax + q.bx) * 0.5, ey = (q.ay + q.by) * 0.5, R = 4 + 22 * Math.sqrt(p.eye * Math.max(q.r0, q.r1)), cosHalf = Math.cos(1.2 - 0.8 * p.eye), tune = p.tune;
+        let sum = 0; const c0 = Math.floor((ex - R) / cell), c1 = Math.floor((ex + R) / cell), r0 = Math.max(0, Math.floor((ey - R) / cell)), r1 = Math.min(this.rows - 1, Math.floor((ey + R) / cell));
+        for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+          const ci = r * this.cols + ((c % this.cols) + this.cols) % this.cols;
+          const look = (x, y, size, hue) => {
+            let dx = x - ex; if (dx > W / 2) dx -= W; else if (dx < -W / 2) dx += W;
+            const dy = y - ey, d2 = dx * dx + dy * dy; if (d2 > R * R || d2 < 1e-9) return;
+            const d = Math.sqrt(d2); if ((dx * ux + dy * uy) / d < cosHalf) return;
+            const m = Math.cos(hue * Math.PI / 180 - tune); if (m <= 0) return;
+            sum += m * m * Math.min(1, size / d);
+          };
+          for (const f of this.grid[ci]) look(f.x, f.y, f.size, this.foodHue);
+          for (const q2 of this.bgrid[ci]) if (q2 !== o) look(q2.cx, q2.cy, q2.rad, q2.g.hue);
+        }
+        q.v = sum;
       }
     }
     nutAt(x, y, field) {
@@ -265,12 +296,13 @@
       const dt = this.dt, C = A.organs.C, P = A.physics;
       this.stepFood(dt);
       if (this.scent && this.tick % 6 === 0) this.stepScent(dt * 6);
+      if (this.vision) { const bg = this.bgrid; for (let i = 0; i < bg.length; i++) bg[i].length = 0; for (const o of this.bodies) { o.rad = Math.sqrt(o.prof.V / Math.PI); bg[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))].push(o); } }
       const born = [];
       for (const o of this.bodies) {
         const b = o.b, pr = o.prof;
         const ground = this.regions ? this.hGround[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))] === 1 : o.cy >= this.yBottom, fl = this.flowAt(o.cx, o.cy);
         b.env.ground = ground; b.env.flowX = fl[0]; b.env.flowY = fl[1]; if (this.regions) b.env.gravity = 4 * this.hWeight[this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01))];
-        if ((this.tick + o.id) % 5 === 0) this.sense(o);
+        if ((this.tick + o.id) % 5 === 0) { this.sense(o); if (this.vision && !o.passive) this.see(o); }
         if (b.hasCircuit && !o.passive) { // each wired segment tastes the water where it is; the circuit does the rest
           const taste = this.taste, cut = o.numb || this.numb, segs = b.segs;
           for (let i = 0; i < segs.length; i++) taste[i] = cut || !segs[i].circ ? 0.5 : this.nutAt((segs[i].ax + segs[i].bx) * 0.5, (segs[i].ay + segs[i].by) * 0.5) / this.nutrientCap;
@@ -279,7 +311,7 @@
             smA = this.smA; smB = this.smB; const off = o.anosmic || this.anosmic;
             for (let i = 0; i < segs.length; i++) { const q = segs[i]; if (off || !q.circ) { smA[i] = smB[i] = 0; continue; } const x = (q.ax + q.bx) * 0.5, y = (q.ay + q.by) * 0.5; smA[i] = this.nutAt(x, y, this.scA); smB[i] = this.nutAt(x, y, this.scB); }
           }
-          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax, smA, smB) * dt;
+          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax, smA, smB, this.vision) * dt;
         }
         if (o.passive) { if (!ground) for (let k = 0; k < b.np; k++) { b.x[k] += fl[0] * dt; b.y[k] += fl[1] * dt; } P.pose(b); }
         else P.step(b, dt, this.substeps);
@@ -325,7 +357,7 @@
         }
       }
       for (const o of born) {
-        const g = this.rand() < this.mutation ? A.genome.mutate(o.g, this.rand, undefined, this.scent) : A.genome.copy(o.g);
+        const g = this.rand() < this.mutation ? A.genome.mutate(o.g, this.rand, undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '')) : A.genome.copy(o.g);
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
         const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1; this.spawn(g, o.cx + Math.cos(a) * d, clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), g.birth, o); this.counts.births++;
@@ -367,7 +399,7 @@
         bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home,
           sig: b.hasCircuit ? b.segs.map(q => q.a) : undefined,
           st: { x: Array.from(b.x), y: Array.from(b.y), vx: Array.from(b.vx), vy: Array.from(b.vy), t: b.t, work: b.work, heat: b.heat, cilia: b.ciliaUse, nerve: b.nerveUse, om: b.om || 0, th: b.th || 0, loc: b.loc ? Array.from(b.loc) : null, inertia: b.inertia == null ? null : b.inertia, carried: b.carried == null ? null : b.carried, cmd: b.cmd,
-            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB]), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
+            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB, q.v == null ? null : q.v, q.mV == null ? null : q.mV]), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
       };
     }
     // Older saves (without `exact`) lack pose, velocities, rhythm phase, sensory memory and birth region: bodies then restart from rest.
@@ -386,7 +418,7 @@
         if (st) { // put the body back exactly as it was
           const b = o.b; b.x.set(st.x); b.y.set(st.y); b.vx.set(st.vx); b.vy.set(st.vy); b.t = st.t; b.work = st.work; b.heat = st.heat; b.ciliaUse = st.cilia; b.nerveUse = st.nerve; b.carried = st.carried == null ? undefined : st.carried; b.cmd = st.cmd;
           if (b.rigid && st.loc) { b.om = st.om; b.th = st.th; b.loc.set(st.loc); b.inertia = st.inertia; } // the same numbers, not the same quantities recomputed in another orientation
-          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; });
+          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; if (v[11] != null) q.v = v[11]; if (v[12] != null) q.mV = v[12]; });
           A.physics.pose(b); o.cx = s.x; o.cy = s.y;
           Object.assign(o, { noise: st.noise, wander: st.wander, seen: st.seen, sx: st.sx, sy: st.sy, sdt: st.sdt, taxDot: st.taxDot, taxLen: st.taxLen, taxN: st.taxN, work0: st.work0, cil0: st.cil0, nerve0: st.nerve0, nextCost: st.nextCost, nextStage: st.nextStage });
         }

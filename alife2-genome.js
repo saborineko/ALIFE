@@ -64,7 +64,12 @@
     // Bodies leak two substances into the water (see `odor`). A segment can sense how much of each is where it is.
     // These two genes only change in worlds where bodies leak (marked 'x'): elsewhere they stay 0 and cost no random draws.
     sA: [-4, 4, 0, 'n', 'x'],      // from its own sense of substance A
-    sB: [-4, 4, 0, 'n', 'x']       // from its own sense of substance B
+    sB: [-4, 4, 0, 'n', 'x'],      // from its own sense of substance B
+    // Sight (marked 'v': these only change in worlds where eyes work this way). A segment with eye tissue is one receptor:
+    // it looks one way, over a cone, and reports how much of its field is filled by things of the colour it is tuned to.
+    vE: [-4, 4, 0, 'n', 'v'],      // from what its own eye reports
+    gaze: [-PI, PI, 0, 'a', 'v'],  // which way the eye looks, against the segment's outward direction
+    tune: [-PI, PI, 1, 'a', 'v']   // the colour it responds to (an angle on the colour wheel; food grains are at about 0.9)
   };
   const LINK_FIELDS = {
     at: [0, 1, 1, 'n'],            // where along the parent
@@ -136,7 +141,7 @@
     const g = copy(g0), s = strength == null ? 1 : strength;
     const num = (o, F) => {
       for (const k in F) {
-        if (F[k][4] && !extra) continue;
+        if (F[k][4] && !(extra === true || (extra && extra.includes(F[k][4])))) continue;
         if (r() > 0.12) continue;
         const [lo, hi, , kind] = F[k], span = kind === 'a' ? 1.2 : hi - lo;
         o[k] += r.gauss() * span * 0.07 * s;
@@ -165,7 +170,7 @@
     g.hue += r.gauss() * 6 * s;
     g.freq += r.gauss() * 0.05 * s;
     if (r() < 0.2) g.birth += r.gauss() * 0.06 * s;
-    if (extra && r() < 0.2) g.odor += r.gauss() * 0.08 * s;
+    if ((extra === true || (extra && extra.includes('x'))) && r() < 0.2) g.odor += r.gauss() * 0.08 * s;
     for (let i = 0; i < g.brain.length; i++) if (r() < 0.2) g.brain[i] += r.gauss() * 0.35 * s;
     g.mutations = (g.mutations || 0) + 1;
     if (g.origin === 'artificial') g.origin = 'artificial-mutated';

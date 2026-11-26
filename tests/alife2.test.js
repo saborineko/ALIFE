@@ -274,3 +274,21 @@ test('bodies leak into the water, a wired segment senses it, the cut sense does 
   const snap = x => JSON.stringify([x.bodies.map(o => [o.cx, o.cy, o.E, o.b.segs[0].a, o.b.segs[0].mB]), Array.from(x.scA), Array.from(x.scB)]);
   assert.strictEqual(snap(w2), snap(a.w));
 });
+
+test('an eye is a receptor that looks one way and answers to its colour: bodies as well as food, not what is behind it, not when cut', () => {
+  const R = Math.PI / 180, mk = (o, hue) => { const g = A.genome.primordial(3); Object.assign(g.parts[0], o); g.hue = hue; return g; };
+  const run = (hue, side, cut) => { const w = new A.engine.World({ seed: 3, founders: 0, cap: 0, vision: 1, sightless: cut, grainRate: 0, bottomRate: 0 });
+    const me = w.spawn(mk({ cilia: 0.2, nerve: 0.5, eye: 0.5, vE: 3, tune: 200 * R }, 200), 80, 30, 1, null); w.step();
+    const s = me.b.segs[0]; w.spawn(mk({}, hue), 80 - side * s.dx * 6, 30 - side * s.dy * 6, 1, null); // the root segment looks against its own direction
+    for (let i = 0; i < 12; i++) w.step(); return me.b.segs[0].v; };
+  const same = run(200, 1, 0), other = run(290, 1, 0), behind = run(200, -1, 0), cut = run(200, 1, 1);
+  assert.ok(same > 0.05 && other < same * 0.01 && behind === 0 && cut === 0, [same, other, behind, cut].join(' '));
+  let g = A.genome.primordial(4); const r = A.genome.rng(9); for (let i = 0; i < 400; i++) g = A.genome.mutate(g, r, undefined, 'x');
+  assert.ok(g.parts.every(p => p.vE === 0 && p.gaze === 0 && p.tune === 1), 'sight genes stay put where eyes do not work this way');
+  const w = new A.engine.World({ seed: 6, vision: 1 }); w.seedWith(A.genome.primordial(6));
+  for (let i = 0; i < 4; i++) w.spawn(mk({ cilia: 0.5, beat: -1, nerve: 0.5, eye: 0.5, vE: -3, mCil: 1, mTurn: 1, adapt: 0.5, tune: 50 * R }, 100), 20 + i * 30, 30, 1, null);
+  for (let i = 0; i < 900; i++) w.step();
+  const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); for (let i = 0; i < 600; i++) { w.step(); w2.step(); }
+  const snap = x => JSON.stringify(x.bodies.map(o => [o.cx, o.cy, o.E, o.b.segs[0].a, o.b.segs[0].v, o.b.segs[0].mV]));
+  assert.strictEqual(snap(w2), snap(w)); assert.ok(w.bodies.some(o => o.b.segs[0].v > 0), 'something was seen');
+});
