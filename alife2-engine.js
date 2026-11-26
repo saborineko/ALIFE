@@ -277,7 +277,7 @@
     // censuses in a row — once is a twitch, not a finding. Each says what was measured, never what it means. If none of it happens, nothing is written.
     soundFirsts(c) {
       const F = this.aco.first, tests = {
-        calls: [c.callsEnded >= 20 && c.callTime > 0.005, '声が続けて出ている（最近の鳴き声 ' + Math.round(c.callsEnded) + ' 回）'],
+        calls: [(c.callsEnded >= 20 || c.calling >= 0.02) && c.callTime > 0.005, '声が続けて出ている（最近終わった鳴き声 ' + Math.round(c.callsEnded) + ' 回、いま鳴いている個体は声を持つ個体の ' + (c.calling * 100).toFixed(0) + '%）'], // (a voice that never stops ends no call: it is counted by who is sounding now)
         shapes: [c.callShapes >= 1, '同じ形の鳴き声が繰り返されている（' + c.callShapes + ' 種類が 25 回以上）'],
         state: [c.callsEnded >= 25 && c.signalBits >= 0.05, '鳴くことが鳴く側の状態（' + c.signalOf + '）と結びついている（' + c.signalBits.toFixed(2) + ' ビット）'],
         follow: [c.answerN >= 20 && c.alternation > 0.05 && c.answer > 1.5, '鳴き声のあとに他個体の鳴き声が続く（偶然の ' + c.answer.toFixed(1) + ' 倍。同じものに反応しただけかは、片方を黙らせないと分からない）'],

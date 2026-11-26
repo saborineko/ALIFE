@@ -1,11 +1,12 @@
 // The record of sound in a saved world, read out: what the census says (sound made / goes with a state / moves listeners / is answered / pitch is copied),
 // and what the genomes say: who has ears and voices, at what pitches, by lineage, and how ears and voices are wired.
-// It reports; it does not decide. Whether sound changes what bodies do is settled only by cutting ears or voices (tools/alife2-branch.js with deaf=1, mute=1, soundLag=2).
+// It reads the world three seconds after the saved moment (what bodies are doing right now is not part of a save). It reports; it does not decide. Whether sound changes what bodies do is settled only by cutting ears or voices (tools/alife2-branch.js with deaf=1, mute=1, soundLag=2).
 // Usage: node tools/alife2-sound-report.js <world.json.gz> [...]
 const zlib = require('zlib'), fs = require('fs'), A = require('../alife2-genome.js'); for (const f of ['development', 'neural', 'physics', 'organs', 'engine']) require('../alife2-' + f + '.js');
 const pct = v => (v * 100).toFixed(1) + '%', NAMES = { hungry: '空腹', fed: '消化管に餌', touched: '押されている', hurt: '傷がある', seeing: '見えている', hearing: '聞こえている', young: '幼体' };
 for (const file of process.argv.slice(2)) {
   const w = A.engine.World.restore(JSON.parse(file.endsWith('.gz') ? zlib.gunzipSync(fs.readFileSync(file)) : fs.readFileSync(file))); if (!w.sound) { console.log('== ' + file + '：音の無い世界'); continue; }
+  for (let i = 0; i < 90; i++) w.step(); // three seconds, so that what is not saved with a world (who is sounding now, what ears are reporting) is there to be read; the file is not touched
   const c = w.census(), L = w.bodies, K = w.aco;
   console.log('== ' + file + '（t=' + Math.round(w.t) + '、個体 ' + L.length + '）');
   console.log('  音が出ているか：声を持つ個体 ' + pct(c.voiced) + ' / 鳴いていた時間（声を持つ個体の生涯のうち）' + pct(c.callTime) + ' / 鳴き始め 100 秒あたり ' + c.callsPer100s.toFixed(2) + ' 回 / 出た音のうち声 ' + pct(c.voiceShare) + ' / 声に使われたエネルギー ' + c.soundCost.toFixed(2));
@@ -20,5 +21,8 @@ for (const file of process.argv.slice(2)) {
   console.log('  系統ごと（個体数の多い順）：' + [...lines.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 6).map(([id, e]) => '系統 ' + id + '：' + e.n + ' 匹・声 ' + pct(e.voiced / e.n) + '（高さ ' + ms(e.v) + '）・耳 ' + pct(e.eared / e.n) + '（合わせた高さ ' + ms(e.h) + '）').join(' ｜ '));
   // wiring that involves an ear or a voice
   const wires = new Map(); for (const o of L) { const keys = new Set(); for (const p of o.g.parts) { if (Math.abs(p.hE || 0) > 0.05 && p.ear > 0.02) keys.add('耳 → 体節の信号（' + (p.hE > 0 ? '+' : '−') + '）'); if (Math.abs(p.mVoice || 0) > 0.05 && p.voice > 0.02) keys.add('体節の信号 → 声（' + (p.mVoice > 0 ? '+' : '−') + '）'); for (const q of p.nn || []) { const ins = q.in.map(e => e[0]), outs = q.out.map(e => e[0]); if ((ins.includes('e') && p.ear > 0.02) || ((outs.includes('V') || outs.includes('Q')) && p.voice > 0.02)) keys.add('神経：' + q.in.map(e => e[0] + (e[1] >= 0 ? '+' : '−')).join(',') + ' → ' + (q.out.map(e => e[0] + (e[1] >= 0 ? '+' : '−')).join(',') || '出力なし')); } } for (const k of keys) wires.set(k, (wires.get(k) || 0) + 1); }
+  // sound and learning together: a connection from an ear that can change with experience (in a segment that has an ear), or a neuron that drives a voice and has any connection that can change
+  { let plasticEar = 0, plasticVoice = 0, anyPlastic = 0, grown = 0; for (const o of L) { let pe = 0, pv = 0, ap = 0; for (const p of o.g.parts) for (const q of p.nn || []) { const lr = q.in.some(e => e[2]); if (lr) ap = 1; if (p.ear > 0.02 && q.in.some(e => e[0] === 'e' && e[2])) pe = 1; if (p.voice > 0.02 && lr && q.out.some(e => e[0] === 'V' || e[0] === 'Q')) pv = 1; } plasticEar += pe; plasticVoice += pv; anyPlastic += ap; if (pe) for (const q of o.b.segs) if (q.nw && Array.from(q.nw).some(v => Math.abs(v) > 0.1)) { grown++; break; } }
+    console.log('  音と学習：経験で変わる結合を持つ個体 ' + anyPlastic + ' 匹 / そのうち耳からの結合が変わりうる個体 ' + plasticEar + ' 匹（実際に 0.1 以上動いている個体 ' + grown + ' 匹）/ 声を動かす神経に変わりうる結合がある個体 ' + plasticVoice + ' 匹'); }
   console.log('  耳や声につながる配線（持つ個体数）：' + ([...wires.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => v + ' 匹 ' + k).join(' ／ ') || 'なし'));
 }
