@@ -209,7 +209,22 @@
     if ($('auto').checked && ms - lastSave > 30000) { lastSave = ms; autosave(); }
     requestAnimationFrame(loop);
   }
-  function autosave() { try { localStorage.setItem(KEY, JSON.stringify(w.save())); $('saveNote').textContent = '自動保存した（' + Math.round(w.t) + ' 秒時点）。保存領域 ' + KEY + '。ALIFE 23 の保存とは別。'; } catch (e) { $('saveNote').textContent = '自動保存に失敗（容量超過の可能性）：' + e.message + '。JSON保存を使ってください。'; } }
+// Saving. The browser's small key-value store (about 5 MB) cannot hold a world with its genealogy, so automatic
+  // saves go to IndexedDB, in a database of ALIFE 2.0's own (ALIFE 23 uses 'alife05-observatory' and 'alife16_*').
+  const DB = 'alife2-worlds', STORE = 'saves';
+  const db = () => new Promise((ok, no) => { const r = indexedDB.open(DB, 1); r.onupgradeneeded = () => r.result.createObjectStore(STORE); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+  const dbPut = async (k, v) => { const d = await db(); return new Promise((ok, no) => { const t = d.transaction(STORE, 'readwrite'); t.objectStore(STORE).put(v, k); t.oncomplete = () => ok(); t.onerror = () => no(t.error); t.onabort = () => no(t.error); }); };
+  const dbGet = async k => { const d = await db(); return new Promise((ok, no) => { const r = d.transaction(STORE).objectStore(STORE).get(k); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); };
+  const gz = async text => typeof CompressionStream === 'undefined' ? null : new Blob([await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer()], { type: 'application/gzip' });
+  const gunzip = async blob => new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  const mb = n => (n / 1048576).toFixed(1) + ' MB';
+  let saving = false;
+  async function autosave() {
+    if (saving) return; saving = true;
+    try { const text = JSON.stringify(w.save()), blob = await gz(text); await dbPut('autosave', blob || text); $('saveNote').textContent = '自動保存した（' + Math.round(w.t) + ' 秒時点、' + mb(blob ? blob.size : text.length) + '）。保存先はこのブラウザの IndexedDB「' + DB + '」。ALIFE 23 の保存とは別。'; }
+    catch (e) { $('saveNote').textContent = '自動保存に失敗：' + (e && e.message || e) + '。「世界を保存」でファイルに残してください。'; }
+    saving = false;
+  }
 
   // ---- input
   cv.addEventListener('wheel', e => { e.preventDefault(); view.scale = Math.max(2, Math.min(200, view.scale * (e.deltaY < 0 ? 1.2 : 1 / 1.2))); }, { passive: false });
@@ -229,10 +244,10 @@
   $('founder').onchange = () => { if ($('founder').value === 'file') $('file').click(); else { loaded = null; start(); } };
   $('file').onchange = async e => { loaded = JSON.parse(await e.target.files[0].text()); start(); };
   const download = (name, text, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); };
-  $('save').onclick = () => download('alife2-world-t' + Math.round(w.t) + '.json', JSON.stringify(w.save()), 'application/json');
+  $('save').onclick = async () => { const text = JSON.stringify(w.save()), blob = await gz(text), a = document.createElement('a'); a.href = URL.createObjectURL(blob || new Blob([text], { type: 'application/json' })); a.download = 'alife2-world-t' + Math.round(w.t) + (blob ? '.json.gz' : '.json'); a.click(); $('saveNote').textContent = '保存した（' + mb(blob ? blob.size : text.length) + (blob ? '、圧縮済み' : '') + '）。'; };
   $('load').onclick = () => $('loadFile').click();
-  $('loadFile').onchange = async e => { try { start(A.engine.World.restore(JSON.parse(await e.target.files[0].text()))); $('saveNote').textContent = '読み込んだ（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '読み込めない：' + err.message; } };
-  $('resume').onclick = () => { try { const d = localStorage.getItem(KEY); if (!d) { $('saveNote').textContent = '自動保存は無い。'; return; } start(A.engine.World.restore(JSON.parse(d))); $('saveNote').textContent = '自動保存から再開（' + Math.round(w.t) + ' 秒時点）。'; } catch (err) { $('saveNote').textContent = '再開できない：' + err.message; } };
+  $('loadFile').onchange = async e => { try { const file = e.target.files[0], text = /\.gz$/.test(file.name) ? await gunzip(file) : await file.text(); start(A.engine.World.restore(JSON.parse(text))); $('saveNote').textContent = '読み込んだ（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '読み込めない：' + err.message; } };
+  $('resume').onclick = async () => { try { let d = await dbGet('autosave'); if (d == null) d = localStorage.getItem(KEY); if (d == null) { $('saveNote').textContent = '自動保存は無い。'; return; } const text = typeof d === 'string' ? d : await gunzip(d); start(A.engine.World.restore(JSON.parse(text))); $('saveNote').textContent = '自動保存から再開（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '再開できない：' + (err && err.message || err); } };
   $('csv').onclick = () => { const rows = ['id,parent,line,generation,born,died,cause,segments,mouths,eye,working_joint,adult_volume,children,mutations']; for (const n of w.tree.values()) rows.push([n.id, n.parent, n.line, n.gen, Math.round(n.born), n.died == null ? '' : Math.round(n.died), n.cause || '', ...n.kind.split('/'), n.V.toFixed(3), n.kids, n.g.mutations].join(',')); download('alife2-lineage-t' + Math.round(w.t) + '.csv', rows.join('\n'), 'text/csv'); };
   $('rank').onchange = $('lostFilter').onchange = () => { lastPanels = 0; };
 
