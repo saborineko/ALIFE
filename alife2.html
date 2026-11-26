@@ -42,10 +42,11 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="卵に入るエネルギーは親が決め、子は変異後の自分の遺伝子で、その予算で作れる段階まで育って生まれる。余りは卵黄として子が持つ。最小の芽も作れなければ死産になる。切ると、子は親の支払いに関係なく自分の遺伝子どおりの姿で生まれる以前の規則。いまの世界のまま切り替えられる。"><input id="budget" type="checkbox">出生の収支を合わせる</label>
     <label title="成長で身体を作り直すとき、体節ごとの神経の信号・感覚の順応・律動の位相を引き継ぐ。切ると、成長の一段ごとに初期化される以前の規則。"><input id="carry" type="checkbox">成長で神経の状態を引き継ぐ</label>
     <label title="身体どうしがすり抜けずに押し合い、口が触れた他個体の組織を削り取る世界。削られた体節は、その分だけ筋肉・消化・眼などの働きが落ちる。捕食者という種類は無く、血縁の保護も無い。いまの世界のまま切り替えられる。"><input id="contact" type="checkbox">身体の接触と組織の摂取（実験中）</label>
+    <label title="接触のある世界で働く。押しつけたパッドが、地面だけでなく他の身体も掴む（引きずり、離れにくくなる）。触れ合っている身体のあいだでは、裸の表面を通して蓄えが、満ちている側から空いている側へ染み出す（外皮と外骨格は通さない）。寄生・共生・群体という種類は無く、どれになるかは決めていない。いまの世界のまま切り替えられる。"><input id="adhere" type="checkbox">他の身体を掴む・蓄えが染み出す</label>
     <label title="沿岸の世界で、海底の重さ（摩擦と踏ん張り）が境界をまたいで少しずつ立ち上がる。切ると、境界で段差になる以前の物理。いまの世界のまま切り替えられる。"><input id="shore" type="checkbox">なだらかな境界</label>
     <label>始祖 <select id="founder"><option value="primordial">原始個体（1体節）から自然進化</option><option value="file">進化試験の結果を読み込む（JSON）</option></select></label>
     <input id="file" type="file" accept=".json" style="display:none">
-    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・変異の強さの進化・粒を削る・物質の還元・複数の神経・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。">全部入りで最初から</button><button id="pause">一時停止</button>
+    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・変異の強さの進化・粒を削る・物質の還元・複数の神経・掴む／染み出す・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。">全部入りで最初から</button><button id="pause">一時停止</button>
     <label>速度 <select id="speed"><option>1</option><option selected>4</option><option>16</option><option>64</option></select>×</label>
     <button id="fit">全体表示</button>
   </div>
@@ -65,15 +66,15 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=34"></script>
-<script src="./alife2-genome.js?v=34"></script>
-<script src="./alife2-development.js?v=34"></script>
-<script src="./alife2-neural.js?v=34"></script>
-<script src="./alife2-physics.js?v=34"></script>
-<script src="./alife2-organs.js?v=34"></script>
-<script src="./alife2-engine.js?v=34"></script>
-<script src="./alife2-render.js?v=34"></script>
-<script src="./alife2-gpu.js?v=34"></script>
-<script src="./alife2-world.js?v=34"></script>
+<script src="./alife2-version.js?v=35"></script>
+<script src="./alife2-genome.js?v=35"></script>
+<script src="./alife2-development.js?v=35"></script>
+<script src="./alife2-neural.js?v=35"></script>
+<script src="./alife2-physics.js?v=35"></script>
+<script src="./alife2-organs.js?v=35"></script>
+<script src="./alife2-engine.js?v=35"></script>
+<script src="./alife2-render.js?v=35"></script>
+<script src="./alife2-gpu.js?v=35"></script>
+<script src="./alife2-world.js?v=35"></script>
 </body>
 </html>

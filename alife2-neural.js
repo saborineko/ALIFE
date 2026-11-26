@@ -31,6 +31,7 @@
       const r = segs[s.padRef], rp = r.p;
       const st = Math.sin(r.osc + rp.skew * Math.sin(r.osc) + s.p.gripPhase);
       s.press = cmd.drive < 0.05 ? 1 : clamp(st * 4 + 0.5, 0, 1) * clamp(Math.abs(r.dir) * 3, 0, 1);
+      if (s.np) s.press = clamp(s.press + s.np, 0, 1); // (a neuron can press or lift the pad)
     }
   }
 
@@ -61,7 +62,7 @@
       use += s.a < 0 ? -s.a : s.a;
       if (p.nn) { // several neurons in this segment. Each reads what it is wired to (its own senses; neurons here, in the parent, in the children, in its mirror twin: their values of a moment ago) and acts on this segment
         const nn = compile(p.nn), n = nn.length; if (!s.na || s.na.length !== n) { s.na = new Float64Array(n); s.nb = new Float64Array(n); }
-        const na = s.na, nb = s.nb, parentSeg = s.parent >= 0 ? segs[s.parent] : null, twin = s.twin >= 0 ? segs[s.twin] : null; let eC = 0, eT = 0, eJ = 0, eM = 0, any = 0;
+        const na = s.na, nb = s.nb, parentSeg = s.parent >= 0 ? segs[s.parent] : null, twin = s.twin >= 0 ? segs[s.twin] : null; let eC = 0, eT = 0, eJ = 0, eM = 0, eP = 0, any = 0;
         for (let q = 0; q < n; q++) { const N = nn[q]; let y = N.b;
           for (let e = 0; e < N.src.length; e++) { let v = 0; const j = N.idx[e];
             switch (N.src[e]) {
@@ -75,8 +76,8 @@
             }
             y += N.w[e] * v; }
           const v2 = na[q] + N.k * (Math.tanh(y) - na[q]); nb[q] = v2; use += v2 < 0 ? -v2 : v2;
-          for (let e = 0; e < N.eff.length; e++) { const z = N.ew[e] * v2; any = 1; switch (N.eff[e]) { case 0: eC += z; break; case 1: eT += z; break; case 2: eJ += z; break; case 3: eM += z; } } }
-        if (any) { const c3 = s.cd + eC; s.cd = c3 < 0 ? 0 : c3 > 2 ? 2 : c3; s.ct += eT; s.nj = eJ; if (eM !== 0) { const mo = (s.mo == null ? 1 : s.mo) + eM; s.mo = mo < 0 ? 0 : mo > 1 ? 1 : mo; } }
+          for (let e = 0; e < N.eff.length; e++) { const z = N.ew[e] * v2; any = 1; switch (N.eff[e]) { case 0: eC += z; break; case 1: eT += z; break; case 2: eJ += z; break; case 3: eM += z; break; case 4: eP += z; } } }
+        if (any) { const c3 = s.cd + eC; s.cd = c3 < 0 ? 0 : c3 > 2 ? 2 : c3; s.ct += eT; s.nj = eJ; s.np = eP; if (eM !== 0) { const mo = (s.mo == null ? 1 : s.mo) + eM; s.mo = mo < 0 ? 0 : mo > 1 ? 1 : mo; } }
       }
     }
     for (let i = 0; i < segs.length; i++) { const s = segs[i]; if (s.na && s.nb) { const t = s.na; s.na = s.nb; s.nb = t; } } // all neurons step together
@@ -92,7 +93,7 @@
   // what a part's wiring costs to keep: the strengths of the single signal's connections, and for each neuron its connections and a share for the cell itself
   const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) w += Math.abs(e[1]); for (const e of q.out) w += Math.abs(e[1]); } return w; };
   // neurons, made ready to run: sources and targets as numbers. Done once per part.
-  const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14 }, EFF = { C: 0, T: 1, J: 2, M: 3 }, ready = new WeakMap();
+  const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14 }, EFF = { C: 0, T: 1, J: 2, M: 3, P: 4 }, ready = new WeakMap();
   function compile(nn) { let c = ready.get(nn); if (!c) { c = nn.map(q => ({ b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? +e[0][1] : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]) })); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); ready.set(nn, c); } return c; }
   const other = (seg, i) => (seg && seg.na && i < seg.na.length ? seg.na[i] : 0);
 

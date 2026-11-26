@@ -29,6 +29,7 @@
     birthStage: 0.3, eggReserve: 0.5, growReserve: 0.35, reproReserve: 0.45,
     life: 400, carrion: 0.5,
     bite: 0.5,            // body volume a mouth can tear from tissue it touches, per second, per gape squared (before its jaw muscle and the other's armour)
+    seep: 0.05,           // reserve that passes between two bodies in contact, per second, per unit of difference in how full they are, through bare surface
     flesh: 0.5            // share of the cost of building tissue that is still in it as food (the same share a dead body leaves)
   };
 

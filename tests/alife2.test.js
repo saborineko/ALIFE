@@ -482,3 +482,19 @@ test('several neurons per segment: they read senses and each other by place on t
   const before = new Map(body.plan.segs.map((s, i) => [s.addr, body.b.segs[i].na ? Array.from(body.b.segs[i].na) : null])); body.stage = 0.9; w.form(body, body.cx, body.cy, 0);
   body.plan.segs.forEach((s, i) => { if (before.get(s.addr)) assert.deepStrictEqual(Array.from(body.b.segs[i].na), before.get(s.addr)); });
 });
+
+test('adhere: a pressed pad grips another body without creating momentum; reserve seeps from the fuller to the emptier body and none is lost; skin blocks it', () => {
+  const G = A.genome, mk = o => { const g = G.primordial(1); Object.assign(g.parts[0], { mouth: 0, cilia: 0 }, o); return g; };
+  const quiet = { seed: 2, founders: 0, cap: 0, contact: 1, adhere: 1, noBite: 1, flow: 0, grainRate: 0, bottomRate: 0, jitter: 0, nutrientStart: 0, nutrientRegrow: 0 };
+  // grip: B slides past A; with A's pad pressed the difference in their speeds shrinks in one touch, and total momentum stays
+  for (const grip of [1, 0]) { const w = new A.engine.World(quiet), a = w.spawn(mk({ grip }), 80, 30, 1, null), b = w.spawn(mk({}), 80 + 1.05, 30, 1, null); w.step();
+    a.b.segs[0].press = grip; b.b.segs[0].press = 0; for (let k = 0; k < b.b.np; k++) { b.b.vx[k] = 0; b.b.vy[k] = 1; a.b.vx[k] = 0; a.b.vy[k] = 0; } b.b.om = 0; a.b.om = 0;
+    const mom = () => { const p = P.momentum(a.b), q = P.momentum(b.b); return [p[0] + q[0], p[1] + q[1]]; }, rel = () => Math.hypot(b.b.vx[1] - a.b.vx[1], b.b.vy[1] - a.b.vy[1]), m0 = mom(), r0 = rel();
+    for (const o of [a, b]) { const c = P.com(o.b); o.cx = c[0]; o.cy = c[1]; } P.pose(a.b); P.pose(b.b); w.index(); w.touch(w.dt); const m1 = mom();
+    assert.ok(Math.hypot(m1[0] - m0[0], m1[1] - m0[1]) < 1e-9, 'momentum'); if (grip) assert.ok(rel() < r0 * 0.99 && a.held === w.tick, 'gripped: ' + r0 + ' -> ' + rel()); else assert.ok(Math.abs(rel() - r0) < 1e-9 && a.held == null, 'no pad, no grip'); }
+  // seepage
+  const seep = (skin, noSeep) => { const w = new A.engine.World(Object.assign({}, quiet, { noSeep })), a = w.spawn(mk({ skin: 0 }), 80, 30, 1, null), b = w.spawn(mk({ skin }), 80.9, 30, 1, null); a.E = a.prof.Emax * 0.9; b.E = b.prof.Emax * 0.1;
+    const tot = a.E + b.E; w.index(); for (let i = 0; i < 200; i++) w.touch(w.dt); return { moved: b.E - b.prof.Emax * 0.1, lost: Math.abs(a.E + b.E - tot), fa: a.E / a.prof.Emax, fb: b.E / b.prof.Emax }; };
+  const open = seep(0, 0), covered = seep(1, 0), cut = seep(0, 1);
+  assert.ok(open.moved > 0.01 && open.lost < 1e-9 && open.fa > open.fb, JSON.stringify(open)); assert.strictEqual(covered.moved, 0); assert.strictEqual(cut.moved, 0);
+});

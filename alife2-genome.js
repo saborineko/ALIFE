@@ -185,8 +185,8 @@
   // Sources are named by where they are, seen from the neuron's own segment (after Framsticks' relative references):
   //   own senses    c taste, A B the two leaked substances, v eye, t push, w wound, h hunger, j bend of own joint, o own rhythm, 1 a constant, a the segment's older single signal
   //   other neurons s0..s3 in the same segment, p0..p3 in the segment it grows from, k0..k3 the mean over segments growing from it, m0..m3 its mirror twin on the other side
-  // Targets, all in its own segment: C how hard the cilia beat, T their turning, J the joint's bend, M how far the mouth is open.
-  const NN_MAX = 4, NN_IN = 6, NN_OUT = 3, NN_SENSE = ['c', 'A', 'B', 'v', 't', 'w', 'h', 'j', 'o', '1', 'a'], NN_REF = ['s', 'p', 'k', 'm'], NN_EFF = ['C', 'T', 'J', 'M'];
+  // Targets, all in its own segment: C how hard the cilia beat, T their turning, J the joint's bend, M how far the mouth is open, P how hard its pad presses.
+  const NN_MAX = 4, NN_IN = 6, NN_OUT = 3, NN_SENSE = ['c', 'A', 'B', 'v', 't', 'w', 'h', 'j', 'o', '1', 'a'], NN_REF = ['s', 'p', 'k', 'm'], NN_EFF = ['C', 'T', 'J', 'M', 'P'];
   const nnSource = r => (r() < 0.6 ? NN_SENSE[r.int(NN_SENSE.length)] : NN_REF[r.int(NN_REF.length)] + r.int(NN_MAX));
   const nnValid = c => typeof c === 'string' && (NN_SENSE.includes(c) || (c.length === 2 && NN_REF.includes(c[0]) && c[1] >= '0' && c[1] < String(NN_MAX)));
   function sanitizeNN(p) {
