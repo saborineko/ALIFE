@@ -13,6 +13,30 @@
   const TAU = Math.PI * 2, clamp = (x, a, b) => Math.max(a, Math.min(b, x));
   const wrapPi = x => { x = (x + Math.PI) % TAU; if (x < 0) x += TAU; return x - Math.PI; };
   const sig = x => 1 / (1 + Math.exp(-x));
+  // ---- sound (world option `sound`) ----
+  // Sound is energy in the water, kept as six fields, one for each band of pitch from low (0) to high (5). What is made at a place is added to the
+  // field there; every tick each field spreads to the neighbouring cells and fades. Low sound fades slowly, so it carries far and lingers; high sound
+  // is gone within a few body lengths and a fraction of a second. Fields of different makers simply add up. The water itself is never silent.
+  // Nothing in a field says who made a sound, where, or why.
+  const SND = {
+    B: 6, D: 0.22,                                   // bands; share that moves to each of the four neighbouring cells per tick
+    fade: [0.012, 0.019, 0.03, 0.048, 0.076, 0.12],  // share lost per tick, low band to high: reach about 17 units down to about 5, lingering about 2.8 s down to 0.3 s
+    amb: [3e-5, 2.4e-5, 1.8e-5, 1.2e-5, 8e-6, 5e-6], // the water's own noise per tick (more where there is current), low band to high
+    bursts: 3, burst: 0.02,                          // and a few random crackles per tick, anywhere, in any band
+    // sound that a body cannot help making, per unit of what it does (all of it far fainter than a voice):
+    cilia: 0.5,     // per unit of cilia beating
+    muscle: 0.02,   // per unit of muscle work
+    hit: 6,         // per unit of energy of two bodies pushing on each other
+    tear: 60,       // per unit volume of tissue torn
+    scrape: 4,      // per unit of body volume dragged one unit over a bottom
+    crunch: 0.3,    // per unit of food taken in through a mouth
+    voice: 6,       // a voice: per unit volume of sound-making tissue per tick at full strength
+    ear: 6          // an ear's reading: loudness times this, times its hearing tissue
+  };
+  // the pitch of a sound a body cannot help making follows the size of what makes it: small things sound high
+  const pitchOfR = r => clamp(0.5 - Math.log2(Math.max(r, 1e-3) / 0.25) / 5, 0, 1);
+  const b64 = f => { const u = new Uint8Array(f.buffer, f.byteOffset, f.byteLength); if (typeof Buffer !== 'undefined') return Buffer.from(u).toString('base64'); let t = ''; for (let i = 0; i < u.length; i += 8192) t += String.fromCharCode.apply(null, u.subarray(i, i + 8192)); return btoa(t); };
+  const unb64 = t => { let u; if (typeof Buffer !== 'undefined') u = new Uint8Array(Buffer.from(t, 'base64')); else { const q = atob(t); u = new Uint8Array(q.length); for (let i = 0; i < q.length; i++) u[i] = q.charCodeAt(i); } return new Float32Array(u.buffer.slice(u.byteOffset, u.byteOffset + u.byteLength)); };
 
   const DEFAULTS = {
     seed: 1, W: 160, H: 100, benthic: 0.25, cell: 4, cap: 400, dt: 1 / 30, substeps: 4,
@@ -56,6 +80,13 @@
     adhere: 0,                            // 1 (needs contact) = two more things happen where bodies touch. A pad pressed against another body grips it: it drags on it and
                                           // holds it close. And reserve seeps between touching bodies through bare surface, from the fuller to the emptier (skin and armour block it).
                                           // Nothing says what this is for: clinging, sharing, feeding young, stealing are all the same two rules
+    sound: 0,                             // 1 = sound exists. Every body makes faint sound by what it does (beating cilia, working muscle, pushing on another body, tearing tissue,
+                                          // dragging over a bottom, taking food in), at a pitch set by its size. A segment can grow hearing tissue (an ear: how loud the water is at
+                                          // its outer end, over the pitches it is tuned to) and sound-making tissue (a voice, driven by its nerve circuit, costing energy for every
+                                          // sound). Sound spreads, fades and adds up (see SND above). No sound has a meaning given to it.
+    deaf: 0,                              // control experiment: no ear in this world hears anything
+    mute: 0,                              // control experiment: no voice in this world makes a sound (bodies still make the sounds they cannot help making)
+    soundLag: 0,                          // control experiment: ears hear the water as it was this many seconds ago (what is heard no longer follows what just happened)
     wave: 0, waveLength: 120, waveDepth: 0.8, // wave > 0 = richness travels: the regrowth of dissolved food and the supply of grains are multiplied by 1 + depth x sin, a wave of this
                                           // length that moves along the world once per `wave` seconds (so every place is rich and lean in turn, and the crest moves at length / wave).
                                           // The supply averaged over time is the same everywhere as without the wave; grains that would fall in lean water fall elsewhere instead.
@@ -107,6 +138,7 @@
       this.grains = this.audit ? {} : null; // per size of grain: energy arrived, eaten, gone uneaten, and how much of it a mouth ever reached but could not take (too big for it / its gut was full)
       if (this.vision || this.contact) this.bgrid = Array.from({ length: this.cols * this.rows }, () => []);
       if (this.scent) { const n = this.cols * this.rows; this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
+      if (this.sound) this.soundInit();
       this.tree = new Map(); this.events = []; this.history = []; this.firsts = {}; this.pruned = 0; this.clades = new Map();
     }
     buildMap(M) {
@@ -171,8 +203,9 @@
       if (mind) { o.b.t = mind.t; o.plan.segs.forEach((s, i) => { const v = mind.seg.get(s.addr); if (!v) return; const q = o.b.segs[i]; q.a = v[0]; q.m = v[1]; if (v[2] != null) q.mA = v[2]; if (v[3] != null) q.mB = v[3]; if (v[4] != null) q.mV = v[4]; if (v[5] != null) q.v = v[5]; if (v[6] && q.p.nn && q.p.nn.length === v[6].length) { q.na = v[6]; q.nb = new Float64Array(v[6].length); } if (v[7] != null) q.nA = v[7]; if (v[8] != null) q.nB = v[8]; if (v[9] != null) q.nV = v[9]; if (v[10] && q.p.nn && A.neural.compile(q.p.nn).total === v[10].length) q.nw = v[10]; }); }
       // a body with no working joint cannot do anything but drift: move it with the water instead of simulating it
       if (!this.rigid) o.b.rigid = false; // control experiment: solve every body with the jointed solver
-      o.passive = !o.b.hasCilia && o.b.rigid && !this.contact; o.cil0 = 0; // where bodies touch, every body is simulated: even one that cannot move can be pushed
+      o.passive = !o.b.hasCilia && o.b.rigid && !this.contact && !this.sound; o.cil0 = 0; // where bodies touch, every body is simulated: even one that cannot move can be pushed
       o.cleanV = o.prof.V; o.cleanBuild = o.prof.buildCost; if (o.hp) { while (o.hp.length < o.b.segs.length) o.hp.push(1); o.hp.length = o.b.segs.length; this.wound(o); }
+      if (this.sound) this.soundBody(o);
       o.cil0 = 0; o.nerve0 = 0; o.b.nerveUse = 0; if (o.sig) { for (let i = 0; i < o.b.segs.length && i < o.sig.length; i++) o.b.segs[i].a = o.sig[i]; o.sig = null; }
     }
     // counts for taxis only if it went somewhere by itself: at least 2 units while perceiving food, at 0.02 units/s or more over its life
@@ -189,6 +222,9 @@
       if ((this.vision || this.contact) && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
       if (o.adhere != null && !!o.adhere !== !!this.adhere) { this.adhere = o.adhere ? 1 : 0; this.log('世界の設定を変更：パッドが他の身体を掴み、触れ合う身体のあいだで蓄えが染み出す規則を' + (o.adhere ? '有効にした' : '無効にした')); }
       if (o.wave != null && o.wave !== this.wave) { this.wave = o.wave > 0 ? o.wave : 0; this.log('世界の設定を変更：豊かさの波（溶存栄養の回復と粒の供給が、波として世界を移動する）を' + (this.wave > 0 ? '有効にした（周期 ' + this.wave + ' 秒）' : '無効にした')); }
+      if (o.sound != null && !!o.sound !== !!this.sound) { this.sound = o.sound ? 1 : 0; this.log('世界の設定を変更：音（身体の活動から生じる音、耳、声）を' + (o.sound ? '有効にした' : '無効にした')); if (this.sound && !this.snd) this.soundInit(); }
+      for (const k of ['deaf', 'mute']) if (o[k] != null && !!o[k] !== !!this[k]) { this[k] = o[k] ? 1 : 0; this.log('世界の設定を変更（対照実験）：' + (k === 'deaf' ? 'すべての耳が何も聞こえない' : 'すべての声が出ない') + (o[k] ? '状態にした' : '状態を解いた')); }
+      if (o.soundLag != null && o.soundLag !== this.soundLag) { this.soundLag = o.soundLag > 0 ? o.soundLag : 0; this.sndRing = []; this.log('世界の設定を変更（対照実験）：耳が聞く音を ' + this.soundLag + ' 秒前のものにした'); }
       if (o.learn != null && !!o.learn !== !!this.learn) { this.learn = o.learn ? 1 : 0; this.log('世界の設定を変更：神経の結合が使われ方で変わる（学習する）規則を' + (o.learn ? '有効にした' : '無効にした')); }
       if (o.invest != null && !!o.invest !== !!this.invest) { this.invest = o.invest ? 1 : 0; this.log('世界の設定を変更：卵に持たせる蓄えの量が遺伝し、変異する規則を' + (o.invest ? '有効にした' : '無効にした')); for (const b of this.bodies) { const baby = A.organs.profile(A.development.develop(b.g, { stage: b.g.birth, maxSegs: this.maxSegs })), y = this.yolkOf(b.g), C = A.organs.C; b.eggCost = C.eggFixed + baby.buildCost + y * baby.Emax; b.eggE = y * baby.Emax; } }
       if (o.mix != null && !!o.mix !== !!this.mix) { this.mix = o.mix ? 1 : 0; this.log('世界の設定を変更：裸の表面どうしが触れると遺伝物質が渡り、次の卵が 2 つの遺伝子から作られる規則を' + (o.mix ? '有効にした' : '無効にした')); }
@@ -202,7 +238,7 @@
       for (const k of ['vision', 'scent', 'blind']) { if (o[k] == null || !!o[k] === !!this[k]) continue; this[k] = o[k] ? 1 : 0; this.log('世界の設定を変更：' + names[k] + (o[k] ? 'を有効にした' : 'を無効にした')); }
       if (this.scent && !this.scA) { this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
       if (this.vision && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
-      for (const b of this.bodies) { A.genome.sanitize(b.g); for (const q of b.b.segs) for (const k in F) if (!Number.isFinite(q.p[k])) q.p[k] = F[k][2]; }
+      for (const b of this.bodies) { A.genome.sanitize(b.g); for (const q of b.b.segs) for (const k in F) if (!Number.isFinite(q.p[k])) q.p[k] = F[k][2]; if (this.sound) { b.passive = false; this.soundBody(b); } }
     }
     log(text, id) { this.events.push({ t: Math.round(this.t), text, id }); if (this.events.length > 400) this.events.shift(); }
     // things that happen for the first time in this world (observation only; nothing is rewarded)
@@ -216,6 +252,94 @@
     }
     // How far a young with these genes can develop on an egg holding B: the stage its genes aim at if the egg pays for that body and the usual
     // reserve; otherwise the latest stage it does pay for; a mere bud with less reserve if that is all there is; null if not even a bud.
+    // ---- sound ----
+    soundInit() {
+      const n = this.cols * this.rows, mk = () => Array.from({ length: SND.B }, () => new Float32Array(n));
+      this.snd = mk(); this.sndIn = mk(); this.snd2 = new Float32Array(n);
+      this.sndV = mk(); this.sndVIn = mk(); // the part of the sound that voices made: the same water, kept apart only for the record and for a human listener. No body can tell it from the rest.
+      this.sndPast = null; this.sndRing = []; // (soundLag) the water as it was
+      this.aco = this.aco || { out: { cilia: 0, muscle: 0, hit: 0, tear: 0, scrape: 0, crunch: 0, voice: 0 }, recent: [], onsets: 0, after: 0, expect: 0, toward: 0, away: 0, tab: {}, spent: 0 };
+    }
+    // The record of sound (counting only). It keeps apart four things that are easily taken for one another:
+    //   sound is made      — voices exist and sound (voiced, calling, callsPer100s, voiceShare of all sound made)
+    //   it goes with a state — how much knowing that a body sounds tells about its state, in bits (signalBits, signalOf): the sender's side only
+    //   it moves a listener  — how hard what ears report pushes on their owners' circuits (listening, hearDrive): the receiver's side, by the wiring;
+    //                          whether behaviour really changes takes a world with ears or voices cut (deaf, mute, soundLag)
+    //   it is answered       — beginnings of sound that follow another body's beginning nearby, against what those neighbours' own rates would give by chance (answer);
+    //                          and, where a neuron pushed the pitch, whether towards the pitch just heard (pitchToward)
+    soundCensus() {
+      const K = this.aco, L = this.bodies, n = Math.max(1, L.length); let voiced = 0, eared = 0, calling = 0, hd = 0, hl = 0, voT = 0, voN = 0, age = 0, pS = 0, pS2 = 0, pN = 0;
+      for (const o of L) { const b = o.b; if (b.hasVoice) { voiced++; if (o.voOn) calling++; voN += o.voN || 0; voT += o.voT || 0; age += o.age; for (const q of b.segs) if (q.voxV > 0) { pS += q.p.pitch; pS2 += q.p.pitch * q.p.pitch; pN++; } } if (b.hasEar) { eared++; hd += b.hd || 0; if ((b.hd || 0) > 0.05) hl++; } }
+      let best = 0, of = ''; for (const k in K.tab) { const t = K.tab[k], N = t[0] + t[1] + t[2] + t[3]; if (N < 50) continue; let mi = 0; for (let c = 0; c < 2; c++) for (let s2 = 0; s2 < 2; s2++) { const pj = t[c * 2 + s2] / N, pc = (t[c * 2] + t[c * 2 + 1]) / N, ps = (t[s2] + t[2 + s2]) / N; if (pj > 0) mi += pj * Math.log2(pj / (pc * ps)); } if (mi > best) { best = mi; of = k; } }
+      const out = K.out, all = out.cilia + out.muscle + out.hit + out.tear + out.scrape + out.crunch + out.voice; let loud = 0; for (let b = 0; b < SND.B; b++) { const f = this.snd[b]; let a = 0; for (let i = 0; i < f.length; i += 7) a += f[i]; loud += a / Math.ceil(f.length / 7); }
+      return { voiced: voiced / n, eared: eared / n, calling: voiced ? calling / voiced : 0, callsPer100s: age > 0 ? voN / age * 100 : 0, callTime: age > 0 ? voT / age : 0, voiceShare: all > 0 ? out.voice / all : 0, soundMade: all, loudness: loud,
+        pitchMean: pN ? pS / pN : 0, pitchSpread: pN ? Math.sqrt(Math.max(0, pS2 / pN - (pS / pN) ** 2)) : 0, signalBits: best, signalOf: of, hearDrive: eared ? hd / eared : 0, listening: eared ? hl / eared : 0,
+        answer: K.expect > 0 ? K.after / K.expect : 0, answerN: K.after, answerBase: K.expect, onsets: K.onsets, pitchToward: K.toward + K.away > 0 ? K.toward / (K.toward + K.away) : 0, pitchN: K.toward + K.away, soundCost: K.spent };
+    }
+    // what a body has to hear and to sound with, worked out when the body is built: for each segment with hearing tissue the bands its ear takes in
+    // (a bell around the pitch it is tuned to) and its sensitivity; for each segment with sound-making tissue the volume of that tissue.
+    soundBody(o) {
+      const b = o.b, segs = b.segs; b.hasEar = false; b.hasVoice = false; o.sp = pitchOfR(0.5 * Math.cbrt(o.prof.V));
+      for (let i = 0; i < segs.length; i++) { const q = segs[i], p = q.p, hp = o.hp ? o.hp[i] : 1; q.earW = null; q.voxV = 0;
+        if (p.ear > 0.02 && q.circ) { const w = new Float32Array(SND.B), wide = Math.max(0.05, p.hWide || 0.3); for (let k = 0; k < SND.B; k++) { const d = (k / (SND.B - 1) - (p.hTune == null ? 0.5 : p.hTune)) / wide; w[k] = Math.exp(-2 * d * d); } q.earW = w; q.earG = SND.ear * p.ear * hp; b.hasEar = true; }
+        if (p.voice > 0.02 && q.circ) { const rm = (q.r0 + q.r1) / 2, zm = (q.z0 + q.z1) / 2; q.voxV = Math.PI * rm * zm * q.len * p.voice * hp; b.hasVoice = true; } }
+    }
+    // sound is made at a place, at a pitch (0 low .. 1 high). It enters the water at the start of the next tick, so that within one tick no body hears another before the other could hear it.
+    emit(x, y, pitch, power, kind) {
+      if (!(power > 0)) return;
+      const i = this.cellAt(x, clamp(y, 0, this.H - 0.01)), q = clamp(pitch, 0, 1) * (SND.B - 1), b0 = Math.min(SND.B - 2, Math.floor(q)), f = q - b0;
+      this.sndIn[b0][i] += power * (1 - f); this.sndIn[b0 + 1][i] += power * f; this.aco.out[kind] += power;
+      if (kind === 'voice') { this.sndVIn[b0][i] += power * (1 - f); this.sndVIn[b0 + 1][i] += power * f; }
+    }
+    stepSound() {
+      const B = SND.B, cols = this.cols, rows = this.rows, n = cols * rows, D = SND.D, r = this.rand, hF = this.hFlow || null;
+      for (let k = 0; k < SND.bursts; k++) { const i = r.int(n), b = r.int(B); this.sndIn[b][i] += SND.burst * r() * r(); } // the water crackles
+      for (let pass = 0; pass < 2; pass++) { const F = pass ? this.sndV : this.snd, IN = pass ? this.sndVIn : this.sndIn;
+        for (let b = 0; b < B; b++) { const f = F[b], inn = IN[b], g = this.snd2, keep = 1 - SND.fade[b], amb = pass ? 0 : SND.amb[b];
+          for (let i = 0; i < n; i++) if (inn[i] !== 0) { f[i] += inn[i]; inn[i] = 0; }
+          for (let y = 0; y < rows; y++) { const row = y * cols, up = y ? row - cols : row, dn = y < rows - 1 ? row + cols : row;
+            for (let x = 0; x < cols; x++) { const i = row + x, c = f[i]; g[i] = (c + D * (f[row + (x ? x - 1 : cols - 1)] + f[row + (x < cols - 1 ? x + 1 : 0)] + f[up + x] + f[dn + x] - 4 * c)) * keep + (amb ? amb * (hF ? 0.4 + hF[i] : 1) : 0); } }
+          F[b] = g; this.snd2 = f; } }
+      if (this.soundLag > 0) { // (control) keep the water of the last seconds, a snapshot every third tick; ears then read an old one
+        if (this.tick % 3 === 0) { this.sndRing.push(this.snd.map(f => Float32Array.from(f))); const keepN = Math.ceil(this.soundLag * 10) + 1; while (this.sndRing.length > keepN) this.sndRing.shift(); }
+        this.sndPast = this.sndRing.length ? this.sndRing[0] : null;
+      } else this.sndPast = null;
+      const rec = this.aco.recent, t0 = this.t - 8; while (rec.length && rec[0].t < t0) rec.shift();
+      if (this.tick % 30 === 0) { const T = this.aco.tab; for (const k in T) for (let i = 0; i < 4; i++) T[k][i] *= 0.998; }
+    }
+    // what a body's ears take in, each at its own place: how loud the water is at the outer end of the segment, over the pitches the ear is tuned to
+    hear(o) {
+      const segs = o.b.segs, F = this.sndPast || this.snd, cut = this.deaf || o.deaf;
+      for (let i = 0; i < segs.length; i++) { const q = segs[i], w = q.earW; if (!w) continue; if (cut) { q.e = 0; continue; }
+        let L = 0; for (let b = 0; b < SND.B; b++) if (w[b] > 0.01) L += w[b] * this.nutAt(q.bx, q.by, F[b]); q.e = L * q.earG; }
+    }
+    // a voice sounds as hard as the segment's nerve circuit drives it, at its own pitch (pushed up or down by a neuron), and the body pays for the sound
+    voiceOut(o, dt) {
+      const C = A.organs.C, segs = o.b.segs; let cost = 0, loud = 0, pit = 0, shift = 0, base = 0;
+      for (let i = 0; i < segs.length; i++) { const q = segs[i]; if (!(q.voxV > 0) || !(q.vo > 0)) continue;
+        const p = clamp(q.p.pitch + q.p.bend * (q.vq || 0), 0, 1), pw = SND.voice * q.voxV * q.vo; this.emit(q.bx, q.by, p, pw, 'voice'); cost += C.call * q.voxV * q.vo * dt; if (q.vo > loud) { loud = q.vo; pit = p; shift = q.vq || 0; base = q.p.pitch; } }
+      if (cost > 0) { o.E -= cost; o.voE = (o.voE || 0) + cost; this.aco.spent += cost; if (this.ledger) this.ledger.sound = (this.ledger.sound || 0) + cost; }
+      // The record (counting only; no body ever sees it). When a body begins to sound: how many other bodies within 16 units had begun to sound just
+      // before (0.05-0.5 s)? Against that: how many would have, if those neighbours began at their usual rates with no regard to anyone (their rate x 0.45 s).
+      // After / expected well above 1: beginnings follow others' beginnings — bodies are answering, or are set off by the same thing (only silencing
+      // one side can tell). Two bodies that each keep their own rhythm give about 1. If the body's neuron pushed its pitch: towards the pitch of the
+      // call it followed, or away from it?
+      const on = loud > 0.2; o.voL = loud; o.voP = pit; if (on) o.voT = (o.voT || 0) + dt;
+      if (on && !o.voOn) { o.voN = (o.voN || 0) + 1; const K = this.aco, seen = new Map(); let near = null; K.onsets++;
+        for (const e of K.recent) { if (e.id === o.id) continue; let dx = e.x - o.cx; if (dx > this.W / 2) dx -= this.W; else if (dx < -this.W / 2) dx += this.W; const dy = e.y - o.cy; if (dx * dx + dy * dy > 256) continue;
+          const age = this.t - e.t, was = seen.get(e.id); seen.set(e.id, { r: e.r, hit: (was && was.hit) || (age >= 0.05 && age <= 0.5) }); if (age >= 0.05 && age <= 0.5) near = e; }
+        for (const v of seen.values()) { K.expect += v.r * 0.45; if (v.hit) K.after++; }
+        if (near && Math.abs(shift) > 0.02 && Math.abs(near.p - base) > 0.02) { if ((pit - base) * (near.p - base) > 0) K.toward++; else K.away++; }
+        K.recent.push({ id: o.id, t: this.t, x: o.cx, y: o.cy, p: pit, r: o.voN / Math.max(8, o.age) }); }
+      o.voOn = on;
+    }
+    // (record) once a second, for a body with a voice: is it sounding, and what state is it in? Kept as counts, old ones fading (about 8 minutes).
+    voiceNote(o) {
+      const T = this.aco.tab, segs = o.b.segs, call = o.voOn ? 1 : 0, pr = o.prof; let touched = 0, seeing = 0, hearing = 0;
+      for (let i = 0; i < segs.length; i++) { const q = segs[i]; if (q.tch > 0.01) touched = 1; if (q.v > 0.2) seeing = 1; if (q.e > 0.15) hearing = 1; }
+      const st = { hungry: o.E < 0.35 * pr.Emax ? 1 : 0, fed: o.G > 0.3 * pr.gutCap ? 1 : 0, touched, hurt: o.hp && o.hp.some(h => h < 1) ? 1 : 0, seeing, hearing, young: o.stage < 1 ? 1 : 0 };
+      for (const k in st) { const t = T[k] || (T[k] = [0, 0, 0, 0]); t[call * 2 + st[k]]++; }
+    }
     // (wave) how rich the water is at x just now, as a multiple of the usual; the wave fits the world's length a whole number of times
     waveAt(x) { const L = this.W / Math.max(1, Math.round(this.W / this.waveLength)); return 1 + this.waveDepth * Math.sin(TAU * (x / L - this.t / this.wave)); }
     waveCols() { const f = this.wcol || (this.wcol = new Float64Array(this.cols)); for (let x = 0; x < this.cols; x++) f[x] = this.waveAt((x + 0.5) * this.cell); return f; }
@@ -294,6 +418,7 @@
         const d = Math.sqrt(d2) || 1e-6, ma = A2.rigid ? A2.mass : A2.m[p.b], mb = B2.rigid ? B2.mass : B2.m[q.b], J = ma * mb / (ma + mb) * Math.min(0.2, 12 * (R - d) * dt), jx = J * dx / d, jy = J * dy / d;
         if (mix && !bare && p.p.skin + p.p.armor < 1 && q.p.skin + q.p.armor < 1) bare = true;
         P.impulse(A2, p.b, -jx, -jy); P.impulse(B2, q.b, jx, jy); p.tch += J / ma; q.tch += J / mb; // each feels the change of speed the push gives it
+        if (this.sound) this.emit(p.bx + dx * 0.5, p.by + dy * 0.5, pitchOfR(Math.min(p.r1, q.r1)), SND.hit * J * J * (ma + mb) / (ma * mb), 'hit');
       } }
       if (bare) { if (!a.got || a.got.id !== b.id) a.got = { id: b.id, g: b.g }; if (!b.got || b.got.id !== a.id) b.got = { id: a.id, g: a.g }; } // (mix) each now carries the other's genetic material, in place of any it had
       if (touch > 0 && !this.noSeep) { // reserve seeps towards the emptier body, never past the point where they are equally full, never more than the receiver can hold
@@ -320,6 +445,7 @@
       v.E -= eE; v.G -= eG; hp[j] -= dv / vol; if (hp[j] < 1e-6) hp[j] = 0; q.torn += dv / vol / dt;
       if (this.ledger) this.ledger.bite += (1 - C.flesh) * C.build * dv; if (this.recycle) this.giveBack(q.bx, q.by, (1 - C.flesh) * C.build * dv);
       if (this.learn) s.ate = (s.ate || 0) + got / e.prof.gutCap;
+      if (this.sound) this.emit(q.bx, q.by, pitchOfR(q.r1), SND.tear * dv, 'tear');
       e.G += got; e.flesh = (e.flesh || 0) + got; e.eaten += got; this.counts.flesh += got; this.counts.torn += got; v.lost = (v.lost || 0) + got; v.biter = e.id;
       return true;
     }
@@ -328,7 +454,7 @@
     wound(o) {
       const hp = o.hp, segs = o.b.segs; if (!hp) return;
       for (let i = 0; i < segs.length; i++) { const h = hp[i], s = segs[i]; o.plan.segs[i].hp = h; if (s.base == null) s.base = [s.tauMax, s.cil, s.padCap || 0]; s.tauMax = s.base[0] * h; s.cil = s.base[1] * h; s.padCap = s.base[2] * h; s.hp = h; }
-      o.prof = A.organs.profile(o.plan);
+      o.prof = A.organs.profile(o.plan); if (this.sound) this.soundBody(o);
       if (hp[0] < 0.05 || o.prof.V < 0.3 * o.cleanV) o.dead = 'killed';
     }
     // Sight. Each segment with eye tissue and a wire from it looks along its own direction (turned by `gaze`), over a cone
@@ -489,6 +615,7 @@
     step() {
       const dt = this.dt, C = A.organs.C, P = A.physics, lg = this.ledger;
       this.stepFood(dt);
+      if (this.sound) this.stepSound();
       if (this.scent && this.tick % 6 === 0) this.stepScent(dt * 6);
       if (this.vision || this.contact) this.index();
       if (this.contact) this.touch(dt);
@@ -511,7 +638,9 @@
             for (let i = 0; i < segs.length; i++) { const q = segs[i]; if (off || !q.circ) { smA[i] = smB[i] = 0; continue; } const x = (q.ax + q.bx) * 0.5, y = (q.ay + q.by) * 0.5; smA[i] = this.nutAt(x, y, this.scA); smB[i] = this.nutAt(x, y, this.scB); }
           }
           if (this.contact && (this.numbSkin || o.numbSkin)) for (let i = 0; i < segs.length; i++) { segs[i].tch = 0; segs[i].torn = 0; }
-          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax, smA, smB, this.vision, this.contact, this.learn ? dt : 0) * dt;
+          if (this.sound && b.hasEar) this.hear(o);
+          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax, smA, smB, this.vision, this.contact, this.learn ? dt : 0, this.sound) * dt;
+          if (this.sound && b.hasVoice) { if (this.mute || o.mute) { o.voOn = false; o.voL = 0; } else this.voiceOut(o, dt); if ((this.tick + o.id) % 30 === 0 && (o.voN > 0 || o.voOn)) this.voiceNote(o); /* (only bodies that have ever sounded: the record is about when a caller calls, not about who has a voice) */ }
         }
         // a body that cannot move itself is simply carried by the water, and lies still on a stepped floor. On a sloping floor it gets the same physics as any body: the current drags it, the floor holds it by its weight
         if (o.passive && !(ground && this.shore > 0)) { if (!ground) for (let k = 0; k < b.np; k++) { b.x[k] += fl[0] * dt; b.y[k] += fl[1] * dt; } P.pose(b); }
@@ -522,7 +651,7 @@
         if (c[1] < 2 || c[1] > this.H - 2) { const push = (c[1] < 2 ? 2 - c[1] : this.H - 2 - c[1]) * 0.5; for (let k = 0; k < b.np; k++) { b.y[k] += push; b.vy[k] *= 0.5; } c[1] += push; P.pose(b); }
         // own travel: displacement with the water's drift removed. A body resting on a bottom is not carried by the water,
         // so nothing is removed there; a body with nothing to move itself with has travelled nowhere by itself.
-        { const jx = c[0] - o.cx, jy = c[1] - o.cy, ux = ground ? 0 : fl[0] * dt, uy = ground ? 0 : fl[1] * dt; if (!o.passive && jx * jx + jy * jy < 25) o.path += Math.sqrt((jx - ux) * (jx - ux) + (jy - uy) * (jy - uy)); o.cx = c[0]; o.cy = c[1]; }
+        { const jx = c[0] - o.cx, jy = c[1] - o.cy, ux = ground ? 0 : fl[0] * dt, uy = ground ? 0 : fl[1] * dt; if (!o.passive && jx * jx + jy * jy < 25) o.path += Math.sqrt((jx - ux) * (jx - ux) + (jy - uy) * (jy - uy)); if (this.sound && ground && jx * jx + jy * jy < 25) this.emit(c[0], c[1], o.sp, SND.scrape * pr.V * Math.sqrt(jx * jx + jy * jy), 'scrape'); o.cx = c[0]; o.cy = c[1]; }
         // income: skin
         for (let i = 0; i < b.segs.length; i++) {
           const a = pr.absorb[i]; if (a <= 0) continue;
@@ -551,9 +680,11 @@
             if (Math.sqrt(dx * dx + (f.y - s.by) * (f.y - s.by)) < m.gape + f.size * 0.5) { if (lg) this.grainClass(f.c || String(f.size)).eaten += f.e; o.G += f.e; o.eaten += f.e; this.counts.eaten += f.e; f.e = 0; }
           }
           if (this.learn && o.G > g0) s.ate = (s.ate || 0) + (o.G - g0) / pr.gutCap; // (learn) this mouth has just taken something in
+          if (this.sound && o.G > g0) this.emit(s.bx, s.by, pitchOfR(s.r1), SND.crunch * (o.G - g0), 'crunch');
         }
         const dg = Math.min(o.G, pr.digest * dt); o.G -= dg; o.E += dg * pr.eta; if (lg) lg.digest += dg * (1 - pr.eta); if (this.recycle) this.giveBack(o.cx, o.cy, dg * (1 - pr.eta));
         // spending
+        if (this.sound) { const dC = b.ciliaUse - o.cil0, dW = b.work - o.work0; if (dC > 0) this.emit(o.cx, o.cy, o.sp, SND.cilia * dC, 'cilia'); if (dW > 0) this.emit(o.cx, o.cy, o.sp, SND.muscle * dW, 'muscle'); }
         if (lg) { lg.basal += pr.basal * dt; lg.work += C.work * (b.work - o.work0); lg.cilia += C.ciliaWork * (b.ciliaUse - o.cil0); lg.nerve += C.spike * (b.nerveUse - o.nerve0); }
         o.E -= pr.basal * dt + C.work * (b.work - o.work0) + C.ciliaWork * (b.ciliaUse - o.cil0) + C.spike * (b.nerveUse - o.nerve0); o.work0 = b.work; o.cil0 = b.ciliaUse; o.nerve0 = b.nerveUse;
         if (o.E > pr.Emax) { if (lg) lg.clip += o.E - pr.Emax; if (this.recycle) this.giveBack(o.cx, o.cy, o.E - pr.Emax); o.E = pr.Emax; }
@@ -579,8 +710,8 @@
       }
       for (const o of born) {
         const mm = this.metamut ? (o.g.mut == null ? 1 : o.g.mut) : 1;
-        let src = o.g, two = 0; if (this.mix && o.got) { src = A.genome.recombine(o.g, o.got.g, this.rand); two = o.got.id; o.got = null; } // an egg made from two genomes; the material taken up is used
-        const g = this.rand() < this.mutation * mm ? A.genome.mutate(src, this.rand, this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut ? 'm' : '') + (this.contact ? 'c' : '') + (this.nerve2 ? 'n' : '') + (this.invest ? 'i' : '') + (this.learn ? 'l' : '')) : two ? src : A.genome.copy(o.g);
+        let src = o.g, two = 0; if (this.mix && o.got) { src = A.genome.recombine(o.g, o.got.g, this.rand, this.sound); two = o.got.id; o.got = null; } // an egg made from two genomes; the material taken up is used
+        const g = this.rand() < this.mutation * mm ? A.genome.mutate(src, this.rand, this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut ? 'm' : '') + (this.contact ? 'c' : '') + (this.nerve2 ? 'n' : '') + (this.invest ? 'i' : '') + (this.learn ? 'l' : '') + (this.sound ? 's' : '')) : two ? src : A.genome.copy(o.g);
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
         const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1, bx = o.cx + Math.cos(a) * d, by = clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), B = o.eggCost - C.eggFixed; // B: what the egg holds
@@ -627,25 +758,27 @@
       return {
         format: 'alife2-world-1', exact: 1, opt: Object.fromEntries(Object.keys(DEFAULTS).map(k => [k, this[k]])), t: this.t, tick: this.tick, nextId: this.nextId, rng: this.rand.state(),
         nut: Array.from(this.nut), scA: this.scent ? Array.from(this.scA) : undefined, scB: this.scent ? Array.from(this.scB) : undefined, food: this.food.filter(f => f.e > 0).map(f => [f.x, f.y, f.size, f.e, f.fixed ? 1 : 0, f.die]),
+        snd: this.sound && this.snd ? { f: this.snd.map(b64), i: this.sndIn.map(b64), v: this.sndV.map(b64), vi: this.sndVIn.map(b64), aco: this.aco } : undefined,
         patch: this.patch, grainDebt: this.grainDebt || 0, bottomDebt: this.bottomDebt || 0, liveLines: this.liveLines ? [...this.liveLines] : null, regionState: this.regions ? this.regions.map(q => ({ debt: q.debt, patch: q.patch })) : null,
         counts: this.counts, events: this.events, history: this.history, firsts: this.firsts, pruned: this.pruned, tree: [...this.tree.values()],
         // body plans that only one or two bodies ever had keep their numbers but not their genome (worlds begun before this rule still carry them)
         clades: [...this.clades.values()].map(c => c.ended != null && c.members <= 2 && c.g ? Object.assign({}, c, { g: null }) : c), cladesDropped: this.cladesDropped || 0,
-        bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home, v0: o.V0, s0: o.stage0, si: o.seepIn || undefined, so: o.seepOut || undefined, hd: o.held == null ? undefined : o.held, p2: o.p2 || undefined, got: o.got ? [o.got.id, o.got.g] : undefined, hp: o.hp || undefined, flesh: o.flesh || undefined, lost: o.lost || undefined,
+        bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home, v0: o.V0, s0: o.stage0, si: o.seepIn || undefined, so: o.seepOut || undefined, hd: o.held == null ? undefined : o.held, p2: o.p2 || undefined, got: o.got ? [o.got.id, o.got.g] : undefined, vo: o.voN ? [o.voOn ? 1 : 0, o.voN, o.voT || 0, o.voE || 0] : undefined, hp: o.hp || undefined, flesh: o.flesh || undefined, lost: o.lost || undefined,
           sig: b.hasCircuit ? b.segs.map(q => q.a) : undefined,
           st: { x: Array.from(b.x), y: Array.from(b.y), vx: Array.from(b.vx), vy: Array.from(b.vy), t: b.t, work: b.work, heat: b.heat, cilia: b.ciliaUse, nerve: b.nerveUse, om: b.om || 0, th: b.th || 0, loc: b.loc ? Array.from(b.loc) : null, inertia: b.inertia == null ? null : b.inertia, carried: b.carried == null ? null : b.carried, cmd: b.cmd,
-            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB, q.v == null ? null : q.v, q.mV == null ? null : q.mV, q.mo == null ? null : q.mo, q.na ? Array.from(q.na) : null, q.na ? [q.nA == null ? null : q.nA, q.nB == null ? null : q.nB, q.nV == null ? null : q.nV] : null].concat(q.nw || q.ate ? [q.nw ? Array.from(q.nw) : null, q.ate || 0] : [])), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
+            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB, q.v == null ? null : q.v, q.mV == null ? null : q.mV, q.mo == null ? null : q.mo, q.na ? Array.from(q.na) : null, q.na ? [q.nA == null ? null : q.nA, q.nB == null ? null : q.nB, q.nV == null ? null : q.nV] : null].concat(q.nw || q.ate || q.mE != null || q.nE != null ? [q.nw ? Array.from(q.nw) : null, q.ate || 0, q.mE == null ? null : q.mE, q.nE == null ? null : q.nE] : [])), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
       };
     }
     // Older saves (without `exact`) lack pose, velocities, rhythm phase, sensory memory and birth region: bodies then restart from rest.
     static restore(d) {
       if (!d || d.format !== 'alife2-world-1') throw new Error('not an ALIFE 2.0 world');
       const w = new World(d.opt); w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = Object.assign({}, d.counts); for (const k of ['killed', 'flesh', 'torn', 'stillborn']) if (w.counts[k] == null) w.counts[k] = 0; /* worlds saved before bodies could touch */ w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
+      if (w.sound && d.snd) { w.snd = d.snd.f.map(unb64); w.sndIn = d.snd.i.map(unb64); w.sndV = d.snd.v.map(unb64); w.sndVIn = d.snd.vi.map(unb64); w.aco = d.snd.aco; }
       for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: d.exact ? f[5] : w.t + f[5] });
       if (d.exact) { w.grainDebt = d.grainDebt; w.bottomDebt = d.bottomDebt; if (d.liveLines) w.liveLines = new Set(d.liveLines); if (d.regionState && w.regions) d.regionState.forEach((q, i) => { w.regions[i].debt = q.debt; w.regions[i].patch = q.patch; }); }
       const nodes = new Map(d.tree.map(n => [n.id, n]));
       for (const s of d.bodies) {
-        const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade, sig: s.sig || null, home: s.home || 0, taxDot: 0, taxLen: 0, taxN: 0, V0: s.v0, stage0: s.s0, seepIn: s.si || 0, seepOut: s.so || 0, held: s.hd == null ? undefined : s.hd, p2: s.p2 || 0, got: s.got ? { id: s.got[0], g: s.got[1] } : null, hp: s.hp || null, flesh: s.flesh || 0, lost: s.lost || 0 };
+        const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade, sig: s.sig || null, home: s.home || 0, taxDot: 0, taxLen: 0, taxN: 0, V0: s.v0, stage0: s.s0, seepIn: s.si || 0, seepOut: s.so || 0, held: s.hd == null ? undefined : s.hd, p2: s.p2 || 0, got: s.got ? { id: s.got[0], g: s.got[1] } : null, voOn: s.vo ? !!s.vo[0] : false, voN: s.vo ? s.vo[1] : 0, voT: s.vo ? s.vo[2] : 0, voE: s.vo ? s.vo[3] : 0, hp: s.hp || null, flesh: s.flesh || 0, lost: s.lost || 0 };
         const baby = A.organs.profile(A.development.develop(o.g, { stage: o.g.birth, maxSegs: w.maxSegs })), C = A.organs.C;
         { const plan = A.development.develop(o.g, { maxSegs: w.maxSegs }); o.full = A.organs.profile(plan); o.gu = w.geneUse(o.g, plan); } o.life = s.life; { const y = w.yolkOf(o.g); o.eggCost = C.eggFixed + baby.buildCost + y * baby.Emax; o.eggE = y * baby.Emax; }
         w.form(o, s.x, s.y, s.angle); o.E = s.E;
@@ -653,7 +786,7 @@
         if (st) { // put the body back exactly as it was
           const b = o.b; b.x.set(st.x); b.y.set(st.y); b.vx.set(st.vx); b.vy.set(st.vy); b.t = st.t; b.work = st.work; b.heat = st.heat; b.ciliaUse = st.cilia; b.nerveUse = st.nerve; b.carried = st.carried == null ? undefined : st.carried; b.cmd = st.cmd;
           if (b.rigid && st.loc) { b.om = st.om; b.th = st.th; b.loc.set(st.loc); b.inertia = st.inertia; } // the same numbers, not the same quantities recomputed in another orientation
-          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; if (v[11] != null) q.v = v[11]; if (v[12] != null) q.mV = v[12]; if (v[13] != null) q.mo = v[13]; if (v[14]) { q.na = Float64Array.from(v[14]); q.nb = new Float64Array(q.na.length); } if (v[15]) { if (v[15][0] != null) q.nA = v[15][0]; if (v[15][1] != null) q.nB = v[15][1]; if (v[15][2] != null) q.nV = v[15][2]; } if (v[16]) q.nw = Float64Array.from(v[16]); if (v[17]) q.ate = v[17]; });
+          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; if (v[11] != null) q.v = v[11]; if (v[12] != null) q.mV = v[12]; if (v[13] != null) q.mo = v[13]; if (v[14]) { q.na = Float64Array.from(v[14]); q.nb = new Float64Array(q.na.length); } if (v[15]) { if (v[15][0] != null) q.nA = v[15][0]; if (v[15][1] != null) q.nB = v[15][1]; if (v[15][2] != null) q.nV = v[15][2]; } if (v[16]) q.nw = Float64Array.from(v[16]); if (v[17]) q.ate = v[17]; if (v[18] != null) q.mE = v[18]; if (v[19] != null) q.nE = v[19]; });
           A.physics.pose(b); o.cx = s.x; o.cy = s.y;
           Object.assign(o, { noise: st.noise, wander: st.wander, seen: st.seen, sx: st.sx, sy: st.sy, sdt: st.sdt, taxDot: st.taxDot, taxLen: st.taxLen, taxN: st.taxN, work0: st.work0, cil0: st.cil0, nerve0: st.nerve0, nextCost: st.nextCost, nextStage: st.nextStage });
         }
@@ -714,6 +847,7 @@
         mouthShare: mean(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), eyes: mean(o => o.prof.eye > 0 ? 1 : 0),
         bottom: mean(o => this.isGround(o.cx, o.cy) ? 1 : 0),
         seepShare: mean(o => { const inc = o.absorbed + o.eaten * o.prof.eta + (o.seepIn || 0); return inc > 0 ? (o.seepIn || 0) / inc : 0; }), holding: mean(o => (o.held != null && this.tick - o.held < 30 ? 1 : 0)), grainEaters: (() => { let n = 0, k = 0; for (const o of this.bodies) if (o.age > 60) { n++; const m = o.eaten * o.prof.eta; if (m >= 0.3 * (m + o.absorbed) && m > 0) k++; } return n ? k / n : 0; })(), /* of the bodies older than a minute: those that took 30% or more of their lifetime income through the mouth */ twoParents: mean(o => (o.p2 ? 1 : 0)), carrying: mean(o => (o.got ? 1 : 0)),
+        ...(this.sound ? this.soundCensus() : null),
         mutGene: mean(o => (o.g.mut == null ? 1 : o.g.mut)), plastic: mean(o => (o.g.parts.some(p => p.nn && p.nn.some(q => q.in.some(e => e[2]))) ? 1 : 0)), senseNeurons: mean(o => (o.b.segs.some(q => q.p.nn && q.p.nn.some(n => n.out.length && n.in.some(e => 'cABvtwhjg'.includes(e[0])))) ? 1 : 0)), /* a neuron that reads a sense of its segment and moves something: the least a neuron must do to be more than a constant */ yolkGene: mean(o => this.yolkOf(o.g)), neurons: mean(o => o.b.segs.reduce((a, q) => a + (q.p.nn ? q.p.nn.length : 0), 0)), neuronBodies: mean(o => o.b.segs.some(q => q.p.nn) ? 1 : 0),
         birthV: (l => l.length ? l.reduce((a, o) => a + o.V0, 0) / l.length : 0)(this.bodies.filter(o => o.V0 != null && o.gen > 0)), birthStage: (l => l.length ? l.reduce((a, o) => a + o.stage0, 0) / l.length : 0)(this.bodies.filter(o => o.stage0 != null && o.gen > 0)), birthGene: mean(o => o.g.birth), eggCost: mean(o => o.eggCost), adultV: mean(o => o.full.V),
         partsTotal: mean(o => o.gu.parts), partsReach: mean(o => o.gu.reach), partsUsed: mean(o => o.gu.expr), multiPart: mean(o => o.gu.expr > 1 ? 1 : 0), zoned: mean(o => o.gu.zones > 0 ? 1 : 0), differed: mean(o => o.gu.zones > 0 && o.gu.div > 0.05 ? 1 : 0),

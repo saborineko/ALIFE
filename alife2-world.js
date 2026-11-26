@@ -75,6 +75,46 @@
   // one step of the world on screen, and its share of the exchange between islands
   function advance() { w.step(); if (w.t >= ISL.next) { ISL.next = w.t + ISL.every; if (ISL.ws.length && ISL.count > 0) { const out = w.emigrate(ISL.count); if (out.length) islandSend(0, out); } } }
 
+  // ---- sound for a human: what the water sounds like at one place, turned into something a person can hear; a picture of where voices sound;
+  // and a short history of the observed body's voice. Nothing here goes back into the world: the world's sound is its own fields, never this.
+  const AU = { ctx: null, tones: [], noises: [], solo: null, master: null, hist: [], lastT: -1, who: 0, level: new Float32Array(12) };
+  const BAND_HZ = [110, 196, 349, 622, 1109, 1976], heard = v => 0.16 * (1 - Math.exp(-8 * v)); // (made easier on the ear: loud and faint are squeezed together)
+  function audioStart() {
+    if (AU.ctx) { AU.ctx.resume && AU.ctx.resume(); return true; }
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) { $('soundStats').textContent = 'このブラウザでは音を鳴らせない（表示と記録は働く）。'; return false; }
+    const c = AU.ctx = new AC(); AU.master = c.createGain(); AU.master.gain.value = Number($('vol').value); AU.master.connect(c.destination);
+    const buf = c.createBuffer(1, c.sampleRate, c.sampleRate), d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    for (let b = 0; b < 6; b++) { // a clear tone for the voices in each band; noise through a narrow filter for everything else that sounds there
+      const o = c.createOscillator(), g = c.createGain(); o.type = 'triangle'; o.frequency.value = BAND_HZ[b]; g.gain.value = 0; o.connect(g); g.connect(AU.master); o.start(); AU.tones.push(g);
+      const n = c.createBufferSource(), f = c.createBiquadFilter(), g2 = c.createGain(); n.buffer = buf; n.loop = true; f.type = 'bandpass'; f.frequency.value = BAND_HZ[b]; f.Q.value = 5; g2.gain.value = 0; n.connect(f); f.connect(g2); g2.connect(AU.master); n.start(); AU.noises.push(g2); }
+    const so = c.createOscillator(), sg = c.createGain(); so.type = 'sine'; sg.gain.value = 0; so.connect(sg); sg.connect(AU.master); so.start(); AU.solo = { o: so, g: sg }; return true;
+  }
+  function audioFrame() {
+    const on = w && w.sound && w.snd, at = $('listenAt').value, body = sel && !sel.dead ? sel : null, x = at !== 'view' && body ? body.cx : view.cx, y = at !== 'view' && body ? body.cy : view.cy, L = AU.level;
+    for (let b = 0; b < 6; b++) { const v = on ? w.nutAt(x, y, w.sndV[b]) : 0, a = on ? Math.max(0, w.nutAt(x, y, w.snd[b]) - v) : 0; L[b] = v; L[6 + b] = a; }
+    if (AU.ctx) { const now = AU.ctx.currentTime, play = on && $('listen').checked && !paused, solo = at === 'voice';
+      for (let b = 0; b < 6; b++) { AU.tones[b].gain.setTargetAtTime(play && !solo ? heard(L[b]) : 0, now, 0.04); AU.noises[b].gain.setTargetAtTime(play && !solo ? 0.7 * heard(L[6 + b]) : 0, now, 0.04); }
+      const v = play && solo && body ? body.voL || 0 : 0; if (v > 0) AU.solo.o.frequency.setTargetAtTime(110 * Math.pow(2, 4.17 * (body.voP || 0)), now, 0.02); AU.solo.g.gain.setTargetAtTime(0.3 * v, now, 0.03); }
+    // the observed body, once a second of its world's time: is it sounding, at what pitch, what do its ears report, how hungry is it, how fast is it going
+    if (body && w.sound) { if (AU.who !== body.id) { AU.who = body.id; AU.hist = []; AU.lastT = -1; } const t = Math.floor(w.t); if (t !== AU.lastT) { AU.lastT = t; let ear = 0; for (const q of body.b.segs) if (q.e > ear) ear = q.e; AU.hist.push({ v: body.voL || 0, p: body.voP || 0, e: ear, h: 1 - body.E / body.prof.Emax, s: body._v || 0 }); if (AU.hist.length > 140) AU.hist.shift(); } }
+  }
+  function soundPanel(c0) {
+    const on = !!(w && w.sound); $('soundPanel').style.display = on ? '' : 'none'; $('voiceChart').style.display = on && sel && !sel.dead && (sel.b.hasVoice || sel.b.hasEar) ? '' : 'none'; if (!on) return;
+    const names = { hungry: '空腹', fed: '消化管に餌がある', touched: '押されている', hurt: '傷がある', seeing: '何か見えている', hearing: '何か聞こえている', young: '幼体' }, pct = v => (v * 100).toFixed(0) + '%';
+    $('soundStats').textContent = '【音が出ている】声を持つ個体 ' + pct(c0.voiced) + '・いま鳴いている（声を持つ個体のうち）' + pct(c0.calling) + '・鳴き始め 100 秒あたり ' + c0.callsPer100s.toFixed(1) + ' 回・出ている音のうち声 ' + pct(c0.voiceShare) + '・声の高さ 平均 ' + c0.pitchMean.toFixed(2) + ' ±' + c0.pitchSpread.toFixed(2)
+      + '\n【状態と結びついているか】鳴くことが鳴く側の状態について教える量 ' + c0.signalBits.toFixed(3) + ' ビット' + (c0.signalOf ? '（' + (names[c0.signalOf] || c0.signalOf) + '）' : '') + '。0 なら、状態と無関係に鳴いている'
+      + '\n【聞き手に効いているか】耳を持つ個体 ' + pct(c0.eared) + '・聞こえが神経回路を押している個体（耳を持つ個体のうち）' + pct(c0.listening) + '・その強さ ' + c0.hearDrive.toFixed(2) + '。行動が本当に変わるかは「対照：耳を切る／声を切る」で比べる'
+      + '\n【応答・模倣】他個体の鳴き始めの直後に鳴き始めた回数 ÷ 偶然の回数 ＝ ' + (c0.answerBase > 0.5 ? c0.answer.toFixed(2) : '—') + '（' + c0.answerN + ' 回。1 前後なら応答ではない）・聞いた音程へ自分の音程を寄せた割合 ' + (c0.pitchN ? pct(c0.pitchToward) + '（' + c0.pitchN + ' 回）' : '—')
+      + '\n声に使われたエネルギーの累計 ' + c0.soundCost.toFixed(1) + (w.deaf ? ' ／ 対照実験中：すべての耳が切られている' : '') + (w.mute ? ' ／ 対照実験中：すべての声が切られている' : '');
+    // what is heard at the listening place, band by band
+    const cv = $('spectrum'), d = cv.getContext('2d'), L = AU.level; d.fillStyle = '#07121d'; d.fillRect(0, 0, cv.width, cv.height);
+    for (let b = 0; b < 6; b++) { const x = 8 + b * 68, hv = Math.min(60, 60 * (1 - Math.exp(-6 * L[b]))), ha = Math.min(60 - hv, 60 * (1 - Math.exp(-6 * L[6 + b]))); d.fillStyle = 'hsla(' + b * 54 + ',35%,35%,.9)'; d.fillRect(x, 64 - hv - ha, 56, ha); d.fillStyle = 'hsl(' + b * 54 + ',90%,62%)'; d.fillRect(x, 64 - hv, 56, hv); d.fillStyle = '#9eb5bb'; d.font = '10px system-ui'; d.fillText(BAND_HZ[b] + ' Hz', x + 10, 69); }
+    // the observed body's last two minutes: voice (bars, coloured by pitch), what its ears report (white line), hunger (orange line)
+    if ($('voiceChart').style.display !== 'none') { const vc = $('voiceChart'), g = vc.getContext('2d'), H2 = vc.height, n = AU.hist.length; g.fillStyle = '#07121d'; g.fillRect(0, 0, vc.width, H2);
+      AU.hist.forEach((q, i) => { const x = vc.width - (n - i) * 3; if (q.v > 0.01) { g.fillStyle = 'hsl(' + q.p * 270 + ',90%,60%)'; g.fillRect(x, H2 - 4 - q.v * (H2 - 14), 3, q.v * (H2 - 14)); } });
+      for (const [key, col, f] of [['e', '#eafff4', v => v / (v + 0.1)], ['h', '#ffb060', v => Math.max(0, Math.min(1, v))]]) { g.strokeStyle = col; g.lineWidth = 1; g.beginPath(); AU.hist.forEach((q, i) => { const x = vc.width - (n - i) * 3 + 1.5, y = H2 - 4 - f(q[key]) * (H2 - 14); if (i) g.lineTo(x, y); else g.moveTo(x, y); }); g.stroke(); }
+      g.fillStyle = '#9eb5bb'; g.font = '10px system-ui'; g.fillText('観察個体の直近 ' + n + ' 秒：声（棒、色＝音程）／耳が受けている大きさ（白）／空腹（橙）', 6, 11); }
+  }
   // a food grain: a few lobes of stippled matter with a soft ragged edge (drifting ones greenish, bottom ones ochre)
   function clump(kind, seed) {
     const n = 64, c = Object.assign(document.createElement('canvas'), { width: n, height: n }), g = c.getContext('2d'), img = g.createImageData(n, n), d = img.data;
@@ -92,12 +132,12 @@
   function start(world) {
     if (world) w = world;
     else {
-      w = new A.engine.World({ seed: Number($('seed').value) || 1, map: $('map').value, scent: $('scent').checked ? 1 : 0, recycle: $('recycle').checked ? 1 : 0, nerve2: $('nerve2').checked || $('learn').checked ? 1 : 0, learn: $('learn').checked ? 1 : 0, metamut: $('metamut').checked ? 1 : 0, nibble: $('nibble').checked ? 1 : 0, budget: $('budget').checked ? 1 : 0, carry: $('carry').checked ? 1 : 0, genome2: $('genome2').checked ? 1 : 0, contact: $('contact').checked || $('adhere').checked || $('mix').checked ? 1 : 0, adhere: $('adhere').checked ? 1 : 0, mix: $('mix').checked ? 1 : 0, invest: $('invest').checked ? 1 : 0, vision: $('vision').checked ? 1 : 0, blind: $('blind').checked ? 1 : 0, shore: $('shore').checked ? 24 : 0, wave: $('wave').checked ? 1200 : 0 });
+      w = new A.engine.World({ seed: Number($('seed').value) || 1, map: $('map').value, scent: $('scent').checked ? 1 : 0, recycle: $('recycle').checked ? 1 : 0, nerve2: $('nerve2').checked || $('learn').checked ? 1 : 0, learn: $('learn').checked ? 1 : 0, sound: $('sound').checked ? 1 : 0, deaf: $('deaf').checked ? 1 : 0, mute: $('mute').checked ? 1 : 0, metamut: $('metamut').checked ? 1 : 0, nibble: $('nibble').checked ? 1 : 0, budget: $('budget').checked ? 1 : 0, carry: $('carry').checked ? 1 : 0, genome2: $('genome2').checked ? 1 : 0, contact: $('contact').checked || $('adhere').checked || $('mix').checked ? 1 : 0, adhere: $('adhere').checked ? 1 : 0, mix: $('mix').checked ? 1 : 0, invest: $('invest').checked ? 1 : 0, vision: $('vision').checked ? 1 : 0, blind: $('blind').checked ? 1 : 0, shore: $('shore').checked ? 24 : 0, wave: $('wave').checked ? 1200 : 0 });
       if (loaded) for (const k of loaded.top) for (let i = 0; i < Math.max(1, Math.round(k.count / 4)); i++) w.spawn(A.genome.sanitize(A.genome.copy(k.genome)), w.rand() * w.W, w.rand() * w.H, 1, null); // older result files lack newer genes
       else w.seedWith(A.genome.primordial(w.seed));
     }
     if (world) $('map').value = w.map || ''; // a loaded world shows its own map
-    $('recycle').checked = !!w.recycle; $('nerve2').checked = !!w.nerve2; $('metamut').checked = !!w.metamut; $('nibble').checked = !!w.nibble; $('budget').checked = !!w.budget; $('carry').checked = !!w.carry; $('genome2').checked = !!w.genome2; $('contact').checked = !!w.contact; $('adhere').checked = !!w.adhere; $('mix').checked = !!w.mix; $('invest').checked = !!w.invest; $('learn').checked = !!w.learn; $('wave').checked = w.wave > 0; $('shore').checked = w.shore > 0; $('blind').checked = !!w.blind; $('vision').checked = !!w.vision; $('scent').checked = !!w.scent; // a loaded world shows what it was made with
+    $('recycle').checked = !!w.recycle; $('nerve2').checked = !!w.nerve2; $('metamut').checked = !!w.metamut; $('nibble').checked = !!w.nibble; $('budget').checked = !!w.budget; $('carry').checked = !!w.carry; $('genome2').checked = !!w.genome2; $('contact').checked = !!w.contact; $('adhere').checked = !!w.adhere; $('mix').checked = !!w.mix; $('invest').checked = !!w.invest; $('learn').checked = !!w.learn; $('sound').checked = !!w.sound; $('deaf').checked = !!w.deaf; $('mute').checked = !!w.mute; $('wave').checked = w.wave > 0; $('shore').checked = w.shore > 0; $('blind').checked = !!w.blind; $('vision').checked = !!w.vision; $('scent').checked = !!w.scent; // a loaded world shows what it was made with
     fit(); sel = null; shown = null; lastPanels = 0;
     if (ISL.keep) ISL.keep = false; else if (ISL.ws.length || Number($('islands').value) > 1) islandStart(Number($('islands').value)); // a new history on screen: the islands start again as copies of it
   }
@@ -120,7 +160,7 @@
   const CAUSE = { starved: '餓死', aged: '老衰', broken: '物理破綻', killed: '傷で死亡（他個体に組織を取られた）', left: '他の島へ移った' };
 
   function panels() {
-    const c0 = w.census();
+    const c0 = w.census(); soundPanel(c0);
     const smellers = w.scent ? w.bodies.filter(o => o.g.parts.some(p => Math.abs(p.sA) > 0.2 || Math.abs(p.sB) > 0.2)).length : 0;
     const seers = w.vision ? w.bodies.filter(o => o.g.parts.some(p => p.eye > 0.1 && Math.abs(p.vE) > 0.2)).length : 0;
     const birthLine = '出生：体積 ' + c0.birthV.toFixed(3) + '・発生段階 ' + c0.birthStage.toFixed(2) + '（遺伝子の狙い ' + c0.birthGene.toFixed(2) + '）・卵 1 個 ' + c0.eggCost.toFixed(2) + (w.budget ? '・死産 ' + (c0.stillborn || 0) : '') + (w.invest ? ' / 卵の蓄え（遺伝子の平均）' + c0.yolkGene.toFixed(2) : '') + (w.metamut ? ' / 変異の強さ（遺伝子の平均）' + c0.mutGene.toFixed(2) + (c0.mutGene < 0.6 ? '（1.00 で始まり、下がっている。変異が減るぶん進化は遅くなる。下限は 0.10）' : '') : '') + (w.nerve2 ? ' / 神経を持つ個体 ' + (c0.neuronBodies * 100).toFixed(0) + '%（1 個体あたり ' + c0.neurons.toFixed(2) + ' 個。感覚を読んで何かを動かす神経を持つのは ' + ((c0.senseNeurons || 0) * 100).toFixed(0) + '%）' : '') + (w.learn ? ' / 経験で変わる結合を持つ個体 ' + (c0.plastic * 100).toFixed(0) + '%' : '') + '\n';
@@ -245,6 +285,12 @@
       for (const q of w.regions) { const xm = X((q.x0 + q.x1) / 2), xb = X(w.borderX(q) % w.W); ctx.fillStyle = 'rgba(235,245,240,.75)'; ctx.fillText(q.name, xm, Math.max(16, y0w + 16)); ctx.strokeStyle = 'rgba(200,225,235,.14)'; ctx.setLineDash([3, 6]); ctx.beginPath(); ctx.moveTo(xb, Math.max(0, y0w)); ctx.lineTo(xb, Math.min(H, Y(w.H))); ctx.stroke(); ctx.setLineDash([]); }
       ctx.textAlign = 'start';
     }
+    if (w.sound && w.sndV && $('showSound').checked) { // where voices are sounding: colour for pitch (red low .. violet high), strength for loudness; a ring on every body that is sounding
+      const c = w.cell, q0 = Math.floor((view.cx - W / 2 / sc) / c) - 1, q1 = Math.ceil((view.cx + W / 2 / sc) / c) + 1, r0 = Math.max(0, Math.floor((view.cy - H / 2 / sc) / c)), r1 = Math.min(w.rows - 1, Math.ceil((view.cy + H / 2 / sc) / c));
+      for (let r = r0; r <= r1; r++) for (let q = q0; q <= q1; q++) { const i = r * w.cols + ((q % w.cols) + w.cols) % w.cols; let tot = 0, hs = 0; for (let b = 0; b < 6; b++) { const v = w.sndV[b][i]; tot += v; hs += v * b; } if (tot < 0.012) continue;
+        ctx.fillStyle = 'hsla(' + (hs / tot * 54) + ',90%,60%,' + Math.min(0.42, 0.5 * (1 - Math.exp(-5 * tot))) + ')'; ctx.fillRect((q * c - view.cx) * sc + W / 2, Y(r * c), c * sc + 1, c * sc + 1); }
+      for (const o of w.bodies) if (o.voL > 0.05) { const x = X(o.cx), y = Y(o.cy); if (x < -40 || x > W + 40 || y < -40 || y > H + 40) continue; ctx.strokeStyle = 'hsla(' + (o.voP || 0) * 270 + ',95%,70%,' + (0.35 + 0.6 * o.voL) + ')'; ctx.lineWidth = 1.5; for (const k of [1, 1.8]) { ctx.beginPath(); ctx.arc(x, y, (6 + 14 * o.voL) * k + ((w.t * 30) % 12) * 0.8, 0, 6.3); ctx.stroke(); } }
+    }
     const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.45, W / 2, H / 2, W * 0.75); vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,4,10,.5)'); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
     if (shown && shown.members != null) { // a body plan that arose here, living or extinct
       const c = shown, inc = c.eaten + c.absorbed; thumb(zc, c.g, zoomR);
@@ -268,6 +314,7 @@
         + '\n遺伝子：部品 ' + sel.gu.parts + '（規則が届く ' + sel.gu.reach + '・身体に現れる ' + sel.gu.expr + ' 種類・休眠 ' + (sel.gu.parts - sel.gu.reach) + '）' + (() => { const G = A.genome, li = G.axisOf(sel.g, sel.g.root); return li < 0 ? '' : ' / 根の軸：' + G.zones(sel.g, li).map(z => '部品' + z.part + '×' + z.len).join(' → ') + (sel.gu.zones ? '（複製元との差 ' + (sel.gu.div * 100).toFixed(1) + '%）' : ''); })()
         + (sel.g.parts.some(p => p.nn) ? '\n神経：' + sel.g.parts.map((p, i) => (p.nn ? '部品' + i + '［' + p.nn.map(q => q.in.map(e => e[0] + (e[1] >= 0 ? '+' : '') + e[1].toFixed(1)).join(' ') + ' → ' + (q.out.map(e => e[0] + (e[1] >= 0 ? '+' : '') + e[1].toFixed(1)).join(' ') || '出力なし')).join(' ｜ ') + '］' : '')).filter(Boolean).join(' ') : '')
         + (sel.hp ? '\n損傷：体節ごとの残り ' + sel.hp.map(v => (v * 100).toFixed(0) + '%').join(' ') + '（失った分 ' + (sel.lost || 0).toFixed(2) + '）' : '') + (sel.flesh ? '\n他個体の組織から得た量 ' + sel.flesh.toFixed(2) + '（口の収入の ' + (sel.flesh / Math.max(1e-9, sel.eaten) * 100).toFixed(0) + '%）' : '')
+        + (w.sound && (sel.b.hasVoice || sel.b.hasEar) ? '\n音：' + (sel.b.hasVoice ? '声（組織 ' + sel.b.segs.reduce((x, q) => x + (q.voxV || 0), 0).toFixed(3) + '・高さ ' + sel.b.segs.filter(q => q.voxV > 0).map(q => q.p.pitch.toFixed(2)).join(' ') + '）いまの大きさ ' + (sel.voL || 0).toFixed(2) + '・鳴き始め ' + (sel.voN || 0) + ' 回・鳴いていた時間 ' + (sel.voT || 0).toFixed(0) + ' 秒・声に使ったエネルギー ' + (sel.voE || 0).toFixed(2) : '声なし') + ' ／ ' + (sel.b.hasEar ? '耳 ' + sel.b.segs.filter(q => q.earW).length + ' 個（合わせた高さ ' + sel.b.segs.filter(q => q.earW).map(q => q.p.hTune.toFixed(2)).join(' ') + '）いま受けている大きさ ' + sel.b.segs.filter(q => q.earW).map(q => (q.e || 0).toFixed(2)).join(' ') + '・回路を押す強さ ' + (sel.b.hd || 0).toFixed(2) : '耳なし') : '')
         + '\nエネルギー ' + sel.E.toFixed(2) + ' / ' + p.Emax.toFixed(2) + ' / 消化管内 ' + sel.G.toFixed(2) + ' / 維持費 ' + p.basal.toFixed(3) + '/s'
         + '\n生涯の収入：口 ' + (inc ? sel.eaten / inc * 100 : 0).toFixed(0) + '%・体表 ' + (inc ? sel.absorbed / inc * 100 : 0).toFixed(0) + '% / 自力移動 ' + speedOf(sel).toFixed(3) + ' u/s' + (sel.passive ? '（動く関節なし）' : '');
     } else if (sel) {
@@ -280,6 +327,7 @@
   function loop(ms) {
     if (!paused && !ISL.busy) { const n = Number($('speed').value); for (let i = 0; i < n; i++) advance(); }
     draw();
+    audioFrame();
     if (ms - lastPanels > 1000) { lastPanels = ms; panels(); islandPanel(); }
     if ($('auto').checked && ms - lastSave > (ISL.ws.length ? 120000 : 30000)) { lastSave = ms; autosave(); }
     requestAnimationFrame(loop);
@@ -319,10 +367,11 @@
   const fresh = () => { start(); $('saveNote').textContent = $('auto').checked ? '新しい世界を始めた。次の自動保存で、前の自動保存は上書きされる。' : '新しい世界を始めた。'; if ($('auto').checked) lastSave = performance.now(); };
   $('restart').onclick = fresh;
   // every optional rule on, on the coast map, from primordial bodies
-  $('allOn').onclick = () => { for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'metamut', 'nibble', 'recycle', 'nerve2', 'adhere', 'mix', 'invest', 'learn', 'shore']) $(k).checked = true; $('map').value = 'coast'; fresh(); $('saveNote').textContent = 'すべての選択式の規則を有効にして、沿岸の世界を原始個体から始めた。'; };
+  $('allOn').onclick = () => { for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'metamut', 'nibble', 'recycle', 'nerve2', 'adhere', 'mix', 'invest', 'learn', 'sound', 'shore']) $(k).checked = true; $('map').value = 'coast'; fresh(); $('saveNote').textContent = 'すべての選択式の規則を有効にして、沿岸の世界を原始個体から始めた。'; };
   // Choosing another map moves the living population there (genomes, genealogy and records with it). 「最初から」 starts anew.
   $('map').onchange = () => { const n = w.bodies.length, map = $('map').value; if (!n) return fresh(); start(A.engine.World.transplant(w, map)); $('saveNote').textContent = 'いまの ' + n + ' 個体を、選んだ世界へ移した（遺伝子・系譜・記録ごと）。同じ相対位置に静止して降ろしたので、合わない場所に落ちた個体は死ぬ。原始個体からやり直すなら「最初から」。'; }; $('wave').onchange = () => { enableAll({ wave: $('wave').checked ? 1200 : 0 }); $('saveNote').textContent = 'いまの世界のまま、豊かさの波を' + ($('wave').checked ? '入れた。' : '止めた。') + 'ここから先は、変えなかった場合とは別の歴史になる。'; }; $('shore').onchange = () => { enableAll({ shore: $('shore').checked ? 24 : 0 }); $('saveNote').textContent = 'いまの世界のまま、海域の境界を' + ($('shore').checked ? 'なだらかにした。' : '段差に戻した。') + 'ここから先は、変えなかった場合とは別の歴史になる。'; };
-  for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'metamut', 'nibble', 'recycle', 'nerve2', 'adhere', 'mix', 'invest', 'learn']) $(k).onchange = () => { if (k === 'learn' && $(k).checked && !w.nerve2) { $('nerve2').checked = true; enableAll({ nerve2: 1 }); } if (k === 'nerve2' && !$(k).checked && w.learn) { $('learn').checked = false; enableAll({ learn: 0 }); } if ((k === 'adhere' || k === 'mix') && $(k).checked && !w.contact) { $('contact').checked = true; enableAll({ contact: 1 }); } if (k === 'contact' && !$(k).checked) for (const j of ['adhere', 'mix']) if (w[j]) { $(j).checked = false; enableAll({ [j]: 0 }); } enableAll({ [k]: $(k).checked ? 1 : 0 }); lastPanels = 0; $('saveNote').textContent = 'いまの世界のまま設定を変えた（記録は「進化の記録」に残る）。ここから先は、変えなかった場合とは別の歴史になる。'; }; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
+  for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'metamut', 'nibble', 'recycle', 'nerve2', 'adhere', 'mix', 'invest', 'learn', 'sound', 'deaf', 'mute']) $(k).onchange = () => { if (k === 'learn' && $(k).checked && !w.nerve2) { $('nerve2').checked = true; enableAll({ nerve2: 1 }); } if (k === 'nerve2' && !$(k).checked && w.learn) { $('learn').checked = false; enableAll({ learn: 0 }); } if ((k === 'adhere' || k === 'mix') && $(k).checked && !w.contact) { $('contact').checked = true; enableAll({ contact: 1 }); } if (k === 'contact' && !$(k).checked) for (const j of ['adhere', 'mix']) if (w[j]) { $(j).checked = false; enableAll({ [j]: 0 }); } enableAll({ [k]: $(k).checked ? 1 : 0 }); lastPanels = 0; $('saveNote').textContent = 'いまの世界のまま設定を変えた（記録は「進化の記録」に残る）。ここから先は、変えなかった場合とは別の歴史になる。'; }; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
+  $('listen').onchange = () => { if ($('listen').checked && !audioStart()) $('listen').checked = false; }; $('vol').oninput = () => { if (AU.master) AU.master.gain.value = Number($('vol').value); };
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; islandAll({ type: paused ? 'pause' : 'resume' }); };
   $('islands').onchange = () => { islandStart(Number($('islands').value)); if (ISL.ws.length) $('saveNote').textContent = '島を ' + (ISL.ws.length + 1) + ' 個にした。増えた島は、いま見ている世界の複製を乱数だけ変えて始めた。'; };
   $('founder').onchange = () => { if ($('founder').value === 'file') $('file').click(); else { loaded = null; start(); } };
@@ -330,7 +379,7 @@
   const download = (name, text, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); };
   $('save').onclick = async () => { try { const blobs = await worldBlobs(), k = blobs.length, out = k > 1 ? pack(blobs) : blobs[0], zipped = out.type === 'application/gzip', a = document.createElement('a'); a.href = URL.createObjectURL(out); a.download = (k > 1 ? 'alife2-islands' + k : 'alife2-world') + '-t' + Math.round(w.t) + (k > 1 ? '.alife2' : zipped ? '.json.gz' : '.json'); a.click(); $('saveNote').textContent = '保存した（' + (k > 1 ? '島 ' + k + ' 個を 1 つのファイルに、' : '') + mb(out.size) + (zipped || k > 1 ? '、圧縮済み' : '') + '）。'; } catch (err) { $('saveNote').textContent = '保存できない：' + (err && err.message || err); } };
   $('load').onclick = () => $('loadFile').click();
-  $('loadFile').onchange = async e => { try { const file = e.target.files[0], set = await isPack(file) ? await unpack(file) : null, text = set ? null : await blobText(file); const want = {}, names = { scent: '他個体の匂い', vision: '視覚', blind: '近道の切断', contact: '身体の接触と組織の摂取', genome2: '遺伝子の新しい規則', budget: '出生の収支を合わせる', carry: '成長で神経の状態を引き継ぐ', metamut: '変異の強さの進化', nibble: '粒を削って食べる', recycle: '失った物質を水に戻す', nerve2: '体節あたり複数の神経', adhere: '他の身体を掴む・蓄えの染み出し', mix: '触れた相手と遺伝子が混ざる', invest: '卵に持たせる蓄えの進化', learn: '神経の結合が経験で変わる' }; if ($('learn').checked) $('nerve2').checked = true; if ($('adhere').checked || $('mix').checked) $('contact').checked = true; for (const k in names) if ($(k).checked) want[k] = 1; // boxes ticked before loading are applied to the loaded world
+  $('loadFile').onchange = async e => { try { const file = e.target.files[0], set = await isPack(file) ? await unpack(file) : null, text = set ? null : await blobText(file); const want = {}, names = { scent: '他個体の匂い', vision: '視覚', blind: '近道の切断', contact: '身体の接触と組織の摂取', genome2: '遺伝子の新しい規則', budget: '出生の収支を合わせる', carry: '成長で神経の状態を引き継ぐ', metamut: '変異の強さの進化', nibble: '粒を削って食べる', recycle: '失った物質を水に戻す', nerve2: '体節あたり複数の神経', adhere: '他の身体を掴む・蓄えの染み出し', mix: '触れた相手と遺伝子が混ざる', invest: '卵に持たせる蓄えの進化', learn: '神経の結合が経験で変わる', sound: '音（身体の音・耳・声）' }; if ($('learn').checked) $('nerve2').checked = true; if ($('adhere').checked || $('mix').checked) $('contact').checked = true; for (const k in names) if ($(k).checked) want[k] = 1; // boxes ticked before loading are applied to the loaded world
       const kk = set ? await openSet(set) : openSaved(text), added = Object.keys(want).filter(k => !w[k]); enableAll(want); for (const k in names) $(k).checked = !!w[k];
       $('saveNote').textContent = '読み込んだ（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体' + (kk > 1 ? '、島 ' + kk + ' 個' : '') + '）。' + (added.length ? 'チェックしてあった設定をこの世界に足した：' + added.map(k => names[k]).join('、') + '。ここから先は元の世界とは別の歴史になる。' : '設定と地図はこの世界が保存されたときのもの。視覚や匂いはチェックを入れれば、沿岸などへは「世界」の欄で選べば、いまの個体のまま移せる。'); } catch (err) { $('saveNote').textContent = '読み込めない：' + err.message; } };
   $('resume').onclick = async () => { try { let d = await dbGet('autosave'); if (d == null) d = localStorage.getItem(KEY); if (d == null) { $('saveNote').textContent = '自動保存は無い。'; return; } if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); $('saveNote').textContent = '自動保存から再開（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '再開できない：' + (err && err.message || err); } };

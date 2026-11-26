@@ -600,3 +600,41 @@ test('wave: richness travels along the world; every place gets the same supply o
   }
   const w = mk('coast', 0); w.enable({ wave: 900 }); assert.strictEqual(w.wave, 900); assert.ok(/豊かさの波/.test(w.events[w.events.length - 1].text));
 });
+
+test('sound: it spreads, fades and adds up; low pitch carries further; ears hear by place and tuning; a voice costs energy; bodies cannot help making sound; controls cut ears and voices; saved exactly; genes only where sound exists', () => {
+  const G = A.genome, W = o => new A.engine.World(Object.assign({ seed: 9, founders: 0, cap: 0, sound: 1, nerve2: 1, flow: 0, grainRate: 0, bottomRate: 0, jitter: 0 }, o || {}));
+  const level = (w, x, y, b) => (b == null ? w.snd.reduce((a, f) => a + w.nutAt(x, y, f), 0) : w.nutAt(x, y, w.snd[b]));
+  // physics of the field: the same water with nothing, with one source, with another, with both
+  const run = f => { const w = W(); for (let i = 0; i < 90; i++) { f(w); w.step(); } return w; };
+  const none = run(() => {}), lo = run(w => w.emit(40, 40, 0, 0.1, 'voice')), hi = run(w => w.emit(40, 40, 1, 0.1, 'voice')), both = run(w => { w.emit(40, 40, 0, 0.1, 'voice'); w.emit(40, 40, 1, 0.1, 'voice'); });
+  const net = (w, d) => level(w, 40 + d, 40) - level(none, 40 + d, 40);
+  assert.ok(net(lo, 0) > net(lo, 8) && net(lo, 8) > net(lo, 24) && net(lo, 24) > 0, 'louder near the source: ' + [0, 8, 24].map(d => net(lo, d).toFixed(4)));
+  assert.ok(net(lo, 16) > 3 * net(hi, 16) && net(hi, 0) > 10 * net(hi, 16), 'low pitch carries further than high: ' + net(lo, 16).toFixed(4) + ' / ' + net(hi, 16).toFixed(4));
+  for (const d of [0, 6, 20]) assert.ok(Math.abs(net(both, d) - net(lo, d) - net(hi, d)) < 1e-4 * (1 + net(both, d)), 'sounds add up at ' + d);
+  for (let i = 0; i < 150; i++) { lo.step(); none.step(); } assert.ok(net(lo, 0) < 0.25 * 0.4 && net(lo, 0) >= -1e-6, 'and it fades once the source is silent: ' + net(lo, 0));
+  assert.ok(level(none, 100, 30) > 0, 'the water itself is not silent');
+  // a body with a voice driven by a neuron, and a listener with one ear near and one far, tuned low
+  const speaker = pitch => { const g = G.create({ parts: [G.part({ len: 0.8, r0: 0.4, r1: 0.4, nerve: 0.5, voice: 0.3, pitch })], links: [] }); g.parts[0].nn = [{ b: 0, k: 1, in: [['1', 3]], out: [['V', 1]] }]; return g; };
+  const listener = tune => G.create({ parts: [G.part({ len: 1, r0: 0.4, r1: 0.4, nerve: 0.5 }), G.part({ len: 3, r0: 0.2, r1: 0.2, nerve: 0.5, ear: 0.6, hTune: tune, hWide: 0.2, hE: 2 })], links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.5, off: 1, angle: 1.5, scale: 1, repeat: 1 })] });
+  const scene = (o, pitch, tune) => { const w = W(Object.assign({ audit: 1 }, o)), s = w.spawn(speaker(pitch), 40, 34, 1, null), l = w.spawn(listener(tune), 40, 40, 1, null); for (const k in w.ledger) w.ledger[k] = 0; const s0 = w.stored(); for (let i = 0; i < 120; i++) { w.step(); l.E = l.prof.Emax * 0.9; } return { w, s, l, s0 }; };
+  const a = scene({}, 0, 0), ears = a.l.b.segs.filter(q => q.earW), near = ears.reduce((m, q) => (q.e > m.e ? q : m)), far = ears.reduce((m, q) => (q.e < m.e ? q : m));
+  assert.strictEqual(ears.length, 2); assert.ok(near.e > far.e * 1.05 && Math.hypot(near.bx - a.s.cx, near.by - a.s.cy) < Math.hypot(far.bx - a.s.cx, far.by - a.s.cy), 'the ear nearer the voice hears more: ' + near.e.toFixed(3) + ' / ' + far.e.toFixed(3));
+  assert.ok(a.l.b.hd > 0.05, 'what it hears pushes on its circuit: ' + a.l.b.hd); assert.ok(a.s.voE > 0 && a.s.voOn && a.w.aco.out.voice > 0 && a.w.ledger.sound > 0, 'the voice sounds and is paid for');
+  const mis = scene({}, 1, 0); assert.ok(mis.l.b.segs.filter(q => q.earW)[0].e < 0.3 * near.e, 'an ear tuned low hardly hears a high voice: ' + mis.l.b.segs.filter(q => q.earW)[0].e + ' / ' + near.e);
+  const deaf = scene({ deaf: 1 }, 0, 0); assert.ok(deaf.l.b.segs.filter(q => q.earW).every(q => q.e === 0) && !(deaf.l.b.hd > 0), 'deaf world: ears read nothing');
+  const mute = scene({ mute: 1 }, 0, 0); assert.ok(!(mute.s.voE > 0) && mute.w.aco.out.voice === 0 && !mute.w.ledger.sound, 'mute world: no voice, no cost');
+  const lag = scene({ soundLag: 2 }, 0, 0); assert.ok(lag.w.sndPast && lag.l.b.segs.filter(q => q.earW)[0].e > 0, 'lagged world: ears read the water of two seconds ago');
+  // the ledger still balances with voices sounding
+  { const w = W({ audit: 1 }); w.spawn(speaker(0.5), 40, 34, 1, null); for (const k in w.ledger) w.ledger[k] = 0; const s0 = w.stored(); for (let i = 0; i < 90; i++) w.step(); const L = w.ledger, IN = ['rain', 'regrow', 'placed', 'mutation', 'recycled', 'arrived'], inflow = IN.reduce((x, k) => x + (L[k] || 0), 0), out = Object.keys(L).filter(k => !IN.includes(k)).reduce((x, k) => x + L[k], 0), gap = (w.stored() - s0) - (inflow - out); assert.ok(L.sound > 0 && Math.abs(gap) < 1e-6 * (1 + w.stored()), 'unexplained ' + gap + ' with sound spent ' + L.sound); }
+  // saved and continued exactly
+  const copy = A.engine.World.restore(JSON.parse(JSON.stringify(a.w.save()))); for (let i = 0; i < 60; i++) { a.w.step(); copy.step(); }
+  assert.strictEqual(JSON.stringify(copy.bodies.map(o => [o.cx, o.E, o.b.segs.map(q => q.e)])), JSON.stringify(a.w.bodies.map(o => [o.cx, o.E, o.b.segs.map(q => q.e)])), 'a world with sound saves and continues exactly'); assert.strictEqual(copy.snd[0][1234], a.w.snd[0][1234]);
+  // sounds a body cannot help making: beating cilia, pushing on another body
+  { const w = W({ contact: 1 }), g = G.primordial(1); Object.assign(g.parts[0], { cilia: 0.5, beat: -1, nerve: 0.5 }); w.spawn(g, 30, 30, 1, null); w.spawn(g, 30.4, 30, 1, null); for (let i = 0; i < 60; i++) w.step(); assert.ok(w.aco.out.cilia > 0 && w.aco.out.hit > 0 && w.aco.out.voice === 0, JSON.stringify(w.aco.out)); }
+  // no sound, nothing: a world without the rule has no fields and its bodies no ears
+  { const w = new A.engine.World({ seed: 9, founders: 0, cap: 0, nerve2: 1 }), l = w.spawn(listener(0), 40, 40, 1, null); for (let i = 0; i < 30; i++) w.step(); assert.ok(!w.snd && !l.b.hasEar && l.b.segs.every(q => q.e == null)); w.enable({ sound: 1 }); for (let i = 0; i < 30; i++) w.step(); assert.ok(w.snd && l.b.hasEar && l.b.segs.some(q => q.e > 0), 'switched on in a running world'); }
+  // genes of sound arise by mutation only where sound exists; mixing leaves them alone elsewhere
+  const r = G.rng(7); let on = G.primordial(1), off = G.primordial(1), gotE = false, gotV = false, codes = false; for (let i = 0; i < 400; i++) { on = G.mutate(on, r, 1, 'ns'); off = G.mutate(off, r, 1, 'nlgxvc'); const p = on.parts[0]; if (p.ear > 0) gotE = true; if (p.voice > 0) gotV = true; if (on.parts.some(q => (q.nn || []).some(n => n.in.some(e => e[0] === 'e') || n.out.some(e => e[0] === 'V' || e[0] === 'Q')))) codes = true; }
+  assert.ok(gotE && gotV && codes, 'ears, voices and their neuron connections arise: ' + [gotE, gotV, codes]); assert.ok(off.parts.every(p => p.ear === 0 && p.voice === 0 && p.hE === 0 && p.mVoice === 0 && !(p.nn || []).some(n => n.in.some(e => e[0] === 'e') || n.out.some(e => 'VQ'.includes(e[0])))), 'and never where sound does not exist');
+  const m1 = G.ensureIds(G.primordial(1)), m2 = G.copy(m1); m2.parts[0].ear = 0.9; m2.parts[0].len = 0.9; let leaked = 0; for (let i = 0; i < 100; i++) if (G.recombine(m1, m2, r).parts[0].ear !== 0) leaked++; assert.strictEqual(leaked, 0, 'mixing in a world without sound does not touch the genes of sound');
+});

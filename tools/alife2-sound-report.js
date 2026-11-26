@@ -1,0 +1,23 @@
+// The record of sound in a saved world, read out: what the census says (sound made / goes with a state / moves listeners / is answered / pitch is copied),
+// and what the genomes say: who has ears and voices, at what pitches, by lineage, and how ears and voices are wired.
+// It reports; it does not decide. Whether sound changes what bodies do is settled only by cutting ears or voices (tools/alife2-branch.js with deaf=1, mute=1, soundLag=2).
+// Usage: node tools/alife2-sound-report.js <world.json.gz> [...]
+const zlib = require('zlib'), fs = require('fs'), A = require('../alife2-genome.js'); for (const f of ['development', 'neural', 'physics', 'organs', 'engine']) require('../alife2-' + f + '.js');
+const pct = v => (v * 100).toFixed(1) + '%', NAMES = { hungry: '空腹', fed: '消化管に餌', touched: '押されている', hurt: '傷がある', seeing: '見えている', hearing: '聞こえている', young: '幼体' };
+for (const file of process.argv.slice(2)) {
+  const w = A.engine.World.restore(JSON.parse(file.endsWith('.gz') ? zlib.gunzipSync(fs.readFileSync(file)) : fs.readFileSync(file))); if (!w.sound) { console.log('== ' + file + '：音の無い世界'); continue; }
+  const c = w.census(), L = w.bodies, K = w.aco;
+  console.log('== ' + file + '（t=' + Math.round(w.t) + '、個体 ' + L.length + '）');
+  console.log('  音が出ているか：声を持つ個体 ' + pct(c.voiced) + ' / 鳴いていた時間（声を持つ個体の生涯のうち）' + pct(c.callTime) + ' / 鳴き始め 100 秒あたり ' + c.callsPer100s.toFixed(2) + ' 回 / 出た音のうち声 ' + pct(c.voiceShare) + ' / 声に使われたエネルギー ' + c.soundCost.toFixed(2));
+  console.log('    出た音の内訳：' + Object.entries(K.out).map(([k, v]) => ({ cilia: '繊毛', muscle: '筋肉', hit: '押し合い', tear: '組織の損傷', scrape: '底との摩擦', crunch: '摂食', voice: '声' }[k]) + ' ' + pct(v / Math.max(1e-9, c.soundMade))).join(' / '));
+  console.log('  状態と結びついているか：' + Object.entries(K.tab).map(([k, t]) => { const N = t[0] + t[1] + t[2] + t[3]; if (N < 50) return null; let mi = 0; for (let a = 0; a < 2; a++) for (let b = 0; b < 2; b++) { const pj = t[a * 2 + b] / N, pa = (t[a * 2] + t[a * 2 + 1]) / N, pb = (t[b] + t[2 + b]) / N; if (pj > 0) mi += pj * Math.log2(pj / (pa * pb)); } return (NAMES[k] || k) + ' ' + mi.toFixed(3) + ' ビット（その状態のとき鳴いている ' + pct(t[3] / Math.max(1, t[1] + t[3])) + '、そうでないとき ' + pct(t[2] / Math.max(1, t[0] + t[2])) + '）'; }).filter(Boolean).join(' / ') || '鳴いた個体の記録がまだ無い');
+  console.log('  聞き手に効いているか：耳を持つ個体 ' + pct(c.eared) + ' / 聞こえが回路を押している個体（耳を持つ個体のうち）' + pct(c.listening) + ' / その強さの平均 ' + c.hearDrive.toFixed(3));
+  console.log('  応答・模倣：鳴き始め ' + c.onsets + ' 回 / 他個体の鳴き始めの直後だったもの ' + c.answerN + '（偶然なら ' + c.answerBase.toFixed(1) + '、比 ' + (c.answerBase > 0.5 ? c.answer.toFixed(2) : '—') + '）/ 音程を寄せた ' + K.toward + '・離した ' + K.away);
+  // by lineage: pitch of voices, tuning of ears
+  const lines = new Map(); for (const o of L) { let e = lines.get(o.line); if (!e) lines.set(o.line, e = { n: 0, v: [], h: [], voiced: 0, eared: 0 }); e.n++; if (o.b.hasVoice) { e.voiced++; for (const q of o.b.segs) if (q.voxV > 0) e.v.push(q.p.pitch); } if (o.b.hasEar) { e.eared++; for (const q of o.b.segs) if (q.earW) e.h.push(q.p.hTune); } }
+  const ms = a => a.length ? (a.reduce((x, y) => x + y, 0) / a.length).toFixed(2) + '±' + Math.sqrt(a.reduce((x, y) => x + y * y, 0) / a.length - (a.reduce((x, y) => x + y, 0) / a.length) ** 2).toFixed(2) : '—';
+  console.log('  系統ごと（個体数の多い順）：' + [...lines.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 6).map(([id, e]) => '系統 ' + id + '：' + e.n + ' 匹・声 ' + pct(e.voiced / e.n) + '（高さ ' + ms(e.v) + '）・耳 ' + pct(e.eared / e.n) + '（合わせた高さ ' + ms(e.h) + '）').join(' ｜ '));
+  // wiring that involves an ear or a voice
+  const wires = new Map(); for (const o of L) { const keys = new Set(); for (const p of o.g.parts) { if (Math.abs(p.hE || 0) > 0.05 && p.ear > 0.02) keys.add('耳 → 体節の信号（' + (p.hE > 0 ? '+' : '−') + '）'); if (Math.abs(p.mVoice || 0) > 0.05 && p.voice > 0.02) keys.add('体節の信号 → 声（' + (p.mVoice > 0 ? '+' : '−') + '）'); for (const q of p.nn || []) { const ins = q.in.map(e => e[0]), outs = q.out.map(e => e[0]); if ((ins.includes('e') && p.ear > 0.02) || ((outs.includes('V') || outs.includes('Q')) && p.voice > 0.02)) keys.add('神経：' + q.in.map(e => e[0] + (e[1] >= 0 ? '+' : '−')).join(',') + ' → ' + (q.out.map(e => e[0] + (e[1] >= 0 ? '+' : '−')).join(',') || '出力なし')); } } for (const k of keys) wires.set(k, (wires.get(k) || 0) + 1); }
+  console.log('  耳や声につながる配線（持つ個体数）：' + ([...wires.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => v + ' 匹 ' + k).join(' ／ ') || 'なし'));
+}

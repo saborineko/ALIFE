@@ -17,7 +17,7 @@
     store0: 6, store1: 14,  // reserve capacity per volume, and extra per storage tissue
     fixed: 0.012, eggFixed: 0.4,  // what any living thing costs however small: upkeep per second, and per offspring
     basal: 0.055,         // upkeep per volume per second of plain tissue
-    upkeep: { muscle: 0.05, nerve: 0.04, gut: 0.03, vessel: 0.03, gonad: 0.03, store: 0.005, eye: 0.10, armor: 0.01, mouth: 0.02 },
+    upkeep: { muscle: 0.05, nerve: 0.04, gut: 0.03, vessel: 0.03, gonad: 0.03, store: 0.005, eye: 0.10, armor: 0.01, mouth: 0.02, ear: 0.06, voice: 0.05 },
     synapse: 0.001, spike: 0.004,         // nerve circuit: per unit of connection strength per second, and per unit of signal activity per second
     ciliaUpkeep: 0.004, ciliaWork: 0.03,  // per ciliated surface: to keep the hairs, and per second of full beating
     surface: 0.008,       // upkeep per unit of body surface per second (thin, branched bodies pay for their skin)
@@ -29,6 +29,7 @@
     birthStage: 0.3, eggReserve: 0.5, growReserve: 0.35, reproReserve: 0.45,
     life: 400, carrion: 0.5,
     bite: 0.5,            // body volume a mouth can tear from tissue it touches, per second, per gape squared (before its jaw muscle and the other's armour)
+    call: 0.6,            // energy per second a unit volume of sound-making tissue spends when it sounds at full strength
     seep: 0.05,           // reserve that passes between two bodies in contact, per second, per unit of difference in how full they are, through bare surface
     flesh: 0.5            // share of the cost of building tissue that is still in it as food (the same share a dead body leaves)
   };
@@ -40,7 +41,7 @@
       const p = s.p, hp = s.hp == null ? 1 : s.hp, rm = (s.r0 + s.r1) / 2, zm = (s.z0 + s.z1) / 2, v = PI * rm * zm * s.len * hp, a = PI * (rm + zm) * s.len * hp, u = C.upkeep;
       o.V += v; o.area += a; o.Vgut += v * p.gut; o.Vgonad += v * p.gonad; o.Vmuscle += v * p.muscle; o.Vnerve += v * p.nerve;
       o.Emax += v * (C.store0 + C.store1 * p.store);
-      o.basal += v * (C.basal + u.muscle * p.muscle + u.nerve * p.nerve + u.gut * p.gut + u.vessel * p.vessel + u.gonad * p.gonad + u.store * p.store + u.eye * p.eye + u.armor * p.armor + u.mouth * p.mouth);
+      o.basal += v * (C.basal + u.muscle * p.muscle + u.nerve * p.nerve + u.gut * p.gut + u.vessel * p.vessel + u.gonad * p.gonad + u.store * p.store + u.eye * p.eye + u.armor * p.armor + u.mouth * p.mouth + u.ear * (p.ear || 0) + u.voice * (p.voice || 0));
       o.basal += a * C.surface + a * (p.cilia || 0) * C.ciliaUpkeep; o.cilia += a * (p.cilia || 0);
       const wire = A.neural ? A.neural.wiring(p) : 0; o.wiring += wire; o.basal += wire * C.synapse; // every wired segment pays for its connections
       o.absorb.push(a * Math.max(0, 1 - p.skin - p.armor));

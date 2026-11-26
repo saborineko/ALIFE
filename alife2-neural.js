@@ -41,8 +41,10 @@
   // smA, smB (optional): how much of the two substances bodies leak is in the water at each segment.
   // vis: eyes work as receptors in this world; each seeing segment carries what its eye reports in s.v.
   // con: bodies touch in this world; each segment carries the push on it (s.tch), the tearing of it (s.torn) and what is left of it (s.hp).
-  function local(body, taste, hunger, smA, smB, vis, con, learn) {
-    const segs = body.segs; let use = 0;
+  // snd: sound exists in this world; each segment with an ear carries how loud the water is at its outer end, over the pitches it is tuned to, in s.e.
+  // Then a segment's signal and neurons can also drive its voice: s.vo (0 silent .. 1 full) and s.vq (its pitch pushed down -1 .. up 1).
+  function local(body, taste, hunger, smA, smB, vis, con, learn, snd) {
+    const segs = body.segs; let use = 0, hd = 0; // hd (record only): how hard what the ears report is pushing on this body's circuit right now
     for (let i = 0; i < segs.length; i++) {
       const s = segs[i]; if (!s.circ) continue;
       const p = s.p, kids = s.kids; let kid = 0;
@@ -56,13 +58,15 @@
       if (smA && (p.sA !== 0 || p.sB !== 0)) x += gain * (p.sA * smell(s, 'mA', smA[i], p.adapt) + p.sB * smell(s, 'mB', smB[i], p.adapt));
       if (con) { if (p.sT !== 0) x += gain * p.sT * (s.tch / (s.tch + 0.05)); if (p.sW !== 0) { const w = 5 * s.torn + 1 - (s.hp == null ? 1 : s.hp); x += gain * p.sW * (w > 1 ? 1 : w); } }
       if (vis && p.vE !== 0 && s.v != null) x += gain * p.vE * smell(s, 'mV', s.v, p.adapt, 0.3);
+      if (snd && p.hE !== 0 && s.e != null) { const sg = smell(s, 'mE', s.e, p.adapt, 0.1), ev = gain * p.hE * (sg + 1 - p.adapt); x += gain * p.hE * sg; hd += ev < 0 ? -ev : ev; } // (hd counts what sound adds over silence: an ear in silence reports its lowest value, not nothing)
       s.a += p.leak * (Math.tanh(x) - s.a);
       const cd = 1 + p.mCil * s.a; s.cd = cd < 0 ? 0 : cd > 2 ? 2 : cd; s.ct = p.mTurn * s.a;
       if (con && p.mBite !== 0) { const mo = 1 + p.mBite * s.a; s.mo = mo < 0 ? 0 : mo > 1 ? 1 : mo; }
+      if (snd) { const vo = p.mVoice * s.a; s.vo = vo < 0 ? 0 : vo > 1 ? 1 : vo; s.vq = 0; }
       use += s.a < 0 ? -s.a : s.a;
       if (p.nn) { // several neurons in this segment. Each reads what it is wired to (its own senses; neurons here, in the parent, in the children, in its mirror twin: their values of a moment ago) and acts on this segment
         const nn = compile(p.nn), n = nn.length; if (!s.na || s.na.length !== n) { s.na = new Float64Array(n); s.nb = new Float64Array(n); }
-        const na = s.na, nb = s.nb, parentSeg = s.parent >= 0 ? segs[s.parent] : null, twin = s.twin >= 0 ? segs[s.twin] : null; let eC = 0, eT = 0, eJ = 0, eM = 0, eP = 0, any = 0;
+        const na = s.na, nb = s.nb, parentSeg = s.parent >= 0 ? segs[s.parent] : null, twin = s.twin >= 0 ? segs[s.twin] : null; let eC = 0, eT = 0, eJ = 0, eM = 0, eP = 0, eV = 0, eQ = 0, any = 0;
         // (learn) connections that change with use: each has, beside the strength its genes give it, a part that this body has acquired in its life
         const lw = learn && nn.learns ? (s.nw && s.nw.length === nn.total ? s.nw : (s.nw = new Float64Array(nn.total))) : null;
         for (let q = 0; q < n; q++) { const N = nn[q]; let y = N.b;
@@ -76,17 +80,20 @@
               case 13: if (kids.length) { for (let c2 = 0; c2 < kids.length; c2++) v += other(segs[kids[c2]], j); v /= kids.length; } break;
               case 14: v = other(twin, j); break;
               case 15: v = s.ate ? s.ate / (s.ate + 0.1) : 0; break; // (learn) this segment's mouth has just swallowed something
+              case 16: v = snd && s.e != null ? smell(s, 'nE', s.e, p.adapt, 0.1) : 0; break; // (sound) what this segment's ear reports
             }
-            if (lw) { pre[e] = v; y += (N.w[e] + lw[N.off + e]) * v; } else y += N.w[e] * v; }
+            if (lw) { pre[e] = v; y += (N.w[e] + lw[N.off + e]) * v; } else y += N.w[e] * v;
+            if (snd && N.src[e] === 16) { const ev = N.w[e] * (v + 1 - p.adapt); hd += ev < 0 ? -ev : ev; } }
           const v2 = na[q] + N.k * (Math.tanh(y) - na[q]); nb[q] = v2; use += v2 < 0 ? -v2 : v2;
           if (lw && N.plastic) { // used together, a connection grows (or shrinks, by its gene); where one input gates the change, only while that input is active. What was acquired fades slowly.
             const gate = N.m >= 0 && N.m < N.src.length ? pre[N.m] : 1;
             for (let e = 0; e < N.eta.length; e++) if (N.eta[e] !== 0) { let d = lw[N.off + e]; d += learn * (N.eta[e] * pre[e] * v2 * gate - 0.005 * d); lw[N.off + e] = d < -2 ? -2 : d > 2 ? 2 : d; } }
-          for (let e = 0; e < N.eff.length; e++) { const z = N.ew[e] * v2; any = 1; switch (N.eff[e]) { case 0: eC += z; break; case 1: eT += z; break; case 2: eJ += z; break; case 3: eM += z; break; case 4: eP += z; } } }
-        if (any) { const c3 = s.cd + eC; s.cd = c3 < 0 ? 0 : c3 > 2 ? 2 : c3; s.ct += eT; s.nj = eJ; s.np = eP; if (eM !== 0) { const mo = (s.mo == null ? 1 : s.mo) + eM; s.mo = mo < 0 ? 0 : mo > 1 ? 1 : mo; } }
+          for (let e = 0; e < N.eff.length; e++) { const z = N.ew[e] * v2; any = 1; switch (N.eff[e]) { case 0: eC += z; break; case 1: eT += z; break; case 2: eJ += z; break; case 3: eM += z; break; case 4: eP += z; break; case 5: eV += z; break; case 6: eQ += z; } } }
+        if (any) { const c3 = s.cd + eC; s.cd = c3 < 0 ? 0 : c3 > 2 ? 2 : c3; s.ct += eT; s.nj = eJ; s.np = eP; if (eM !== 0) { const mo = (s.mo == null ? 1 : s.mo) + eM; s.mo = mo < 0 ? 0 : mo > 1 ? 1 : mo; } if (snd) { const vo = s.vo + eV; s.vo = vo < 0 ? 0 : vo > 1 ? 1 : vo; s.vq = eQ < -1 ? -1 : eQ > 1 ? 1 : eQ; } }
       }
     }
     for (let i = 0; i < segs.length; i++) { const s = segs[i]; if (s.na && s.nb) { const t = s.na; s.na = s.nb; s.nb = t; } } // all neurons step together
+    if (snd) body.hd = hd;
     return use;
   }
   // One smell receptor: the same two readings as taste (how much there is; or, as far as it adapts, the change against a slow average).
@@ -95,11 +102,11 @@
     let rel = (c - s[key]) / (0.02 + 0.15 * s[key]); rel = rel < -1 ? -1 : rel > 1 ? 1 : rel;
     return (1 - adapt) * (2 * c / (c + (half || 0.1)) - 1) + adapt * rel;
   }
-  const CIRCUIT = ['nC', 'nP', 'nK', 'nH', 'nB', 'mCil', 'mTurn', 'mJoint', 'adapt', 'sA', 'sB', 'vE', 'sT', 'sW', 'mBite'];
+  const CIRCUIT = ['nC', 'nP', 'nK', 'nH', 'nB', 'mCil', 'mTurn', 'mJoint', 'adapt', 'sA', 'sB', 'vE', 'sT', 'sW', 'mBite', 'hE', 'mVoice'];
   // what a part's wiring costs to keep: the strengths of the single signal's connections, and for each neuron its connections and a share for the cell itself
   const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) w += Math.abs(e[1]) + (e[2] ? 0.5 * Math.abs(e[2]) : 0); for (const e of q.out) w += Math.abs(e[1]); } return w; };
   // neurons, made ready to run: sources and targets as numbers. Done once per part.
-  const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14, g: 15 }, EFF = { C: 0, T: 1, J: 2, M: 3, P: 4 }, ready = new WeakMap();
+  const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14, g: 15, e: 16 }, EFF = { C: 0, T: 1, J: 2, M: 3, P: 4, V: 5, Q: 6 }, ready = new WeakMap();
   function compile(nn) { let c = ready.get(nn); if (!c) { let off = 0; c = nn.map(q => { const N = { b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? +e[0][1] : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]), eta: q.in.map(e => e[2] || 0), m: q.m == null ? -1 : q.m, off }; N.plastic = N.eta.some(x => x !== 0); off += q.in.length; return N; }); c.total = off; c.learns = c.some(N => N.plastic); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); ready.set(nn, c); } return c; }
   const pre = new Float64Array(8); // (the inputs of the neuron being worked on)
   const other = (seg, i) => (seg && seg.na && i < seg.na.length ? seg.na[i] : 0);

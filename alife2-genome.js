@@ -73,7 +73,17 @@
     // In worlds where bodies touch (marked 'c'): a segment feels being pushed and being torn, and a mouth can be held shut.
     sT: [-4, 4, 0, 'n', 'c'],      // from the push this segment is getting from another body right now
     sW: [-4, 4, 0, 'n', 'c'],      // from its wound: tissue being torn from it right now, and how much of it is gone
-    mBite: [-1.5, 1.5, 0, 'n', 'c'] // signal -> how far this segment's mouth is open (0 = no effect: always open)
+    mBite: [-1.5, 1.5, 0, 'n', 'c'], // signal -> how far this segment's mouth is open (0 = no effect: always open)
+    // Sound (marked 's': these only change in worlds where sound exists). Any segment can carry hearing tissue and sound-making tissue.
+    // An ear reports how loud the water is where the segment's outer end is, over the pitches it is tuned to; nothing tells it where a sound came from or who made it.
+    ear: [0, 1, 0, 'n', 's'],       // hearing tissue (costs upkeep): how sensitive this segment is to sound
+    hTune: [0, 1, 0.5, 'n', 's'],   // the pitch its ear answers best (0 = lowest, 1 = highest)
+    hWide: [0.05, 1, 0.3, 'n', 's'], // how wide a range of pitches around that it takes in
+    hE: [-4, 4, 0, 'n', 's'],       // from what its own ear reports
+    voice: [0, 1, 0, 'n', 's'],     // sound-making tissue (costs upkeep, and energy for every sound): how loud this segment can be
+    pitch: [0, 1, 0.5, 'n', 's'],   // the pitch of its voice at rest
+    bend: [0, 0.5, 0.1, 'n', 's'],  // how far a neuron can push that pitch up or down
+    mVoice: [-1.5, 1.5, 0, 'n', 's'] // signal -> how loudly this segment's voice sounds (0 = no effect: silent unless a neuron drives it)
   };
   const LINK_FIELDS = {
     at: [0, 1, 1, 'n'],            // where along the parent
@@ -189,8 +199,10 @@
   // Targets, all in its own segment: C how hard the cilia beat, T their turning, J the joint's bend, M how far the mouth is open, P how hard its pad presses.
   const NN_MAX = 4, NN_IN = 6, NN_OUT = 3, NN_SENSE = ['c', 'A', 'B', 'v', 't', 'w', 'h', 'j', 'o', '1', 'a'], NN_REF = ['s', 'p', 'k', 'm'], NN_EFF = ['C', 'T', 'J', 'M', 'P'];
   //   g  (only in worlds where connections learn) the segment's own mouth has just swallowed something
-  const NN_SENSE_L = NN_SENSE.concat('g');
-  const nnSource = (r, L) => (r() < 0.6 ? (L ? NN_SENSE_L[r.int(NN_SENSE_L.length)] : NN_SENSE[r.int(NN_SENSE.length)]) : NN_REF[r.int(NN_REF.length)] + r.int(NN_MAX));
+  //   e  (only in worlds with sound) what the segment's own ear reports
+  // and two more targets there: V how loudly the segment's voice sounds, Q how far its pitch is pushed up or down.
+  const NN_POOL = [NN_SENSE, NN_SENSE.concat('g'), NN_SENSE.concat('e'), NN_SENSE.concat('g', 'e')], NN_SENSE_L = NN_POOL[3], NN_EFF_S = NN_EFF.concat('V', 'Q');
+  const nnSource = (r, L, S) => { const pool = NN_POOL[(L ? 1 : 0) + (S ? 2 : 0)]; return r() < 0.6 ? pool[r.int(pool.length)] : NN_REF[r.int(NN_REF.length)] + r.int(NN_MAX); };
   const nnValid = c => typeof c === 'string' && (NN_SENSE_L.includes(c) || (c.length === 2 && NN_REF.includes(c[0]) && c[1] >= '0' && c[1] < String(NN_MAX)));
   function sanitizeNN(p) {
     if (p.nn == null) return; if (!Array.isArray(p.nn)) { delete p.nn; return; }
@@ -198,26 +210,26 @@
       b: clamp(Number.isFinite(q.b) ? q.b : 0, -2, 2), k: clamp(Number.isFinite(q.k) ? q.k : 1, 0.02, 1),
       in: (Array.isArray(q.in) ? q.in : []).filter(e => Array.isArray(e) && nnValid(e[0]) && Number.isFinite(e[1])).slice(0, NN_IN).map(e => (Number.isFinite(e[2]) && e[2] !== 0 ? [e[0], clamp(e[1], -4, 4), clamp(e[2], -1, 1)] : [e[0], clamp(e[1], -4, 4)])), // (a third number: how fast this connection changes with use, in worlds where connections can)
       m: q.m,
-      out: (Array.isArray(q.out) ? q.out : []).filter(e => Array.isArray(e) && NN_EFF.includes(e[0]) && Number.isFinite(e[1])).slice(0, NN_OUT).map(e => [e[0], clamp(e[1], -2, 2)])
+      out: (Array.isArray(q.out) ? q.out : []).filter(e => Array.isArray(e) && NN_EFF_S.includes(e[0]) && Number.isFinite(e[1])).slice(0, NN_OUT).map(e => [e[0], clamp(e[1], -2, 2)])
     }));
     for (const q of p.nn) if (!(Number.isInteger(q.m) && q.m >= 0 && q.m < q.in.length)) delete q.m; // (which of its own inputs gates the changing of its connections; none: they change with use alone)
     if (!p.nn.length) delete p.nn;
   }
-  function mutateNN(p, r, s, L) {
-    const nn = p.nn || [];
+  function mutateNN(p, r, s, L, S) {
+    const nn = p.nn || [], EFF = S ? NN_EFF_S : NN_EFF;
     for (const q of nn) {
       if (L) { for (const e of q.in) if (r() < 0.08) { const v = clamp((e[2] || 0) + r.gauss() * 0.15 * s, -1, 1); if (v !== 0) e[2] = v; else e.length = 2; } if (r() < 0.03 * s) { if (q.m == null && q.in.length) q.m = r.int(q.in.length); else delete q.m; } }
       if (r() < 0.12) q.b += r.gauss() * 0.3 * s; if (r() < 0.12) q.k += r.gauss() * 0.07 * s;
       for (const e of q.in) if (r() < 0.12) e[1] += r.gauss() * 0.5 * s; for (const e of q.out) if (r() < 0.12) e[1] += r.gauss() * 0.3 * s;
-      if (r() < 0.05 * s && q.in.length < NN_IN) q.in.push([nnSource(r, L), r.gauss()]);
+      if (r() < 0.05 * s && q.in.length < NN_IN) q.in.push([nnSource(r, L, S), r.gauss()]);
       if (r() < 0.03 * s && q.in.length > 1) { const i = r.int(q.in.length); q.in.splice(i, 1); if (q.m != null) { if (q.m === i) delete q.m; else if (q.m > i) q.m--; } }
-      if (r() < 0.03 * s && q.in.length) q.in[r.int(q.in.length)][0] = nnSource(r, L);
-      if (r() < 0.03 * s && q.out.length < NN_OUT) q.out.push([NN_EFF[r.int(NN_EFF.length)], r.gauss() * 0.5]);
+      if (r() < 0.03 * s && q.in.length) q.in[r.int(q.in.length)][0] = nnSource(r, L, S);
+      if (r() < 0.03 * s && q.out.length < NN_OUT) q.out.push([EFF[r.int(EFF.length)], r.gauss() * 0.5]);
       if (r() < 0.02 * s && q.out.length) q.out.splice(r.int(q.out.length), 1);
     }
     if (r() < 0.04 * s && nn.length < NN_MAX) {
       // a new neuron: half the time a copy of one that is there, with all its connections (it can then drift apart); otherwise a fresh one with a sense and an effect
-      if (nn.length && r() < 0.5) nn.push(copy(nn[r.int(nn.length)])); else nn.push({ b: 0, k: 1, in: [[nnSource(r, L), r.gauss()]], out: [[NN_EFF[r.int(NN_EFF.length)], r.gauss() * 0.5]] });
+      if (nn.length && r() < 0.5) nn.push(copy(nn[r.int(nn.length)])); else nn.push({ b: 0, k: 1, in: [[nnSource(r, L, S), r.gauss()]], out: [[EFF[r.int(EFF.length)], r.gauss() * 0.5]] });
     }
     if (r() < 0.02 * s && nn.length) nn.splice(r.int(nn.length), 1);
     if (nn.length) p.nn = nn; else delete p.nn;
@@ -230,7 +242,7 @@
     if (g.root > i) g.root--;
   }
   // how far a part's numbers are from another's, as a share of each gene's range (0 = a perfect copy)
-  function divergence(a, b) { let d = 0, n = 0; for (const k in PART_FIELDS) { const [lo, hi, , kind] = PART_FIELDS[k]; d += Math.abs(kind === 'a' ? wrapPi(a[k] - b[k]) / TAU : (a[k] - b[k]) / (hi - lo)); n++; } return d / n; }
+  function divergence(a, b) { let d = 0, n = 0; for (const k in PART_FIELDS) { const [lo, hi, , kind, flag] = PART_FIELDS[k]; if (flag === 's' && a[k] === b[k]) continue; /* (genes of sound count only where they differ: the measure reads as before in worlds without sound) */ d += Math.abs(kind === 'a' ? wrapPi(a[k] - b[k]) / TAU : (a[k] - b[k]) / (hi - lo)); n++; } return d / n; }
 
   function mutate(g0, r, strength, extra) {
     const g = copy(g0), s = strength == null ? 1 : strength, G2 = extra === true || !!(extra && extra.includes('g'));
@@ -244,7 +256,7 @@
       }
     };
     for (const p of g.parts) num(p, PART_FIELDS);
-    if (extra === true || (extra && extra.includes('n'))) for (const p of g.parts) mutateNN(p, r, s, !!(extra && extra !== true && extra.includes('l')));
+    if (extra === true || (extra && extra.includes('n'))) for (const p of g.parts) mutateNN(p, r, s, !!(extra && extra !== true && extra.includes('l')), !!(extra && extra !== true && extra.includes('s')));
     for (const l of g.links) {
       num(l, LINK_FIELDS);
       if (r() < 0.14 * s) l.repeat += r() < 0.5 ? -1 : 1;
@@ -292,8 +304,8 @@
   // genes lie in a row and are cut at one place: one side comes from one parent, the rest from the other — neighbouring genes tend to stay
   // together, genes far apart are easily parted. A part's neurons go with the far end of the row. A shared rule is tuned as in one parent or
   // the other. The genes of the whole body are drawn one by one. A part or rule that the other genome lacks stays as it is.
-  function recombine(a, b, r) {
-    const g = copy(a), ids = g.parts.some(p => p.id != null) && b.parts.some(p => p.id != null), K = Object.keys(PART_FIELDS), pb = new Map(), lb = new Map();
+  function recombine(a, b, r, sound) {
+    const g = copy(a), ids = g.parts.some(p => p.id != null) && b.parts.some(p => p.id != null), K = Object.keys(PART_FIELDS).filter(k => sound || PART_FIELDS[k][4] !== 's') /* (the genes of sound join the row only where sound exists: other worlds mix exactly as before) */, pb = new Map(), lb = new Map();
     b.parts.forEach((p, i) => { if (!ids || p.id != null) pb.set(ids ? p.id : i, p); }); b.links.forEach((l, i) => { if (!ids || l.id != null) lb.set(ids ? l.id : i, l); });
     g.parts.forEach((p, i) => {
       const q = pb.get(ids ? p.id : i); if (!q) return;

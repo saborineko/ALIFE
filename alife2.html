@@ -38,6 +38,9 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="身体が物質として失ったもの（消化しきれなかった分、蓄えの上限を超えた分、死骸や死産の卵のうち粒にならなかった分、削られた組織のうち食物にならない分）が、その場の溶存栄養に戻る。熱として失った分と、誰も食べなかった粒は戻らない。"><input id="recycle" type="checkbox">失った物質を水に戻す</label>
     <label title="部品が神経を 4 個まで持てる。神経は、自分の体節の感覚と、同じ体節・親・子・左右の対の神経を入力にでき、繊毛・関節・口を動かす。変異で生じ、結合ごと複製され、消える。これまでの 1 信号の回路はそのまま働く。"><input id="nerve2" type="checkbox">体節あたり複数の神経</label>
     <label title="複数の神経のある世界で働く。神経の結合ごとに、使われ方で強さが変わる速さ（遺伝する。0 なら変わらない）を持てる。変化は「速さ × 入力 × その神経の活動」で、神経ごとに、自分の入力の 1 つが働いているあいだだけ変わる、という門を持てる。身につけた強さはゆっくり薄れ、子には伝わらない（伝わるのは速さと門）。いまの世界のまま切り替えられる。"><input id="learn" type="checkbox">神経の結合が経験で変わる</label>
+    <label title="音という物理現象のある世界。どの身体も、していること（繊毛を打つ、筋肉を動かす、他の身体と押し合う、組織を削られる、底を擦る、餌を口に入れる）から、身体の大きさで決まる高さの微かな音を否応なく出す。体節は、聴く組織（耳：その体節の外側の端で水がどれだけ鳴っているかを、合わせた高さのあたりで測る）と、音を出す組織（声：神経が鳴らし、鳴らすたびにエネルギーを使う）を持てる。音は広がり、薄れ、重なる。低い音は遠くまで届いて長く残り、高い音はすぐ消える。水そのものにも雑音がある。誰が・どこで・なぜ出した音かは、どこにも書かれていない。警戒・求愛といった意味も、鳴くことへの報酬も無い。いまの世界のまま切り替えられる。"><input id="sound" type="checkbox">音（身体の音・耳・声）</label>
+    <label title="対照実験：この世界のすべての耳が何も聞こえなくなる。声や身体の音は出続ける。音が行動に効いているかを確かめるために使う。"><input id="deaf" type="checkbox">対照：耳を切る</label>
+    <label title="対照実験：この世界のすべての声が出なくなる（費用もかからない）。身体が否応なく出す音は残る。"><input id="mute" type="checkbox">対照：声を切る</label>
     <label title="変異の起きやすさと大きさが遺伝し、それ自体も変異する（0.1〜3 倍）。ALIEN や Polyworld が持つ仕組み。いまの世界のまま切り替えられる。"><input id="metamut" type="checkbox">変異の強さも進化する</label>
     <label title="母が卵 1 個に持たせる蓄えの量（幼体が持てる量に対する割合。この規則が無ければ 0.5）が遺伝し、変異する。多く持たせるほど卵 1 個が高くつき、産める数が減る。幼体が一度に持てない分は、幼体の成長に回る。「出生の収支を合わせる」と一緒に使う想定。いまの世界のまま切り替えられる。"><input id="invest" type="checkbox">卵に持たせる蓄えも進化する</label>
     <label title="飲み込めない大きさの粒（または消化管に入りきらない粒）に口が届いていれば、組織を削るのと同じ速さで少しずつ削って食べる。切ると、粒は丸呑みか、まったく取れないかのどちらか。"><input id="nibble" type="checkbox">粒を削って食べる</label>
@@ -50,7 +53,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="溶存栄養の回復と粒の供給が、長さ 120 の波になって世界を一周し続ける（1200 秒で 1 波長ぶん進む＝毎秒 0.1）。どの場所も、豊かな時期と乏しい時期を交互に迎える。時間で平均した供給はどこでも波の無い世界と同じで、乏しい水に降るはずだった粒は別の場所に降る。じっとしていれば飢える時期が来て、波について行けば豊かな水に居続けられる。いまの世界のまま切り替えられる。「全部入り」には含めていない。"><input id="wave" type="checkbox">豊かさの波（餌場が移る）</label>
     <label>始祖 <select id="founder"><option value="primordial">原始個体（1体節）から自然進化</option><option value="file">進化試験の結果を読み込む（JSON）</option></select></label>
     <input id="file" type="file" accept=".json" style="display:none">
-    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・変異の強さの進化・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。">全部入りで最初から</button><button id="pause">一時停止</button>
+    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・変異の強さの進化・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・音・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。">全部入りで最初から</button><button id="pause">一時停止</button>
     <label>速度 <select id="speed"><option>1</option><option selected>4</option><option>16</option><option>64</option></select>×</label>
     <label title="同じ種類の世界を、別々のスレッドで同時に回す。増やした島は、いま見ている世界の複製を乱数だけ変えて始める。150 秒ごとに各島から 1 個体が隣の島へ移る（遺伝子・齢・蓄えごと。出入りはエネルギーの収支に記帳される）。裏の島は描画しないので全速で進む。島の数だけ CPU のコアを使う。島を使う世界は、同じ seed でも毎回同じ歴史にはならない。">並列の島 <select id="islands"><option>1</option><option>2</option><option>4</option><option>8</option></select></label>
     <label title="タブを裏に回したり最小化したりしても、世界を止めずに進める（表示中より遅い）。ブラウザがタブを休止させた場合は止まる。"><input id="bg" type="checkbox" checked>裏でも進める</label>
@@ -61,7 +64,14 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 <div>
   <section class="panel"><b>世界</b><div id="stats" class="note"></div><canvas id="chart" width="420" height="150"></canvas><div class="note" style="font-size:11px"><span style="color:#8fd0ff">個体数</span>　<span style="color:#ffd27a">平均体節数</span>　<span style="color:#ff9a9a">口からの収入%</span>　<span style="color:#9af0b0">自力移動の速度</span></div></section>
   <section class="panel" id="islandPanel" style="display:none"><b>並列の島</b><div id="islandInfo" class="note"></div><div id="islandNote" class="note" style="color:#ff9a9a"></div></section>
-  <section class="panel"><b>観察個体</b><canvas id="zoom" width="420" height="300"></canvas><div id="info" class="note">クリックで選択</div>
+  <section class="panel" id="soundPanel" style="display:none"><b>音</b>
+    <div class="controls"><label title="生物の音を実際に鳴らす。聞きやすいように変換した音で、世界の中の音や生物の判断には一切影響しない。声は音程ごとの澄んだ音、身体が否応なく出す音と水の雑音はざらついた音にしてある。"><input id="listen" type="checkbox">聴く</label>
+      <label>音量 <input id="vol" type="range" min="0" max="1" step="0.05" value="0.5" style="width:90px"></label>
+      <label>聴く場所 <select id="listenAt"><option value="view">画面の中心</option><option value="body">観察個体のいる場所</option><option value="voice">観察個体の声だけ</option></select></label>
+      <label title="声が鳴っている場所を色で重ねて描く。色は音程（赤＝低い … 紫＝高い）、濃さは大きさ。鳴いている個体には輪を描く。"><input id="showSound" type="checkbox" checked>音を描く</label></div>
+    <div id="soundStats" class="note"></div><canvas id="spectrum" width="420" height="70"></canvas>
+    <div class="note" style="font-size:11px">上：聴いている場所の音を 6 つの高さに分けたもの（左が低い音。明るい部分が声、暗い部分が身体の音と水の雑音）。</div></section>
+  <section class="panel"><b>観察個体</b><canvas id="zoom" width="420" height="300"></canvas><div id="info" class="note">クリックで選択</div><canvas id="voiceChart" width="420" height="84" style="display:none"></canvas>
     <div class="controls"><button id="follow">追跡</button><button id="biggest">最大の身体</button><button id="oldest">最多の子孫</button><button id="mover">最も動く個体</button><button id="brainy" title="身体に現れている神経（体節あたり複数の神経）の数が最も多い個体。神経を持つ個体がいなければ、1 信号の回路の配線が最も強い個体。">神経が最も多い個体</button><button id="mosaic" title="身体に現れている部品の種類が最も多い個体（体節が分化している個体）。">部品の種類が最も多い個体</button></div></section>
   <details class="panel" open><summary><b>遺伝の系譜・祖先</b></summary><div class="note">観察個体から始祖まで。体制が親から変わった世代だけを示す。クリックでその祖先の身体を表示。</div><div id="ancestry" class="cards"></div><div class="controls"><button id="csv">系譜CSV</button></div></details>
   <details class="panel" open><summary><b>生きている形態図鑑</b></summary><div class="note">いま生きている体制を多い順に。クリックで代表個体を観察。</div><div id="atlas" class="cards"></div></details>
@@ -73,15 +83,15 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=39"></script>
-<script src="./alife2-genome.js?v=39"></script>
-<script src="./alife2-development.js?v=39"></script>
-<script src="./alife2-neural.js?v=39"></script>
-<script src="./alife2-physics.js?v=39"></script>
-<script src="./alife2-organs.js?v=39"></script>
-<script src="./alife2-engine.js?v=39"></script>
-<script src="./alife2-render.js?v=39"></script>
-<script src="./alife2-gpu.js?v=39"></script>
-<script src="./alife2-world.js?v=39"></script>
+<script src="./alife2-version.js?v=40"></script>
+<script src="./alife2-genome.js?v=40"></script>
+<script src="./alife2-development.js?v=40"></script>
+<script src="./alife2-neural.js?v=40"></script>
+<script src="./alife2-physics.js?v=40"></script>
+<script src="./alife2-organs.js?v=40"></script>
+<script src="./alife2-engine.js?v=40"></script>
+<script src="./alife2-render.js?v=40"></script>
+<script src="./alife2-gpu.js?v=40"></script>
+<script src="./alife2-world.js?v=40"></script>
 </body>
 </html>
