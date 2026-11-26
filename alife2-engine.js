@@ -34,6 +34,11 @@
     vision: 0,                            // 1 = a segment with eye tissue is a receptor that looks one way and sees coloured things: food grains and other bodies alike. 0 = the worlds before this existed
     foodHue: 50,                          // the colour of food grains (degrees). Bodies have the colour their genome gives them
     sightless: 0,                         // control experiment: no eye in this world reports anything
+    budget: 0,                            // 1 = an egg holds what its parent put into it, and the young is built from that with its own (mutated) genes: it develops as far
+                                          // as the egg pays for (never past the stage its genes aim at), keeps what is left as yolk, and is stillborn if not even a bud can be made.
+                                          // 0 = the earlier rule: the young is born at the stage and size its own genes describe, whatever the parent paid
+    carry: 0,                             // 1 = when a body is rebuilt for growth, each segment keeps its nerve signal, what its senses had adapted to, and the body keeps its rhythm
+                                          // (a segment is known by its address). 0 = the earlier rule: these start from nothing at every growth step
     audit: 0,                             // 1 = keep a ledger of all energy entering, leaving and changing form (counting only: nothing behaves differently)
     genome2: 0,                           // 1 = the newer gene rules: a stretch of an axis can split into two parts without changing the body (and then mutate apart);
                                           // parts nothing leads to are dormant, can be linked in again, and decay slowly; only parts in use count against the limit; genes carry identities
@@ -71,9 +76,10 @@
       this.bodies = []; this.yBottom = this.H * (1 - this.benthic);
       this.patch = Array.from({ length: this.patches }, () => ({ x: this.rand() * this.W, y: this.rand() * this.yBottom, a: this.rand() * TAU }));
       if (M) this.buildMap(M);
-      this.counts = { births: 0, starved: 0, aged: 0, broken: 0, blocked: 0, eaten: 0, killed: 0, flesh: 0, torn: 0 };
+      this.counts = { births: 0, starved: 0, aged: 0, broken: 0, blocked: 0, eaten: 0, killed: 0, flesh: 0, torn: 0, stillborn: 0 };
       this.taste = new Float64Array(256);
-      this.ledger = this.audit ? { rain: 0, regrow: 0, placed: 0, mutation: 0, basal: 0, work: 0, cilia: 0, nerve: 0, digest: 0, clip: 0, eggFixed: 0, death: 0, expire: 0, bite: 0, growth: 0 } : null;
+      this.ledger = this.audit ? { rain: 0, regrow: 0, placed: 0, mutation: 0, basal: 0, work: 0, cilia: 0, nerve: 0, digest: 0, clip: 0, eggFixed: 0, death: 0, expire: 0, bite: 0, growth: 0, stillborn: 0 } : null;
+      this.grains = this.audit ? {} : null; // per size of grain: energy arrived, eaten, gone uneaten, and how much of it a mouth ever reached but could not take (too big for it / its gut was full)
       if (this.vision || this.contact) this.bgrid = Array.from({ length: this.cols * this.rows }, () => []);
       if (this.scent) { const n = this.cols * this.rows; this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
       this.tree = new Map(); this.events = []; this.history = []; this.firsts = {}; this.pruned = 0; this.clades = new Map();
@@ -110,7 +116,7 @@
       { const plan = A.development.develop(g, { maxSegs: this.maxSegs }); o.full = A.organs.profile(plan); o.gu = this.geneUse(g, plan); } o.life = o.full.life * (0.85 + 0.3 * this.rand());
       o.eggCost = C.eggFixed + baby.buildCost + C.eggReserve * baby.Emax; o.eggE = C.eggReserve * baby.Emax;
       this.form(o, x, y, this.rand() * TAU);
-      o.E = parent ? Math.min(o.prof.Emax, parent.eggE) : o.prof.Emax * 0.6;
+      o.E = parent ? Math.min(o.prof.Emax, parent.eggE) : o.prof.Emax * 0.6; o.V0 = o.prof.V; o.stage0 = stage;
       if (this.ledger && !parent) this.ledger.placed += o.E + o.prof.buildCost;
       // genealogy: what kind of body this is, and whether that differs from its parent's
       o.home = this.regions ? this.regionAt(x) : 0; // the region it was born in
@@ -130,12 +136,14 @@
     form(o, x, y, ang) {
       // wounds stay with the segments they are on while the body is rebuilt for growth (a segment is known by its address, not its number)
       const was = o.hp && o.plan ? new Map(o.plan.segs.map((s, i) => [s.addr, o.hp[i]])) : null;
+      const mind = this.carry && o.b && o.plan ? { t: o.b.t, seg: new Map(o.plan.segs.map((s, i) => { const q = o.b.segs[i]; return [s.addr, [q.a, q.m, q.mA, q.mB, q.mV, q.v]]; })) } : null;
       o.plan = A.development.develop(o.g, { stage: o.stage, maxSegs: this.maxSegs }); o.prof = A.organs.profile(o.plan);
       if (was) o.hp = o.plan.segs.map(s => (was.has(s.addr) ? was.get(s.addr) : 1));
       o.b = A.physics.build(o.plan, { x, y, angle: ang, env: { fluid: 1, ground: false, gravity: 4, flowX: 0, flowY: 0 } });
       // lay the body's own centre on (x, y)
       const c = A.physics.com(o.b); for (let k = 0; k < o.b.np; k++) { o.b.x[k] += x - c[0]; o.b.y[k] += y - c[1]; }
       A.physics.pose(o.b); o.cx = x; o.cy = y; o.work0 = 0;
+      if (mind) { o.b.t = mind.t; o.plan.segs.forEach((s, i) => { const v = mind.seg.get(s.addr); if (!v) return; const q = o.b.segs[i]; q.a = v[0]; q.m = v[1]; if (v[2] != null) q.mA = v[2]; if (v[3] != null) q.mB = v[3]; if (v[4] != null) q.mV = v[4]; if (v[5] != null) q.v = v[5]; }); }
       // a body with no working joint cannot do anything but drift: move it with the water instead of simulating it
       if (!this.rigid) o.b.rigid = false; // control experiment: solve every body with the jointed solver
       o.passive = !o.b.hasCilia && o.b.rigid && !this.contact; o.cil0 = 0; // where bodies touch, every body is simulated: even one that cannot move can be pushed
@@ -154,6 +162,8 @@
       if (o.shore != null && o.shore !== this.shore) { this.shore = o.shore; this.log('世界の設定を変更：海域の境界を' + (o.shore > 0 ? 'なだらかにした（幅 ' + o.shore + '）' : '段差に戻した')); }
       if (o.contact != null && !!o.contact !== !!this.contact) { this.contact = o.contact ? 1 : 0; this.log('世界の設定を変更：身体の接触と、口による組織の摂取を' + (o.contact ? '有効にした' : '無効にした')); for (const b of this.bodies) b.passive = !this.contact && !b.b.hasCilia && b.b.rigid; for (const k of ['killed', 'flesh', 'torn']) if (this.counts[k] == null) this.counts[k] = 0; }
       if ((this.vision || this.contact) && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
+      if (o.budget != null && !!o.budget !== !!this.budget) { this.budget = o.budget ? 1 : 0; this.log('世界の設定を変更：出生の収支を合わせる規則（子は卵の予算で作れる段階で生まれる）を' + (o.budget ? '有効にした' : '無効にした')); }
+      if (o.carry != null && !!o.carry !== !!this.carry) { this.carry = o.carry ? 1 : 0; this.log('世界の設定を変更：成長の前後で神経の状態と律動を引き継ぐ規則を' + (o.carry ? '有効にした' : '無効にした')); }
       if (o.genome2 != null && !!o.genome2 !== !!this.genome2) { this.genome2 = o.genome2 ? 1 : 0; this.log('世界の設定を変更：遺伝子の新しい規則（軸の分割・休眠遺伝子・識別子）を' + (o.genome2 ? '有効にした' : '無効にした')); }
       for (const k of ['vision', 'scent', 'blind']) { if (o[k] == null || !!o[k] === !!this[k]) continue; this[k] = o[k] ? 1 : 0; this.log('世界の設定を変更：' + names[k] + (o[k] ? 'を有効にした' : 'を無効にした')); }
       if (this.scent && !this.scA) { this.scA = new Float32Array(n); this.scB = new Float32Array(n); this.sc2 = new Float32Array(n); this.smA = new Float64Array(256); this.smB = new Float64Array(256); }
@@ -169,6 +179,15 @@
       for (const s of plan.segs) { used.add(s.part); if (s.chain && s.parent >= 0 && plan.segs[s.parent].part !== s.part) zones++; }
       for (const i of used) { const p = g.parts[i]; if (p.src == null) continue; const q = g.parts.find(x => x.id === p.src); if (q) div = Math.max(div, G.divergence(p, q)); }
       return { parts: g.parts.length, reach: G.reach(g).size, expr: used.size, zones, div };
+    }
+    // How far a young with these genes can develop on an egg holding B: the stage its genes aim at if the egg pays for that body and the usual
+    // reserve; otherwise the latest stage it does pay for; a mere bud with less reserve if that is all there is; null if not even a bud.
+    afford(g, B) {
+      const C = A.organs.C, cost = s => { const p = A.organs.profile(A.development.develop(g, { stage: s, maxSegs: this.maxSegs })); return [p.buildCost + C.eggReserve * p.Emax, p.buildCost]; };
+      if (cost(g.birth)[0] <= B + 1e-9) return g.birth;
+      const bud = 0.05, c = cost(bud); if (c[1] > B) return null; if (c[0] > B) return bud;
+      let lo = bud, hi = g.birth; for (let i = 0; i < 8; i++) { const mid = (lo + hi) / 2; if (cost(mid)[0] <= B) lo = mid; else hi = mid; }
+      return lo;
     }
     note(o) {
       const F = this.firsts, f = o.full, once = (k, text) => { if (!F[k]) { F[k] = o.id; this.log(text, o.id); } };
@@ -304,7 +323,8 @@
     // ---- the energy ledger (audit: 1) ----
     // Everything that holds energy at this moment: dissolved food, grains, and in every body its reserve, gut contents, savings for growth and eggs, and the cost of the tissue it has.
     stored() { let s = 0; for (let i = 0; i < this.nut.length; i++) s += this.nut[i]; for (const f of this.food) if (f.e > 0) s += f.e; for (const o of this.bodies) s += o.E + o.G + o.grow + o.egg + o.prof.buildCost; return s; }
-    addFood(x, y, size, e, fixed, life) { if (this.ledger && !this.corpse) this.ledger.rain += e; this.food.push({ x: ((x % this.W) + this.W) % this.W, y: clamp(y, 0.5, this.H - 0.5), size, e, fixed, die: this.t + life }); }
+    grainClass(k) { if (!this.rainSizes) { this.rainSizes = new Set([...this.grainSizes, ...this.bottomSize].map(String)); if (this.regions) for (const q of this.regions) for (const z of q.grains.sizes) this.rainSizes.add(String(z)); } if (!this.rainSizes.has(k)) k = '死骸'; return this.grains[k] || (this.grains[k] = { in: 0, eaten: 0, expired: 0, tooBig: 0, gutFull: 0 }); } // grains of any other size came from dead bodies
+    addFood(x, y, size, e, fixed, life) { const f = { x: ((x % this.W) + this.W) % this.W, y: clamp(y, 0.5, this.H - 0.5), size, e, fixed, die: this.t + life }; if (this.ledger) { if (!this.corpse) this.ledger.rain += e; f.c = this.corpse ? '死骸' : String(size); this.grainClass(f.c).in += e; } this.food.push(f); }
 
     stepFood(dt) {
       const r = this.rand;
@@ -324,7 +344,7 @@
       const every = this.jostleEvery; let n = 0; const ph = this.tick % every, dt4 = dt * every, jit = this.jitter * Math.sqrt(dt4);
       for (let i = 0; i < this.food.length; i++) {
         const f = this.food[i];
-        if (f.e <= 0 || f.die < this.t) { if (this.ledger && f.e > 0) this.ledger.expire += f.e; continue; }
+        if (f.e <= 0 || f.die < this.t) { if (this.ledger && f.e > 0) { this.ledger.expire += f.e; this.grainClass(f.c || String(f.size)).expired += f.e; } continue; }
         if (!f.fixed && i % every === ph) { const [vx, vy] = this.flowAt(f.x, f.y); f.x = ((f.x + vx * dt4 + (r() + r() + r() - 1.5) * 2 * jit) % this.W + this.W) % this.W; f.y = clamp(f.y + (vy + this.sink) * dt4 + (r() + r() + r() - 1.5) * 2 * jit, 0.5, this.H - 0.5); if (f.y >= this.yBottom) f.fixed = true; }
         this.food[n++] = f; this.grid[this.cellAt(f.x, f.y)].push(f);
       }
@@ -357,7 +377,7 @@
       let n = 0; const sq = Math.sqrt(dt);
       for (let i = 0; i < this.food.length; i++) {
         const f = this.food[i];
-        if (f.e <= 0 || f.die < this.t) { if (this.ledger && f.e > 0) this.ledger.expire += f.e; continue; }
+        if (f.e <= 0 || f.die < this.t) { if (this.ledger && f.e > 0) { this.ledger.expire += f.e; this.grainClass(f.c || String(f.size)).expired += f.e; } continue; }
         let ci = this.cellAt(f.x, f.y);
         if (!f.fixed) {
           const [vx, vy] = this.flowAt(f.x, f.y), jit = this.jitter * this.hJit[ci] * sq;
@@ -446,9 +466,13 @@
         for (const m of pr.mouths) {
           const s = b.segs[m.seg], ci = this.cellAt(s.bx, clamp(s.by, 0, this.H - 0.01));
           for (const f of this.grid[ci]) {
+            if (lg && f.e > 0 && (f.size > m.gape * 1.3 || o.G + f.e > pr.gutCap)) { // (ledger only) a mouth that reaches a grain it cannot take: note once why
+              let dx = f.x - s.bx; if (dx > this.W / 2) dx -= this.W; else if (dx < -this.W / 2) dx += this.W;
+              if (Math.sqrt(dx * dx + (f.y - s.by) * (f.y - s.by)) < m.gape + f.size * 0.5) { const gc = this.grainClass(f.c || String(f.size)); if (f.size > m.gape * 1.3) { if (!f.tb) { f.tb = 1; gc.tooBig += f.e; } } else if (!f.gf) { f.gf = 1; gc.gutFull += f.e; } }
+            }
             if (f.e <= 0 || f.size > m.gape * 1.3 || o.G + f.e > pr.gutCap) continue;
             let dx = f.x - s.bx; if (dx > this.W / 2) dx -= this.W; else if (dx < -this.W / 2) dx += this.W;
-            if (Math.sqrt(dx * dx + (f.y - s.by) * (f.y - s.by)) < m.gape + f.size * 0.5) { o.G += f.e; o.eaten += f.e; this.counts.eaten += f.e; f.e = 0; }
+            if (Math.sqrt(dx * dx + (f.y - s.by) * (f.y - s.by)) < m.gape + f.size * 0.5) { if (lg) this.grainClass(f.c || String(f.size)).eaten += f.e; o.G += f.e; o.eaten += f.e; this.counts.eaten += f.e; f.e = 0; }
           }
         }
         const dg = Math.min(o.G, pr.digest * dt); o.G -= dg; o.E += dg * pr.eta; if (lg) lg.digest += dg * (1 - pr.eta);
@@ -480,8 +504,18 @@
         const g = this.rand() < this.mutation ? A.genome.mutate(o.g, this.rand, undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '')) : A.genome.copy(o.g);
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
-        const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1; const kid = this.spawn(g, o.cx + Math.cos(a) * d, clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), g.birth, o); this.counts.births++;
-        if (lg) { lg.eggFixed += C.eggFixed; lg.mutation += kid.prof.buildCost + kid.E - (o.eggCost - C.eggFixed); } // the parent paid for the young its own genes describe; the young is built from its own (mutated) genes
+        const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1, bx = o.cx + Math.cos(a) * d, by = clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), B = o.eggCost - C.eggFixed; // B: what the egg holds
+        let stage = g.birth;
+        if (this.budget) {
+          stage = this.afford(g, B);
+          if (stage == null) { // the egg cannot make even a bud of this body: it is lost, and what a dead thing leaves of it lies where it was laid
+            let e = C.carrion * B; const e0 = e; this.corpse = true; while (e > 0.05) { const size = 0.25 + this.rand() * 0.25, pe = Math.min(e, this.grainEnergy * size ** 3); this.addFood(bx + this.rand.gauss() * 0.5, by + this.rand.gauss() * 0.5, size, pe, this.isGround(bx, by), this.grainLife); e -= pe; } this.corpse = false;
+            this.counts.stillborn++; o.kids--; if (lg) { lg.eggFixed += C.eggFixed; lg.stillborn += B - (e0 - e); } continue;
+          }
+        }
+        const kid = this.spawn(g, bx, by, stage, o); this.counts.births++;
+        if (this.budget) { const left = B - kid.prof.buildCost; kid.E = Math.min(kid.prof.Emax, left); const yolk = left - kid.E; if (yolk > 0) { if (kid.stage < 1) kid.grow += yolk; else kid.egg += yolk; } } // what the body and its reserve do not use stays with the young as yolk
+        if (lg) { lg.eggFixed += C.eggFixed; lg.mutation += kid.prof.buildCost + kid.E + kid.grow + kid.egg - B; } // (earlier rule: the parent paid for the young its own genes describe, the young is built from its own)
       }
       if (this.bodies.some(o => o.dead)) {
         for (const o of this.bodies) if (o.dead) {
@@ -518,7 +552,7 @@
         counts: this.counts, events: this.events, history: this.history, firsts: this.firsts, pruned: this.pruned, tree: [...this.tree.values()],
         // body plans that only one or two bodies ever had keep their numbers but not their genome (worlds begun before this rule still carry them)
         clades: [...this.clades.values()].map(c => c.ended != null && c.members <= 2 && c.g ? Object.assign({}, c, { g: null }) : c), cladesDropped: this.cladesDropped || 0,
-        bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home, hp: o.hp || undefined, flesh: o.flesh || undefined, lost: o.lost || undefined,
+        bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home, v0: o.V0, s0: o.stage0, hp: o.hp || undefined, flesh: o.flesh || undefined, lost: o.lost || undefined,
           sig: b.hasCircuit ? b.segs.map(q => q.a) : undefined,
           st: { x: Array.from(b.x), y: Array.from(b.y), vx: Array.from(b.vx), vy: Array.from(b.vy), t: b.t, work: b.work, heat: b.heat, cilia: b.ciliaUse, nerve: b.nerveUse, om: b.om || 0, th: b.th || 0, loc: b.loc ? Array.from(b.loc) : null, inertia: b.inertia == null ? null : b.inertia, carried: b.carried == null ? null : b.carried, cmd: b.cmd,
             segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB, q.v == null ? null : q.v, q.mV == null ? null : q.mV]), noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
@@ -527,12 +561,12 @@
     // Older saves (without `exact`) lack pose, velocities, rhythm phase, sensory memory and birth region: bodies then restart from rest.
     static restore(d) {
       if (!d || d.format !== 'alife2-world-1') throw new Error('not an ALIFE 2.0 world');
-      const w = new World(d.opt); w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = Object.assign({}, d.counts); for (const k of ['killed', 'flesh', 'torn']) if (w.counts[k] == null) w.counts[k] = 0; /* worlds saved before bodies could touch */ w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
+      const w = new World(d.opt); w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = Object.assign({}, d.counts); for (const k of ['killed', 'flesh', 'torn', 'stillborn']) if (w.counts[k] == null) w.counts[k] = 0; /* worlds saved before bodies could touch */ w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
       for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: d.exact ? f[5] : w.t + f[5] });
       if (d.exact) { w.grainDebt = d.grainDebt; w.bottomDebt = d.bottomDebt; if (d.liveLines) w.liveLines = new Set(d.liveLines); if (d.regionState && w.regions) d.regionState.forEach((q, i) => { w.regions[i].debt = q.debt; w.regions[i].patch = q.patch; }); }
       const nodes = new Map(d.tree.map(n => [n.id, n]));
       for (const s of d.bodies) {
-        const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade, sig: s.sig || null, home: s.home || 0, taxDot: 0, taxLen: 0, taxN: 0, hp: s.hp || null, flesh: s.flesh || 0, lost: s.lost || 0 };
+        const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade, sig: s.sig || null, home: s.home || 0, taxDot: 0, taxLen: 0, taxN: 0, V0: s.v0, stage0: s.s0, hp: s.hp || null, flesh: s.flesh || 0, lost: s.lost || 0 };
         const baby = A.organs.profile(A.development.develop(o.g, { stage: o.g.birth, maxSegs: w.maxSegs })), C = A.organs.C;
         { const plan = A.development.develop(o.g, { maxSegs: w.maxSegs }); o.full = A.organs.profile(plan); o.gu = w.geneUse(o.g, plan); } o.life = s.life; o.eggCost = C.eggFixed + baby.buildCost + C.eggReserve * baby.Emax; o.eggE = C.eggReserve * baby.Emax;
         w.form(o, s.x, s.y, s.angle); o.E = s.E;
@@ -568,6 +602,7 @@
         multi: n ? segs.filter(s => s > 1).length / n : 0, volume: mean(o => o.prof.V), speed: mean(o => o.age > 5 ? o.path / o.age : 0),
         mouthShare: mean(o => o.eaten + o.absorbed > 0 ? o.eaten / (o.eaten + o.absorbed) : 0), eyes: mean(o => o.prof.eye > 0 ? 1 : 0),
         bottom: mean(o => this.isGround(o.cx, o.cy) ? 1 : 0),
+        birthV: (l => l.length ? l.reduce((a, o) => a + o.V0, 0) / l.length : 0)(this.bodies.filter(o => o.V0 != null && o.gen > 0)), birthStage: (l => l.length ? l.reduce((a, o) => a + o.stage0, 0) / l.length : 0)(this.bodies.filter(o => o.stage0 != null && o.gen > 0)), birthGene: mean(o => o.g.birth), eggCost: mean(o => o.eggCost), adultV: mean(o => o.full.V),
         partsTotal: mean(o => o.gu.parts), partsReach: mean(o => o.gu.reach), partsUsed: mean(o => o.gu.expr), multiPart: mean(o => o.gu.expr > 1 ? 1 : 0), zoned: mean(o => o.gu.zones > 0 ? 1 : 0), differed: mean(o => o.gu.zones > 0 && o.gu.div > 0.05 ? 1 : 0),
         fleshShare: mean(o => o.eaten > 0 ? (o.flesh || 0) / o.eaten : 0), fleshEaters: mean(o => (o.flesh || 0) > 0.2 * o.eaten && o.eaten > 0 ? 1 : 0), wounded: mean(o => o.hp ? 1 : 0), armor: mean(o => o.g.parts.reduce((a, p) => a + p.armor, 0) / o.g.parts.length),
         // nerve circuits: share of bodies that are wired at all, mean wiring, and share whose taste reaches cilia or a joint

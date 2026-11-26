@@ -405,3 +405,29 @@ test('the energy ledger balances, and keeping it changes nothing', () => {
   assert.ok(Object.values(L).every(Number.isFinite) && L.rain > 100 && L.basal > 10 && L.death > 0 && a.counts.births > 20, JSON.stringify(L));
   assert.ok(Math.abs(gap) < 1e-6 * inflow, 'unexplained ' + gap + ' of ' + inflow);
 });
+
+test('birth budget: the young is built from what the egg holds; nothing is created at birth; too little makes it premature or stillborn', () => {
+  const G = A.genome, C = A.organs.C, w = new A.engine.World({ seed: 3, founders: 0, budget: 1 });
+  const P = G.primordial(3), cost = (g, s) => { const p = A.organs.profile(develop(g, { stage: s, maxSegs: 64 })); return p.buildCost + C.eggReserve * p.Emax; }, B = cost(P, P.birth);
+  assert.strictEqual(w.afford(P, B), P.birth, 'its own kind of young: exactly paid for');
+  const big = G.copy(P); big.parts[0].len *= 1.6; big.parts[0].r0 *= 1.4; big.parts[0].r1 *= 1.4; const s = w.afford(big, B);
+  assert.ok(s < big.birth && s >= 0.05 && cost(big, s) <= B + 1e-9, 'a bigger body is born earlier: ' + s); assert.ok(cost(big, Math.min(big.birth, s + 0.02)) > B || s === big.birth);
+  const small = G.copy(P); small.parts[0].len *= 0.6; assert.strictEqual(w.afford(small, B), small.birth); assert.ok(cost(small, small.birth) < B, 'a smaller body has yolk left');
+  const huge = G.copy(P); huge.parts[0].len = 8; huge.parts[0].r0 = 4; huge.parts[0].r1 = 4; assert.strictEqual(w.afford(huge, B), null, 'no bud can be made: stillborn');
+  // in a running world: the ledger shows nothing created at birth, with the rule on; and something, with it off
+  const run = budget => { const x = new A.engine.World({ seed: 9, budget, audit: 1 }); x.seedWith(G.primordial(9)); for (let i = 0; i < 4500; i++) x.step(); return x; };
+  const on = run(1), off = run(0), gap = x => { const L = x.ledger, IN = ['rain', 'regrow', 'placed', 'mutation']; return [IN.reduce((a, k) => a + L[k], 0), Object.keys(L).filter(k => !IN.includes(k)).reduce((a, k) => a + L[k], 0)]; };
+  assert.ok(on.counts.births > 50 && Math.abs(on.ledger.mutation) < 1e-9, 'created at birth with the rule: ' + on.ledger.mutation); assert.ok(Math.abs(off.ledger.mutation) > 1e-3, 'without: ' + off.ledger.mutation);
+  assert.ok(on.bodies.some(o => o.gen > 0 && o.stage0 < o.g.birth - 1e-6) || on.bodies.some(o => o.gen > 0 && (o.grow > 0 || o.egg > 0)), 'some young were born early or with yolk');
+  const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(on.save()))); for (let i = 0; i < 300; i++) { on.step(); w2.step(); }
+  assert.strictEqual(JSON.stringify(w2.bodies.map(o => [o.id, o.cx, o.E, o.grow, o.stage0])), JSON.stringify(on.bodies.map(o => [o.id, o.cx, o.E, o.grow, o.stage0])));
+});
+
+test('carry: a segment keeps its nerve signal, its sensory adaptation and the body its rhythm when the body is rebuilt for growth', () => {
+  const g = design(Object.assign({}, SAMPLES[0].params, { length: 3, width: 0.7, segments: 5, limbs: 0, tail: 0.3, tailSegs: 2 })); for (const p of g.parts) Object.assign(p, { nerve: 0.5, nC: 2, nP: 1, leak: 0.2, adapt: 0.5 });
+  for (const carry of [1, 0]) { const w = new A.engine.World({ seed: 4, founders: 0, cap: 0, carry }), o = w.spawn(A.genome.copy(g), 60, 40, 0.5, null);
+    for (let i = 0; i < 300; i++) w.step(); const before = new Map(o.plan.segs.map((s, i) => [s.addr, [o.b.segs[i].a, o.b.segs[i].m]])), t = o.b.t; assert.ok([...before.values()].some(v => Math.abs(v[0]) > 0.01), 'the circuit is active');
+    o.stage = 0.8; w.form(o, o.cx, o.cy, 0);
+    const kept = o.plan.segs.filter((s, i) => before.has(s.addr) && o.b.segs[i].a === before.get(s.addr)[0] && o.b.segs[i].m === before.get(s.addr)[1]).length, had = o.plan.segs.filter(s => before.has(s.addr)).length;
+    if (carry) { assert.ok(had > 2 && kept === had, kept + ' of ' + had + ' kept'); assert.strictEqual(o.b.t, t); } else { assert.ok(o.b.segs.every(q => q.a === 0 && q.m === null) && o.b.t !== t, 'earlier rule: starts from nothing'); } }
+});
