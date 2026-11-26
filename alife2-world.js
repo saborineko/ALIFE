@@ -77,24 +77,60 @@
 
   // ---- sound for a human: what the water sounds like at one place, turned into something a person can hear; a picture of where voices sound;
   // and a short history of the observed body's voice. Nothing here goes back into the world: the world's sound is its own fields, never this.
-  const AU = { ctx: null, tones: [], noises: [], solo: null, master: null, hist: [], lastT: -1, who: 0, level: new Float32Array(12) };
-  const BAND_HZ = [110, 196, 349, 622, 1109, 1976], heard = v => 0.16 * (1 - Math.exp(-8 * v)); // (made easier on the ear: loud and faint are squeezed together)
-  function audioStart() {
-    if (AU.ctx) { AU.ctx.resume && AU.ctx.resume(); return true; }
-    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) { $('soundStats').textContent = 'このブラウザでは音を鳴らせない（表示と記録は働く）。'; return false; }
-    const c = AU.ctx = new AC(); AU.master = c.createGain(); AU.master.gain.value = Number($('vol').value); AU.master.connect(c.destination);
+  const AU = { ctx: null, tones: [], noises: [], solo: null, master: null, analyser: null, meter: null, error: '', lastMeter: -1, testUntil: 0, hist: [], lastT: -1, who: 0, level: new Float32Array(12) };
+  const BAND_HZ = [110, 196, 349, 622, 1109, 1976];
+  // Playback only. Boost weak bands before compression; never write to the world's fields.
+  function heard(v, boost) { return Number.isFinite(v) && v > 0 ? 0.16 * -Math.expm1(-8 * v * boost) : 0; }
+  function audioMix(L, envBoost, voiceBoost, active, solo, soloVoice) {
+  const g = new Array(13).fill(0);
+  if (!active) return g;
+  if (solo) { g[12] = 0.3 * Math.min(1, Math.max(0, Number(soloVoice) || 0)); return g; }
+  for (let b = 0; b < 6; b++) { g[b] = heard(L[b], voiceBoost); g[6+b] = 0.7 * heard(L[6+b], envBoost); }
+  const sum = g.reduce((a,b) => a+b,0);
+  return sum > 0.65 ? g.map(v=>v*0.65/sum) : g;
+}
+  async function audioStart() {
+    AU.error = '';
+    try {
+      if (!AU.ctx) {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) throw new Error('AudioContext 非対応');
+    const c = AU.ctx = new AC(); AU.master = c.createGain(); AU.master.gain.value = Number($('vol').value);
+    const limit = c.createDynamicsCompressor(); limit.threshold.value = -8; limit.knee.value = 0; limit.ratio.value = 20; limit.attack.value = 0.003; limit.release.value = 0.15;
+    AU.analyser = c.createAnalyser(); AU.analyser.fftSize = 1024; AU.meter = new Float32Array(AU.analyser.fftSize);
+    AU.master.connect(limit); limit.connect(AU.analyser); AU.analyser.connect(c.destination);
     const buf = c.createBuffer(1, c.sampleRate, c.sampleRate), d = buf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     for (let b = 0; b < 6; b++) { // a clear tone for the voices in each band; noise through a narrow filter for everything else that sounds there
       const o = c.createOscillator(), g = c.createGain(); o.type = 'triangle'; o.frequency.value = BAND_HZ[b]; g.gain.value = 0; o.connect(g); g.connect(AU.master); o.start(); AU.tones.push(g);
       const n = c.createBufferSource(), f = c.createBiquadFilter(), g2 = c.createGain(); n.buffer = buf; n.loop = true; f.type = 'bandpass'; f.frequency.value = BAND_HZ[b]; f.Q.value = 5; g2.gain.value = 0; n.connect(f); f.connect(g2); g2.connect(AU.master); n.start(); AU.noises.push(g2); }
-    const so = c.createOscillator(), sg = c.createGain(); so.type = 'sine'; sg.gain.value = 0; so.connect(sg); sg.connect(AU.master); so.start(); AU.solo = { o: so, g: sg }; return true;
+    const so = c.createOscillator(), sg = c.createGain(); so.type = 'sine'; sg.gain.value = 0; so.connect(sg); sg.connect(AU.master); so.start(); AU.solo = { o: so, g: sg };
+      }
+      await AU.ctx.resume();
+      if (AU.ctx.state !== 'running') throw new Error('音声を開始できません: ' + AU.ctx.state);
+      return true;
+    } catch (e) {
+      AU.error = String(e && e.message || e); if (AU.ctx && AU.ctx.state === 'closed' || AU.ctx && !AU.solo) { AU.ctx.close().catch(() => {}); AU.ctx = AU.master = AU.analyser = AU.meter = AU.solo = null; AU.tones = []; AU.noises = []; }
+      $('audioStatus').textContent = '再生エラー: ' + AU.error; return false;
+    }
+  }
+  async function audioTest() {
+    if (!await audioStart()) return;
+    const c = AU.ctx, t = c.currentTime; if (t < AU.testUntil) return;
+    const o = c.createOscillator(), g = c.createGain(); o.type = 'sine'; o.frequency.value = 440;
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.12, t + 0.03); g.gain.setValueAtTime(0.12, t + 0.45); g.gain.linearRampToValueAtTime(0, t + 0.55);
+    o.connect(g); g.connect(AU.master); o.start(t); o.stop(t + 0.56); o.onended = () => { o.disconnect(); g.disconnect(); }; AU.testUntil = t + 0.56;
   }
   function audioFrame() {
     const on = w && w.sound && w.snd, at = $('listenAt').value, body = sel && !sel.dead ? sel : null, x = at !== 'view' && body ? body.cx : view.cx, y = at !== 'view' && body ? body.cy : view.cy, L = AU.level;
     for (let b = 0; b < 6; b++) { const v = on ? w.nutAt(x, y, w.sndV[b]) : 0, a = on ? Math.max(0, w.nutAt(x, y, w.snd[b]) - v) : 0; L[b] = v; L[6 + b] = a; }
-    if (AU.ctx) { const now = AU.ctx.currentTime, play = on && $('listen').checked && !paused, solo = at === 'voice';
-      for (let b = 0; b < 6; b++) { AU.tones[b].gain.setTargetAtTime(play && !solo ? heard(L[b]) : 0, now, 0.04); AU.noises[b].gain.setTargetAtTime(play && !solo ? 0.7 * heard(L[6 + b]) : 0, now, 0.04); }
-      const v = play && solo && body ? body.voL || 0 : 0; if (v > 0) AU.solo.o.frequency.setTargetAtTime(110 * Math.pow(2, 4.17 * (body.voP || 0)), now, 0.02); AU.solo.g.gain.setTargetAtTime(0.3 * v, now, 0.03); }
+    if (AU.ctx && AU.solo) { const now = AU.ctx.currentTime, play = on && $('listen').checked && !paused, solo = at === 'voice';
+      const gains = audioMix(L, Number($('envBoost').value), Number($('voiceBoost').value), play, solo, body ? body.voL : 0);
+      for (let b = 0; b < 6; b++) { AU.tones[b].gain.setTargetAtTime(gains[b], now, 0.04); AU.noises[b].gain.setTargetAtTime(gains[6+b], now, 0.04); }
+      if (gains[12] > 0) AU.solo.o.frequency.setTargetAtTime(110 * Math.pow(2, 4.17 * (body.voP || 0)), now, 0.02); AU.solo.g.gain.setTargetAtTime(gains[12], now, 0.03);
+      const ms = performance.now(); if (ms - AU.lastMeter >= 150) { AU.lastMeter = ms; AU.analyser.getFloatTimeDomainData(AU.meter); let sq = 0; for (const x of AU.meter) sq += x*x; const rms = Math.sqrt(sq/AU.meter.length), db = rms > 0 ? Math.max(-120, 20*Math.log10(rms)) : -120;
+        $('audioStatus').textContent = AU.error ? '再生エラー: ' + AU.error : '再生: ' + AU.ctx.state + ' / ' + (now < AU.testUntil ? 'テスト音' : !on ? '世界の音OFF' : paused ? '一時停止' : !$('listen').checked ? '聴くOFF' : solo && !body ? '個体未選択' : '観測中') + ' / 出力 ' + db.toFixed(1) + ' dBFS' + (Number($('vol').value) === 0 ? '（音量0）' : '');
+        $('audioMeter').value = Math.max(0, 60 + db);
+      }
+    }
     // the observed body, once a second of its world's time: is it sounding, at what pitch, what do its ears report, how hungry is it, how fast is it going
     if (body && w.sound) { if (AU.who !== body.id) { AU.who = body.id; AU.hist = []; AU.lastT = -1; } const t = Math.floor(w.t); if (t !== AU.lastT) { AU.lastT = t; let ear = 0; for (const q of body.b.segs) if (q.e > ear) ear = q.e; AU.hist.push({ v: body.voL || 0, p: body.voP || 0, e: ear, h: 1 - body.E / body.prof.Emax, s: body._v || 0 }); if (AU.hist.length > 140) AU.hist.shift(); } }
   }
@@ -372,7 +408,7 @@
   // Choosing another map moves the living population there (genomes, genealogy and records with it). 「最初から」 starts anew.
   $('map').onchange = () => { const n = w.bodies.length, map = $('map').value; if (!n) return fresh(); start(A.engine.World.transplant(w, map)); $('saveNote').textContent = 'いまの ' + n + ' 個体を、選んだ世界へ移した（遺伝子・系譜・記録ごと）。同じ相対位置に静止して降ろしたので、合わない場所に落ちた個体は死ぬ。原始個体からやり直すなら「最初から」。'; }; $('wave').onchange = () => { enableAll({ wave: $('wave').checked ? 1200 : 0 }); $('saveNote').textContent = 'いまの世界のまま、豊かさの波を' + ($('wave').checked ? '入れた。' : '止めた。') + 'ここから先は、変えなかった場合とは別の歴史になる。'; }; $('shore').onchange = () => { enableAll({ shore: $('shore').checked ? 24 : 0 }); $('saveNote').textContent = 'いまの世界のまま、海域の境界を' + ($('shore').checked ? 'なだらかにした。' : '段差に戻した。') + 'ここから先は、変えなかった場合とは別の歴史になる。'; };
   for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'metamut', 'mutsplit', 'nibble', 'recycle', 'nerve2', 'adhere', 'mix', 'invest', 'learn', 'sound', 'soundWork', 'deaf', 'mute']) $(k).onchange = () => { if (k === 'learn' && $(k).checked && !w.nerve2) { $('nerve2').checked = true; enableAll({ nerve2: 1 }); } if (k === 'soundWork' && $(k).checked && !w.sound) { $('sound').checked = true; enableAll({ sound: 1 }); } if (k === 'nerve2' && !$(k).checked && w.learn) { $('learn').checked = false; enableAll({ learn: 0 }); } if ((k === 'adhere' || k === 'mix') && $(k).checked && !w.contact) { $('contact').checked = true; enableAll({ contact: 1 }); } if (k === 'contact' && !$(k).checked) for (const j of ['adhere', 'mix']) if (w[j]) { $(j).checked = false; enableAll({ [j]: 0 }); } enableAll({ [k]: $(k).checked ? 1 : 0 }); lastPanels = 0; $('saveNote').textContent = 'いまの世界のまま設定を変えた（記録は「進化の記録」に残る）。ここから先は、変えなかった場合とは別の歴史になる。'; }; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
-  $('listen').onchange = () => { if ($('listen').checked && !audioStart()) $('listen').checked = false; }; $('vol').oninput = () => { if (AU.master) AU.master.gain.value = Number($('vol').value); };
+  $('listen').onchange = async () => { if ($('listen').checked && !await audioStart()) $('listen').checked = false; }; $('vol').oninput = () => { if (AU.master) AU.master.gain.setTargetAtTime(Number($('vol').value), AU.ctx.currentTime, 0.02); }; $('audioTest').onclick = audioTest;
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; islandAll({ type: paused ? 'pause' : 'resume' }); };
   $('islands').onchange = () => { islandStart(Number($('islands').value)); if (ISL.ws.length) $('saveNote').textContent = '島を ' + (ISL.ws.length + 1) + ' 個にした。増えた島は、いま見ている世界の複製を乱数だけ変えて始めた。'; };
   $('founder').onchange = () => { if ($('founder').value === 'file') $('file').click(); else { loaded = null; start(); } };

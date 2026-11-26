@@ -69,8 +69,12 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
   <section class="panel" id="soundPanel" style="display:none"><b>音</b>
     <div class="controls"><label title="生物の音を実際に鳴らす。聞きやすいように変換した音で、世界の中の音や生物の判断には一切影響しない。声は音程ごとの澄んだ音、身体が否応なく出す音と水の雑音はざらついた音にしてある。"><input id="listen" type="checkbox">聴く</label>
       <label>音量 <input id="vol" type="range" min="0" max="1" step="0.05" value="0.5" style="width:90px"></label>
+      <label title="PCへの再生だけを増幅する。世界には影響しない">身体音・水音 <select id="envBoost"><option value="0">消音</option><option value="1">1倍</option><option value="10">10倍</option><option value="30">30倍</option><option value="100" selected>100倍</option><option value="200">200倍</option></select></label>
+      <label title="PCへの再生だけを増幅する（個体の声だけを聴く場合は元の音量）">声 <select id="voiceBoost"><option value="0">消音</option><option value="1">1倍</option><option value="4" selected>4倍</option><option value="10">10倍</option></select></label>
+      <button type="button" id="audioTest">テスト音</button>
       <label>聴く場所 <select id="listenAt"><option value="view">画面の中心</option><option value="body">観察個体のいる場所</option><option value="voice">観察個体の声だけ</option></select></label>
       <label title="声が鳴っている場所を色で重ねて描く。色は音程（赤＝低い … 紫＝高い）、濃さは大きさ。鳴いている個体には輪を描く。"><input id="showSound" type="checkbox" checked>音を描く</label></div>
+    <div class="note"><span id="audioStatus">再生未開始（「聴く」またはテスト音）</span> <meter id="audioMeter" min="0" max="60" value="0" style="width:120px"></meter></div>
     <div id="soundStats" class="note"></div><canvas id="spectrum" width="420" height="70"></canvas>
     <div class="note" style="font-size:11px">上：聴いている場所の音を 6 つの高さに分けたもの（左が低い音。明るい部分が声、暗い部分が身体の音と水の雑音）。</div></section>
   <section class="panel"><b>観察個体</b><canvas id="zoom" width="420" height="300"></canvas><div id="info" class="note">クリックで選択</div><canvas id="voiceChart" width="420" height="84" style="display:none"></canvas>
@@ -94,6 +98,6 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 <script src="./alife2-engine.js?v=44"></script>
 <script src="./alife2-render.js?v=44"></script>
 <script src="./alife2-gpu.js?v=44"></script>
-<script src="./alife2-world.js?v=44"></script>
+<script src="./alife2-world.js?v=44-audio1"></script>
 </body>
 </html>
