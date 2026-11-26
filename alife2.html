@@ -30,7 +30,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
   <canvas id="world" width="1280" height="800"></canvas>
   <div class="controls">
     <label>乱数種 <input id="seed" type="number" value="1" min="1" style="width:80px"></label>
-    <label>世界 <select id="map"><option value="">標準（開水域＋底面帯）</option><option value="coast">沿岸：外洋・海底・浅瀬・大粒の海（実験中）</option></select></label>
+    <label>世界 <select id="map"><option value="coast" selected>沿岸：外洋・海底・浅瀬・大粒の海</option><option value="">小さな水槽（開水域＋底面帯）</option></select></label>
     <label title="身体が水に漏らす 2 種類の物質を、体節ごとに感じられる世界。いまの世界のまま切り替えられる。"><input id="scent" type="checkbox">他個体の匂い（実験中）</label>
     <label title="眼のある体節が、向きと色の好みを持つ受容器になる世界。餌も他個体も、色のある物として同じように見える。いまの世界のまま切り替えられる。"><input id="vision" type="checkbox">視覚（実験中）</label>
     <label title="世界が全身の脳に「餌が前／左にある」と教える古い近道を切る。餌の方向は、眼や味覚で自分で得るしかなくなる。いまの世界のまま切り替えられる。"><input id="blind" type="checkbox">餌の方向の近道を切る</label>
@@ -40,7 +40,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label>速度 <select id="speed"><option>1</option><option selected>4</option><option>16</option><option>64</option></select>×</label>
     <button id="fit">全体表示</button>
   </div>
-  <small>ホイールで拡大、ドラッグで移動、クリックで個体を選択。上の水色域が開水域（流れあり・粒が偏在して漂う）、下の帯が底面（流れなし・粒が固定・腹を引きずる）。背景の明るさが溶存栄養。</small>
+  <small>ホイールで拡大、ドラッグで移動、クリックで個体を選択。沿岸の世界は左右につながった一続きの場所で、外洋・流れのある海底・浅瀬・大粒の海が並ぶ。境界は無く、身体も餌も自由に行き来する。小さな水槽は、開水域（流れあり・粒が漂う）の下に底面（流れなし・粒が固定・腹を引きずる）がある。背景の明るさが溶存栄養。</small>
 </div>
 <div>
   <section class="panel"><b>世界</b><div id="stats" class="note"></div><canvas id="chart" width="420" height="150"></canvas><div class="note" style="font-size:11px"><span style="color:#8fd0ff">個体数</span>　<span style="color:#ffd27a">平均体節数</span>　<span style="color:#ff9a9a">口からの収入%</span>　<span style="color:#9af0b0">自力移動の速度</span></div></section>
@@ -56,15 +56,15 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=24"></script>
-<script src="./alife2-genome.js?v=24"></script>
-<script src="./alife2-development.js?v=24"></script>
-<script src="./alife2-neural.js?v=24"></script>
-<script src="./alife2-physics.js?v=24"></script>
-<script src="./alife2-organs.js?v=24"></script>
-<script src="./alife2-engine.js?v=24"></script>
-<script src="./alife2-render.js?v=24"></script>
-<script src="./alife2-gpu.js?v=24"></script>
-<script src="./alife2-world.js?v=24"></script>
+<script src="./alife2-version.js?v=25"></script>
+<script src="./alife2-genome.js?v=25"></script>
+<script src="./alife2-development.js?v=25"></script>
+<script src="./alife2-neural.js?v=25"></script>
+<script src="./alife2-physics.js?v=25"></script>
+<script src="./alife2-organs.js?v=25"></script>
+<script src="./alife2-engine.js?v=25"></script>
+<script src="./alife2-render.js?v=25"></script>
+<script src="./alife2-gpu.js?v=25"></script>
+<script src="./alife2-world.js?v=25"></script>
 </body>
 </html>

@@ -264,7 +264,7 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden && $('auto').checked) autosave(); }); // also when the tab is left
 
   if (q.get('seed')) $('seed').value = q.get('seed');
-  if (q.get('map')) $('map').value = q.get('map');
+  if (q.has('map')) $('map').value = q.get('map') === 'tank' ? '' : q.get('map'); // ?map=tank opens the small tank
   (async () => {
     if (!loaded && q.get('load')) loaded = await (await fetch(q.get('load'))).json().catch(() => null);
     let resumed = false;
