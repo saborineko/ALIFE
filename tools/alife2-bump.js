@@ -3,12 +3,14 @@
 // Usage: node tools/alife2-bump.js "what changed"
 const fs = require('fs'), path = require('path'), root = path.join(__dirname, '..');
 const vf = path.join(root, 'alife2-version.js'), cur = fs.existsSync(vf) ? Number((fs.readFileSync(vf, 'utf8').match(/build: (\d+)/) || [0, 0])[1]) : 0, n = cur + 1;
-const when = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC', note = process.argv[2] || '';
+const at = new Date().toISOString(), when = at.slice(0, 16).replace('T', ' ') + ' UTC', note = process.argv[2] || '';
 fs.writeFileSync(vf, `// ALIFE 2.0 build number. Written by tools/alife2-bump.js; do not edit by hand.
 (function (G) {
   const A = G.ALIFE2 = G.ALIFE2 || {};
-  A.version = { build: ${n}, label: 'v2.0.${n}', when: '${when}', note: ${JSON.stringify(note)} };
-  if (typeof document !== 'undefined') addEventListener('DOMContentLoaded', () => { for (const e of document.querySelectorAll('[data-alife2-version]')) e.textContent = A.version.label + '（' + A.version.when + (A.version.note ? '・' + A.version.note : '') + '）'; });
+  A.version = { build: ${n}, label: 'v2.0.${n}', at: '${at}', when: '${when}', note: ${JSON.stringify(note)} };
+  // shown in the reader's own time zone
+  const local = () => { try { return new Date(A.version.at).toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }); } catch (e) { return A.version.when; } };
+  if (typeof document !== 'undefined') addEventListener('DOMContentLoaded', () => { for (const e of document.querySelectorAll('[data-alife2-version]')) e.textContent = A.version.label + '（' + local() + (A.version.note ? '・' + A.version.note : '') + '）'; });
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
 `);
