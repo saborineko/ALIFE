@@ -31,6 +31,7 @@
       if (loaded) for (const k of loaded.top) for (let i = 0; i < Math.max(1, Math.round(k.count / 4)); i++) w.spawn(A.genome.sanitize(A.genome.copy(k.genome)), w.rand() * w.W, w.rand() * w.H, 1, null); // older result files lack newer genes
       else w.seedWith(A.genome.primordial(w.seed));
     }
+    if (world) $('map').value = w.map || ''; // a loaded world shows its own map
     $('blind').checked = !!w.blind; $('vision').checked = !!w.vision; $('scent').checked = !!w.scent; // a loaded world shows what it was made with
     fit(); sel = null; shown = null; lastPanels = 0;
   }
@@ -250,7 +251,9 @@
   const download = (name, text, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); };
   $('save').onclick = async () => { const text = JSON.stringify(w.save()), blob = await gz(text), a = document.createElement('a'); a.href = URL.createObjectURL(blob || new Blob([text], { type: 'application/json' })); a.download = 'alife2-world-t' + Math.round(w.t) + (blob ? '.json.gz' : '.json'); a.click(); $('saveNote').textContent = '保存した（' + mb(blob ? blob.size : text.length) + (blob ? '、圧縮済み' : '') + '）。'; };
   $('load').onclick = () => $('loadFile').click();
-  $('loadFile').onchange = async e => { try { const file = e.target.files[0], text = /\.gz$/.test(file.name) ? await gunzip(file) : await file.text(); start(A.engine.World.restore(JSON.parse(text))); $('saveNote').textContent = '読み込んだ（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '読み込めない：' + err.message; } };
+  $('loadFile').onchange = async e => { try { const file = e.target.files[0], text = /\.gz$/.test(file.name) ? await gunzip(file) : await file.text(); const want = {}, names = { scent: '他個体の匂い', vision: '視覚', blind: '近道の切断' }; for (const k in names) if ($(k).checked) want[k] = 1; // boxes ticked before loading are applied to the loaded world
+      start(A.engine.World.restore(JSON.parse(text))); const added = Object.keys(want).filter(k => !w[k]); w.enable(want); for (const k in names) $(k).checked = !!w[k];
+      $('saveNote').textContent = '読み込んだ（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。' + (added.length ? 'チェックしてあった設定をこの世界に足した：' + added.map(k => names[k]).join('、') + '。ここから先は元の世界とは別の歴史になる。' : '設定はこの世界が保存されたときのもの。視覚や匂いは、このあとチェックを入れれば、いまの世界のまま足せる。'); } catch (err) { $('saveNote').textContent = '読み込めない：' + err.message; } };
   $('resume').onclick = async () => { try { let d = await dbGet('autosave'); if (d == null) d = localStorage.getItem(KEY); if (d == null) { $('saveNote').textContent = '自動保存は無い。'; return; } const text = typeof d === 'string' ? d : await gunzip(d); start(A.engine.World.restore(JSON.parse(text))); $('saveNote').textContent = '自動保存から再開（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '再開できない：' + (err && err.message || err); } };
   $('csv').onclick = () => { const rows = ['id,parent,line,generation,born,died,cause,segments,mouths,eye,working_joint,adult_volume,children,mutations']; for (const n of w.tree.values()) rows.push([n.id, n.parent, n.line, n.gen, Math.round(n.born), n.died == null ? '' : Math.round(n.died), n.cause || '', ...n.kind.split('/'), n.V.toFixed(3), n.kids, n.g.mutations].join(',')); download('alife2-lineage-t' + Math.round(w.t) + '.csv', rows.join('\n'), 'text/csv'); };
   $('rank').onchange = $('lostFilter').onchange = () => { lastPanels = 0; };
