@@ -83,7 +83,7 @@
               case 16: v = snd && s.e != null ? smell(s, 'nE', s.e, p.adapt, 0.1) : 0; break; // (sound) what this segment's ear reports
             }
             if (lw) { pre[e] = v; y += (N.w[e] + lw[N.off + e]) * v; } else y += N.w[e] * v;
-            if (snd && N.src[e] === 16) { const ev = N.w[e] * (v + 1 - p.adapt); hd += ev < 0 ? -ev : ev; } }
+            if (snd && N.src[e] === 16 && s.e != null) { const ev = N.w[e] * (v + 1 - p.adapt); hd += ev < 0 ? -ev : ev; } } // (record; only where the segment has an ear: a neuron that reads an ear the segment lacks reads nothing)
           const v2 = na[q] + N.k * (Math.tanh(y) - na[q]); nb[q] = v2; use += v2 < 0 ? -v2 : v2;
           if (lw && N.plastic) { // used together, a connection grows (or shrinks, by its gene); where one input gates the change, only while that input is active. What was acquired fades slowly.
             const gate = N.m >= 0 && N.m < N.src.length ? pre[N.m] : 1;

@@ -64,6 +64,10 @@
     recycle: 0,                           // 1 = what bodies lose as matter goes back into the water where they are, as dissolved food: the part of a meal the gut does not
                                           // take up, reserve above what the body can hold, what a dead body or a lost egg does not leave as grains, and torn tissue that
                                           // is not food. Not returned: heat (upkeep, work, the fixed cost of an egg) and grains nobody ate. 0 = all of these simply vanish
+    mutsplit: 0,                          // 1 = how often a lineage's births mutate (gene `mut`) and how wide the steps are (gene `mutW`) are two inherited genes, each 0.1..3 times
+                                          //     the world's value. Both drift at every birth, by a step and at a rate that do not depend on them. How often the plan of the body
+                                          //     changes follows from the first alone. (Under `metamut` one gene scaled the chance that a birth mutates, the chance of each change
+                                          //     of plan within it, and the width of steps — so changes of plan went with its square — and it could only drift when a birth mutated.)
     metamut: 0,                           // 1 = how often and how strongly a lineage mutates is itself inherited and mutates (gene `mut`, 0.1..3 times the world's rate)
     nibble: 0,                            // 1 = a mouth that reaches a grain it cannot swallow whole (too big for it, or for the room left in its gut) tears pieces from it,
                                           // at the rate at which it tears tissue. 0 = the earlier rule: a grain is swallowed whole or not at all
@@ -230,6 +234,7 @@
       if (o.mix != null && !!o.mix !== !!this.mix) { this.mix = o.mix ? 1 : 0; this.log('世界の設定を変更：裸の表面どうしが触れると遺伝物質が渡り、次の卵が 2 つの遺伝子から作られる規則を' + (o.mix ? '有効にした' : '無効にした')); }
       if (o.nerve2 != null && !!o.nerve2 !== !!this.nerve2) { this.nerve2 = o.nerve2 ? 1 : 0; this.log('世界の設定を変更：体節あたり複数の神経（相対位置の結合）を' + (o.nerve2 ? '有効にした' : '無効にした')); }
       if (o.recycle != null && !!o.recycle !== !!this.recycle) { this.recycle = o.recycle ? 1 : 0; this.log('世界の設定を変更：身体が失った物質を、その場の溶存栄養に戻す規則を' + (o.recycle ? '有効にした' : '無効にした')); }
+      if (o.mutsplit != null && !!o.mutsplit !== !!this.mutsplit) { this.mutsplit = o.mutsplit ? 1 : 0; this.log('世界の設定を変更：変異の頻度と幅を別々の遺伝子として受け継ぐ規則を' + (o.mutsplit ? '有効にした（体のつくりが変わる確率は頻度だけに比例する）' : '無効にした')); }
       if (o.metamut != null && !!o.metamut !== !!this.metamut) { this.metamut = o.metamut ? 1 : 0; this.log('世界の設定を変更：変異の強さが遺伝し、それ自体も変異する規則を' + (o.metamut ? '有効にした' : '無効にした')); }
       if (o.nibble != null && !!o.nibble !== !!this.nibble) { this.nibble = o.nibble ? 1 : 0; this.log('世界の設定を変更：飲み込めない粒を口が削って食べられる規則を' + (o.nibble ? '有効にした' : '無効にした')); }
       if (o.budget != null && !!o.budget !== !!this.budget) { this.budget = o.budget ? 1 : 0; this.log('世界の設定を変更：出生の収支を合わせる規則（子は卵の予算で作れる段階で生まれる）を' + (o.budget ? '有効にした' : '無効にした')); }
@@ -325,6 +330,23 @@
         sequenceOrder: K.seqN >= 5 ? (K.seqRep - K.seqExp) / K.seqN : 0, sequenceN: K.seqN, dialectBits: dialect, dialectRegions: regs.length, shapeGenerations: span,
         lisEffect: eff, lisOf: of, lisRaw: raw, lisControl: ok ? (both ? 'both' : 'self') : '', lisN: L[1].n, lisDeafN: L[0].n,
         lisTurn: mean(L[1], 'h'), lisTurnN: L[1].hn, lisMoved: mean(L[1], 'm'), lisEat: mean(L[1], 'eat'), lisMovedBefore: mean(L[1], 'pre'), lisMovedAfter: mean(L[1], 'post'), deafTurn: mean(L[0], 'h'), deafMoved: mean(L[0], 'm'), deafEat: mean(L[0], 'eat') };
+    }
+    // The notebook read out for a person, sorted by how much each line may claim (after LIFE's labels: observed / correlated / inferred / unknown):
+    //   観測 what was counted · 相関 what goes together, cause not settled · 推定 what a comparison with ears or voices cut supports (the notebook alone never does) · 不明 too few cases yet
+    soundReading(c) {
+      const p = v => (v * 100).toFixed(v < 0.1 ? 1 : 0) + '%', R = { seen: [], goes: [], inferred: [], unknown: [] }, names = { hungry: '空腹', fed: '消化管に餌がある', touched: '押されている', hurt: '傷がある', seeing: '何か見えている', hearing: '何か聞こえている', young: '幼体' };
+      R.seen.push('声を持つ個体 ' + p(c.voiced) + '・耳を持つ個体 ' + p(c.eared) + '・最近の鳴き声 ' + Math.round(c.callsEnded) + ' 回（声を持つ個体が鳴いていた時間 ' + p(c.callTime) + '）');
+      if (c.callShapes >= 1) R.seen.push('繰り返される鳴き声の形 ' + c.callShapes + ' 種類（25 回以上。最も多い形が全体の ' + p(c.topShape) + '）'); else R.unknown.push('鳴き声の形（どの形も 25 回に届いていない）');
+      if (c.callsEnded >= 25 && c.signalOf) R.goes.push('鳴くことと鳴く側の状態：' + c.signalBits.toFixed(3) + ' ビット（' + (names[c.signalOf] || c.signalOf) + '。0 なら状態と無関係）'); else R.unknown.push('鳴くことと状態の結びつき（鳴き声 ' + Math.round(c.callsEnded) + ' 回、25 回から）');
+      if (c.answerN >= 20) R.goes.push('他個体の鳴き始めの直後に鳴き始める：偶然の ' + c.answer.toFixed(2) + ' 倍（1 前後なら応答ではない）。直後だった割合 ' + p(c.replyRate) + '、鳴く個体がふだん「聞いたばかり」である割合 ' + p(c.heardAnyway)); else R.unknown.push('鳴き声への鳴き返し（直後の鳴き始め ' + Math.round(c.answerN) + ' 回、20 回から）');
+      if (c.lisControl) R.goes.push('鳴き声が始まった前後の、聞こえる個体のふるまい' + (c.lisOf ? '：「' + c.lisOf + '」が ' + c.lisEffect.toFixed(2) + ' 標準偏差だけ変わる' : '：変化なし（下限未満）') + '。動く速さ ' + c.lisMovedBefore.toFixed(2) + ' → ' + c.lisMovedAfter.toFixed(2) + '（' + Math.round(c.lisN) + ' 例' + (c.lisControl === 'both' ? '。聞こえない個体 ' + Math.round(c.lisDeafN) + ' 例に起きた変化は引いてある' : '。聞こえない個体との比較はまだない') + '）');
+      else R.unknown.push('聞き手のふるまい（静かな所で鳴き声に出会った聞こえる個体 ' + Math.round(c.lisN) + ' 例、25 例から）');
+      if (c.resembleN >= 20) R.goes.push('直後の鳴き声と直前の鳴き声の音程の近さ：無関係な鳴き声との差 ' + c.resemble.toFixed(3) + '（正なら似ている。血縁は元から似る）・音程を寄せた割合 ' + (c.pitchN ? p(c.pitchToward) : '—')); else R.unknown.push('鳴き声が似てくるか（' + Math.round(c.resembleN) + ' 例、20 例から）');
+      if (c.sequenceN >= 50) R.goes.push('同じ個体の中での形の順序：持ち歌から無作為に選んだ場合との差 ' + c.sequenceOrder.toFixed(2) + '（正：同じ形を続ける、負：入れ替える、0：順序なし）'); else R.unknown.push('鳴き声の順序（2 種類以上の形を使う個体の鳴き声 ' + Math.round(c.sequenceN) + ' 回、50 回から）');
+      if (c.dialectRegions >= 2) R.goes.push('海域による鳴き声の形の違い：' + c.dialectBits.toFixed(2) + ' ビット（遺伝の違いだけでも起きる）'); else R.unknown.push('海域による違い（鳴き声が 40 回以上ある海域が ' + c.dialectRegions + ' つ、2 つから）');
+      if (c.shapeGenerations >= 1) R.goes.push('同じ形の鳴き声が使われた世代の幅：' + c.shapeGenerations + ' 世代（遺伝だけでも起きる）');
+      R.inferred.push(this.deaf || this.mute ? '対照実験中（' + (this.deaf ? '耳' : '') + (this.deaf && this.mute ? 'と' : '') + (this.mute ? '声' : '') + 'が切られている）：切らない分岐との差が、聞こえること・鳴くことの効果' : 'この記録だけからは何も言えない。聞こえること・鳴くことが生存や行動を変えているかは、同じ世界から耳や声を切って分岐させた比較でしか分からない');
+      return R;
     }
     // what a body has to hear and to sound with, worked out when the body is built: for each segment with hearing tissue the bands its ear takes in
     // (a bell around the pitch it is tuned to) and its sensitivity; for each segment with sound-making tissue the volume of that tissue.
@@ -809,9 +831,10 @@
         }
       }
       for (const o of born) {
-        const mm = this.metamut ? (o.g.mut == null ? 1 : o.g.mut) : 1;
+        const split = this.mutsplit, mm = this.metamut || split ? (o.g.mut == null ? 1 : o.g.mut) : 1, mw = split ? (o.g.mutW == null ? mm : o.g.mutW) : 1; // (a lineage that comes from the one-gene rule starts with the width it had)
         let src = o.g, two = 0; if (this.mix && o.got) { src = A.genome.recombine(o.g, o.got.g, this.rand, this.sound); two = o.got.id; o.got = null; } // an egg made from two genomes; the material taken up is used
-        const g = this.rand() < this.mutation * mm ? A.genome.mutate(src, this.rand, this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut ? 'm' : '') + (this.contact ? 'c' : '') + (this.nerve2 ? 'n' : '') + (this.invest ? 'i' : '') + (this.learn ? 'l' : '') + (this.sound ? 's' : '')) : two ? src : A.genome.copy(o.g);
+        const g = this.rand() < this.mutation * mm ? A.genome.mutate(src, this.rand, split ? mw : this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut && !split ? 'm' : '') + (this.contact ? 'c' : '') + (this.nerve2 ? 'n' : '') + (this.invest ? 'i' : '') + (this.learn ? 'l' : '') + (this.sound ? 's' : ''), split ? 1 : undefined) : two ? src : A.genome.copy(o.g);
+        if (split) { if (this.rand() < this.mutation) g.mut = clamp(mm * Math.exp(this.rand.gauss() * 0.15), 0.1, 3); if (this.rand() < this.mutation) g.mutW = clamp(mw * Math.exp(this.rand.gauss() * 0.15), 0.1, 3); } // the two genes drift whether or not this birth mutates
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
         const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1, bx = o.cx + Math.cos(a) * d, by = clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), B = o.eggCost - C.eggFixed; // B: what the egg holds
@@ -949,7 +972,7 @@
         bottom: mean(o => this.isGround(o.cx, o.cy) ? 1 : 0),
         seepShare: mean(o => { const inc = o.absorbed + o.eaten * o.prof.eta + (o.seepIn || 0); return inc > 0 ? (o.seepIn || 0) / inc : 0; }), holding: mean(o => (o.held != null && this.tick - o.held < 30 ? 1 : 0)), grainEaters: (() => { let n = 0, k = 0; for (const o of this.bodies) if (o.age > 60) { n++; const m = o.eaten * o.prof.eta; if (m >= 0.3 * (m + o.absorbed) && m > 0) k++; } return n ? k / n : 0; })(), /* of the bodies older than a minute: those that took 30% or more of their lifetime income through the mouth */ twoParents: mean(o => (o.p2 ? 1 : 0)), carrying: mean(o => (o.got ? 1 : 0)),
         ...(this.sound ? this.soundCensus() : null),
-        mutGene: mean(o => (o.g.mut == null ? 1 : o.g.mut)), plastic: mean(o => (o.g.parts.some(p => p.nn && p.nn.some(q => q.in.some(e => e[2]))) ? 1 : 0)), senseNeurons: mean(o => (o.b.segs.some(q => q.p.nn && q.p.nn.some(n => n.out.length && n.in.some(e => 'cABvtwhjg'.includes(e[0])))) ? 1 : 0)), /* a neuron that reads a sense of its segment and moves something: the least a neuron must do to be more than a constant */ yolkGene: mean(o => this.yolkOf(o.g)), neurons: mean(o => o.b.segs.reduce((a, q) => a + (q.p.nn ? q.p.nn.length : 0), 0)), neuronBodies: mean(o => o.b.segs.some(q => q.p.nn) ? 1 : 0),
+        mutGene: mean(o => (o.g.mut == null ? 1 : o.g.mut)), mutWidth: mean(o => (o.g.mutW == null ? (o.g.mut == null ? 1 : o.g.mut) : o.g.mutW)), mutLow: mean(o => ((o.g.mut == null ? 1 : o.g.mut) < 0.3 ? 1 : 0)), plastic: mean(o => (o.g.parts.some(p => p.nn && p.nn.some(q => q.in.some(e => e[2]))) ? 1 : 0)), senseNeurons: mean(o => (o.b.segs.some(q => q.p.nn && q.p.nn.some(n => n.out.length && n.in.some(e => 'cABvtwhjg'.includes(e[0])))) ? 1 : 0)), /* a neuron that reads a sense of its segment and moves something: the least a neuron must do to be more than a constant */ yolkGene: mean(o => this.yolkOf(o.g)), neurons: mean(o => o.b.segs.reduce((a, q) => a + (q.p.nn ? q.p.nn.length : 0), 0)), neuronBodies: mean(o => o.b.segs.some(q => q.p.nn) ? 1 : 0),
         birthV: (l => l.length ? l.reduce((a, o) => a + o.V0, 0) / l.length : 0)(this.bodies.filter(o => o.V0 != null && o.gen > 0)), birthStage: (l => l.length ? l.reduce((a, o) => a + o.stage0, 0) / l.length : 0)(this.bodies.filter(o => o.stage0 != null && o.gen > 0)), birthGene: mean(o => o.g.birth), eggCost: mean(o => o.eggCost), adultV: mean(o => o.full.V),
         partsTotal: mean(o => o.gu.parts), partsReach: mean(o => o.gu.reach), partsUsed: mean(o => o.gu.expr), multiPart: mean(o => o.gu.expr > 1 ? 1 : 0), zoned: mean(o => o.gu.zones > 0 ? 1 : 0), differed: mean(o => o.gu.zones > 0 && o.gu.div > 0.05 ? 1 : 0),
         fleshShare: mean(o => o.eaten > 0 ? (o.flesh || 0) / o.eaten : 0), fleshEaters: mean(o => (o.flesh || 0) > 0.2 * o.eaten && o.eaten > 0 ? 1 : 0), wounded: mean(o => o.hp ? 1 : 0), armor: mean(o => o.g.parts.reduce((a, p) => a + p.armor, 0) / o.g.parts.length),

@@ -640,6 +640,26 @@ test('sound: it spreads, fades and adds up; low pitch carries further; ears hear
   assert.ok(gotE && gotV && codes, 'ears, voices and their neuron connections arise: ' + [gotE, gotV, codes]); assert.ok(off.parts.every(p => p.ear === 0 && p.voice === 0 && p.hE === 0 && p.mVoice === 0 && !(p.nn || []).some(n => n.in.some(e => e[0] === 'e') || n.out.some(e => 'VQ'.includes(e[0])))), 'and never where sound does not exist');
   const m1 = G.ensureIds(G.primordial(1)), m2 = G.copy(m1); m2.parts[0].ear = 0.9; m2.parts[0].len = 0.9; let leaked = 0; for (let i = 0; i < 100; i++) if (G.recombine(m1, m2, r).parts[0].ear !== 0) leaked++; assert.strictEqual(leaked, 0, 'mixing in a world without sound does not touch the genes of sound');
 });
+test('mutation frequency and width as two genes (mutsplit): changes of plan follow the frequency alone; both genes drift at every birth; a lineage from the one-gene rule keeps its width; off by default', () => {
+  const G = A.genome, r = G.rng(11), base = G.mutate(G.mutate(G.primordial(1), r, 1, 'gn'), r, 1, 'gn');
+  const sig = g => JSON.stringify([g.parts.length, g.links.map(l => [l.from, l.to, l.repeat, l.sym, l.n]), g.parts.map(p => [p.next, p.span, (p.nn || []).map(q => [q.in.map(e => e[0]).join(''), q.out.map(e => e[0]).join(''), q.m])])]);
+  const rate = (strength, structural) => { let ch = 0, step = 0; const N = 6000; for (let i = 0; i < N; i++) { const g = G.mutate(base, r, strength, 'gn', structural); if (sig(g) !== sig(base)) ch++; step += Math.abs(g.hue - base.hue); } return [ch / N, step / N]; };
+  const full = rate(1), one = rate(0.1), two = rate(0.1, 1);
+  assert.ok(one[0] < 0.2 * full[0], 'one gene at 0.1: the plan changes a tenth as often within a mutation (and a birth mutates a tenth as often: a hundredth in all): ' + one[0] + ' / ' + full[0]);
+  assert.ok(Math.abs(two[0] - full[0]) < 0.15 * full[0], 'two genes, width 0.1: the plan changes as often as at full width: ' + two[0] + ' / ' + full[0]);
+  assert.ok(two[1] < 0.2 * full[1] && Math.abs(two[1] - one[1]) < 0.2 * one[1], 'and the steps are a tenth as wide: ' + [full[1], one[1], two[1]]);
+  assert.strictEqual(new A.engine.World({ seed: 3, founders: 0, cap: 0 }).mutsplit, 0);
+  // in a world: founders that carry strength 0.5 from the one-gene rule
+  const w = new A.engine.World({ seed: 5, mutsplit: 1 }), g0 = G.primordial(5); g0.mut = 0.5; w.seedWith(g0);
+  for (let i = 0; i < 6000 && w.counts.births < 400; i++) w.step();
+  const born = w.bodies.filter(o => o.gen > 0), f = born.map(o => (o.g.mut == null ? 1 : o.g.mut)), wd = born.map(o => (o.g.mutW == null ? (o.g.mut == null ? 1 : o.g.mut) : o.g.mutW)), mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+  assert.ok(born.length > 50, 'births: ' + born.length);
+  assert.ok(mean(f) > 0.35 && mean(f) < 0.7 && mean(wd) > 0.35 && mean(wd) < 0.7, 'they start from the strength they had: ' + mean(f) + ', ' + mean(wd));
+  assert.ok(born.some(o => o.g.mutW != null && Math.abs(o.g.mutW - (o.g.mut == null ? 1 : o.g.mut)) > 0.02), 'and the two genes go their own ways');
+  const still = born.filter(o => !(o.g.mutations > 0)); assert.ok(still.length === 0 || still.some(o => o.g.mut !== 0.5 || o.g.mutW != null) || still.length < 5, 'they drift also at births that do not mutate');
+  const c = w.census(); assert.ok(Number.isFinite(c.mutGene) && Number.isFinite(c.mutWidth));
+});
+
 test('the record of sound is only a notebook: wiping it changes nothing in the world; it tells bodies that respond to a call from bodies that merely differ; order is counted within a body; older saves load', () => {
   const G = A.genome, W = o => new A.engine.World(Object.assign({ seed: 5, founders: 0, cap: 0, sound: 1, nerve2: 1, blind: 1 }, o || {}));
   const one = (o, nn, fr) => { const g = G.create({ freq: fr || 1, parts: [G.part(Object.assign({ len: 0.6, r0: 0.3, r1: 0.3, nerve: 0.5, store: 0.5 }, o))], links: [] }); if (nn) g.parts[0].nn = nn; return g; };

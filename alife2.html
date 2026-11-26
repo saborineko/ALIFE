@@ -42,6 +42,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="対照実験：この世界のすべての耳が何も聞こえなくなる。声や身体の音は出続ける。音が行動に効いているかを確かめるために使う。"><input id="deaf" type="checkbox">対照：耳を切る</label>
     <label title="対照実験：この世界のすべての声が出なくなる（費用もかからない）。身体が否応なく出す音は残る。"><input id="mute" type="checkbox">対照：声を切る</label>
     <label title="変異の起きやすさと大きさが遺伝し、それ自体も変異する（0.1〜3 倍）。ALIEN や Polyworld が持つ仕組み。いまの世界のまま切り替えられる。"><input id="metamut" type="checkbox">変異の強さも進化する</label>
+    <label title="変異の頻度（出生のうち変異が入る割合）と変異の幅（数値が動く大きさ）を、別々の遺伝子として受け継ぐ（どちらも世界の値の 0.1〜3 倍）。2 つの遺伝子は、変異が入った出生かどうかに関係なく、毎回の出生で同じ確率・同じ幅でゆらぐ。体のつくり（部品の複製・規則の追加・神経の追加など）が変わる確率は頻度だけに比例する。「変異の強さも進化する」では 1 つの遺伝子が頻度と構造変異の確率と幅の全部に掛かっていて、構造変異は遺伝子の 2 乗で減り（下限 0.1 で 1/100）、遺伝子自身も変異が入った出生でしか変われなかった（低い値ほど動きにくい）。両方に印を付けた場合はこちらが使われる。進化を保つための報酬や補正は入れていない：下がるなら下がる。いまの世界のまま切り替えられる。"><input id="mutsplit" type="checkbox">変異の頻度と幅を別々に進化させる</label>
     <label title="母が卵 1 個に持たせる蓄えの量（幼体が持てる量に対する割合。この規則が無ければ 0.5）が遺伝し、変異する。多く持たせるほど卵 1 個が高くつき、産める数が減る。幼体が一度に持てない分は、幼体の成長に回る。「出生の収支を合わせる」と一緒に使う想定。いまの世界のまま切り替えられる。"><input id="invest" type="checkbox">卵に持たせる蓄えも進化する</label>
     <label title="飲み込めない大きさの粒（または消化管に入りきらない粒）に口が届いていれば、組織を削るのと同じ速さで少しずつ削って食べる。切ると、粒は丸呑みか、まったく取れないかのどちらか。"><input id="nibble" type="checkbox">粒を削って食べる</label>
     <label title="卵に入るエネルギーは親が決め、子は変異後の自分の遺伝子で、その予算で作れる段階まで育って生まれる。余りは卵黄として子が持つ。最小の芽も作れなければ死産になる。切ると、子は親の支払いに関係なく自分の遺伝子どおりの姿で生まれる以前の規則。いまの世界のまま切り替えられる。"><input id="budget" type="checkbox">出生の収支を合わせる</label>
@@ -53,7 +54,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="溶存栄養の回復と粒の供給が、長さ 120 の波になって世界を一周し続ける（1200 秒で 1 波長ぶん進む＝毎秒 0.1）。どの場所も、豊かな時期と乏しい時期を交互に迎える。時間で平均した供給はどこでも波の無い世界と同じで、乏しい水に降るはずだった粒は別の場所に降る。じっとしていれば飢える時期が来て、波について行けば豊かな水に居続けられる。いまの世界のまま切り替えられる。「全部入り」には含めていない。"><input id="wave" type="checkbox">豊かさの波（餌場が移る）</label>
     <label>始祖 <select id="founder"><option value="primordial">原始個体（1体節）から自然進化</option><option value="file">進化試験の結果を読み込む（JSON）</option></select></label>
     <input id="file" type="file" accept=".json" style="display:none">
-    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・変異の強さの進化・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・音・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。">全部入りで最初から</button><button id="pause">一時停止</button>
+    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・音・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。変異の強さの進化（2 種類）は長期観察のために含めていない：変異の起きやすさは世界の値のまま一定。入れたいときは個別に印を付ける。">全部入りで最初から</button><button id="pause">一時停止</button>
     <label>速度 <select id="speed"><option>1</option><option selected>4</option><option>16</option><option>64</option></select>×</label>
     <label title="同じ種類の世界を、別々のスレッドで同時に回す。増やした島は、いま見ている世界の複製を乱数だけ変えて始める。150 秒ごとに各島から 1 個体が隣の島へ移る（遺伝子・齢・蓄えごと。出入りはエネルギーの収支に記帳される）。裏の島は描画しないので全速で進む。島の数だけ CPU のコアを使う。島を使う世界は、同じ seed でも毎回同じ歴史にはならない。">並列の島 <select id="islands"><option>1</option><option>2</option><option>4</option><option>8</option></select></label>
     <label title="タブを裏に回したり最小化したりしても、世界を止めずに進める（表示中より遅い）。ブラウザがタブを休止させた場合は止まる。"><input id="bg" type="checkbox" checked>裏でも進める</label>
@@ -83,15 +84,15 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=41"></script>
-<script src="./alife2-genome.js?v=41"></script>
-<script src="./alife2-development.js?v=41"></script>
-<script src="./alife2-neural.js?v=41"></script>
-<script src="./alife2-physics.js?v=41"></script>
-<script src="./alife2-organs.js?v=41"></script>
-<script src="./alife2-engine.js?v=41"></script>
-<script src="./alife2-render.js?v=41"></script>
-<script src="./alife2-gpu.js?v=41"></script>
-<script src="./alife2-world.js?v=41"></script>
+<script src="./alife2-version.js?v=42"></script>
+<script src="./alife2-genome.js?v=42"></script>
+<script src="./alife2-development.js?v=42"></script>
+<script src="./alife2-neural.js?v=42"></script>
+<script src="./alife2-physics.js?v=42"></script>
+<script src="./alife2-organs.js?v=42"></script>
+<script src="./alife2-engine.js?v=42"></script>
+<script src="./alife2-render.js?v=42"></script>
+<script src="./alife2-gpu.js?v=42"></script>
+<script src="./alife2-world.js?v=42"></script>
 </body>
 </html>

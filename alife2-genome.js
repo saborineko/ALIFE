@@ -141,6 +141,7 @@
     g.freq = clamp(Number.isFinite(g.freq) ? g.freq : 1, 0.2, 4);
     g.odor = clamp(Number.isFinite(g.odor) ? g.odor : 0.5, 0, 1); // what the body leaks: this share as substance A, the rest as B. Inherited, so relatives smell alike
     if (g.mut != null) g.mut = clamp(Number.isFinite(g.mut) ? g.mut : 1, 0.1, 3); // how strongly this lineage mutates (only in worlds where that evolves)
+    if (g.mutW != null) g.mutW = clamp(Number.isFinite(g.mutW) ? g.mutW : 1, 0.1, 3); // how wide its steps are (only in worlds that keep frequency and width apart)
     if (g.yolk != null) g.yolk = clamp(Number.isFinite(g.yolk) ? g.yolk : 0.5, 0.05, 3); // how much reserve an egg is given, as a share of what the young can hold (only in worlds where that evolves)
     g.birth = clamp(Number.isFinite(g.birth) ? g.birth : 0.3, 0.2, 0.9); // how developed offspring are when released (bigger young cost more each)
     if (!Array.isArray(g.brain) || g.brain.length !== BRAIN_IN * BRAIN_OUT) g.brain = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -215,23 +216,24 @@
     for (const q of p.nn) if (!(Number.isInteger(q.m) && q.m >= 0 && q.m < q.in.length)) delete q.m; // (which of its own inputs gates the changing of its connections; none: they change with use alone)
     if (!p.nn.length) delete p.nn;
   }
-  function mutateNN(p, r, s, L, S) {
+  function mutateNN(p, r, s, L, S, t) {
+    if (t == null) t = s; // t: how often the wiring changes; s: how wide the steps are (the same number, unless the world keeps them as two genes)
     const nn = p.nn || [], EFF = S ? NN_EFF_S : NN_EFF;
     for (const q of nn) {
-      if (L) { for (const e of q.in) if (r() < 0.08) { const v = clamp((e[2] || 0) + r.gauss() * 0.15 * s, -1, 1); if (v !== 0) e[2] = v; else e.length = 2; } if (r() < 0.03 * s) { if (q.m == null && q.in.length) q.m = r.int(q.in.length); else delete q.m; } }
+      if (L) { for (const e of q.in) if (r() < 0.08) { const v = clamp((e[2] || 0) + r.gauss() * 0.15 * s, -1, 1); if (v !== 0) e[2] = v; else e.length = 2; } if (r() < 0.03 * t) { if (q.m == null && q.in.length) q.m = r.int(q.in.length); else delete q.m; } }
       if (r() < 0.12) q.b += r.gauss() * 0.3 * s; if (r() < 0.12) q.k += r.gauss() * 0.07 * s;
       for (const e of q.in) if (r() < 0.12) e[1] += r.gauss() * 0.5 * s; for (const e of q.out) if (r() < 0.12) e[1] += r.gauss() * 0.3 * s;
-      if (r() < 0.05 * s && q.in.length < NN_IN) q.in.push([nnSource(r, L, S), r.gauss()]);
-      if (r() < 0.03 * s && q.in.length > 1) { const i = r.int(q.in.length); q.in.splice(i, 1); if (q.m != null) { if (q.m === i) delete q.m; else if (q.m > i) q.m--; } }
-      if (r() < 0.03 * s && q.in.length) q.in[r.int(q.in.length)][0] = nnSource(r, L, S);
-      if (r() < 0.03 * s && q.out.length < NN_OUT) q.out.push([EFF[r.int(EFF.length)], r.gauss() * 0.5]);
-      if (r() < 0.02 * s && q.out.length) q.out.splice(r.int(q.out.length), 1);
+      if (r() < 0.05 * t && q.in.length < NN_IN) q.in.push([nnSource(r, L, S), r.gauss()]);
+      if (r() < 0.03 * t && q.in.length > 1) { const i = r.int(q.in.length); q.in.splice(i, 1); if (q.m != null) { if (q.m === i) delete q.m; else if (q.m > i) q.m--; } }
+      if (r() < 0.03 * t && q.in.length) q.in[r.int(q.in.length)][0] = nnSource(r, L, S);
+      if (r() < 0.03 * t && q.out.length < NN_OUT) q.out.push([EFF[r.int(EFF.length)], r.gauss() * 0.5]);
+      if (r() < 0.02 * t && q.out.length) q.out.splice(r.int(q.out.length), 1);
     }
-    if (r() < 0.04 * s && nn.length < NN_MAX) {
+    if (r() < 0.04 * t && nn.length < NN_MAX) {
       // a new neuron: half the time a copy of one that is there, with all its connections (it can then drift apart); otherwise a fresh one with a sense and an effect
       if (nn.length && r() < 0.5) nn.push(copy(nn[r.int(nn.length)])); else nn.push({ b: 0, k: 1, in: [[nnSource(r, L, S), r.gauss()]], out: [[EFF[r.int(EFF.length)], r.gauss() * 0.5]] });
     }
-    if (r() < 0.02 * s && nn.length) nn.splice(r.int(nn.length), 1);
+    if (r() < 0.02 * t && nn.length) nn.splice(r.int(nn.length), 1);
     if (nn.length) p.nn = nn; else delete p.nn;
   }
 
@@ -244,8 +246,9 @@
   // how far a part's numbers are from another's, as a share of each gene's range (0 = a perfect copy)
   function divergence(a, b) { let d = 0, n = 0; for (const k in PART_FIELDS) { const [lo, hi, , kind, flag] = PART_FIELDS[k]; if (flag === 's' && a[k] === b[k]) continue; /* (genes of sound count only where they differ: the measure reads as before in worlds without sound) */ d += Math.abs(kind === 'a' ? wrapPi(a[k] - b[k]) / TAU : (a[k] - b[k]) / (hi - lo)); n++; } return d / n; }
 
-  function mutate(g0, r, strength, extra) {
-    const g = copy(g0), s = strength == null ? 1 : strength, G2 = extra === true || !!(extra && extra.includes('g'));
+  // strength: how wide the steps are, and — unless `structural` is given — also how often the plan of the body and the wiring change.
+  function mutate(g0, r, strength, extra, structural) {
+    const g = copy(g0), s = strength == null ? 1 : strength, t = structural == null ? s : structural, G2 = extra === true || !!(extra && extra.includes('g'));
     if (G2) ensureIds(g);
     const num = (o, F) => {
       for (const k in F) {
@@ -256,15 +259,15 @@
       }
     };
     for (const p of g.parts) num(p, PART_FIELDS);
-    if (extra === true || (extra && extra.includes('n'))) for (const p of g.parts) mutateNN(p, r, s, !!(extra && extra !== true && extra.includes('l')), !!(extra && extra !== true && extra.includes('s')));
+    if (extra === true || (extra && extra.includes('n'))) for (const p of g.parts) mutateNN(p, r, s, !!(extra && extra !== true && extra.includes('l')), !!(extra && extra !== true && extra.includes('s')), t);
     for (const l of g.links) {
       num(l, LINK_FIELDS);
-      if (r() < 0.14 * s) l.repeat += r() < 0.5 ? -1 : 1;
-      if (r() < 0.03 * s) l.sym = ['none', 'mirror', 'radial'][r.int(3)];
-      if (l.sym === 'radial' && r() < 0.15 * s) l.n += r() < 0.5 ? -1 : 1;
+      if (r() < 0.14 * t) l.repeat += r() < 0.5 ? -1 : 1;
+      if (r() < 0.03 * t) l.sym = ['none', 'mirror', 'radial'][r.int(3)];
+      if (l.sym === 'radial' && r() < 0.15 * t) l.n += r() < 0.5 ? -1 : 1;
       if (l.sym === 'radial' && l.n < 3) l.n = 3;
     }
-    if (r() < 0.07 * s && (G2 ? g.parts.length < STORE_PARTS && reach(g).size < MAX_PARTS && g.links.length < STORE_LINKS : g.parts.length < MAX_PARTS && g.links.length < MAX_LINKS)) {
+    if (r() < 0.07 * t && (G2 ? g.parts.length < STORE_PARTS && reach(g).size < MAX_PARTS && g.links.length < STORE_LINKS : g.parts.length < MAX_PARTS && g.links.length < MAX_LINKS)) {
       // gene duplication: copy a part and let one rule make the copy instead
       const i = r.int(g.parts.length); g.parts.push(copy(g.parts[i]));
       if (G2) { const q = g.parts[g.parts.length - 1]; q.src = g.parts[i].id; q.id = newId(r); q.how = 'dup'; q.next = -1; }
@@ -272,20 +275,20 @@
       if (cand.length) cand[r.int(cand.length)].to = g.parts.length - 1;
       else g.links.push(link({ from: i, to: g.parts.length - 1, at: r(), off: 0.6, angle: (r() - 0.5) * TAU, sym: r() < 0.6 ? 'mirror' : 'none', scale: 0.7 }));
     }
-    if (r() < 0.06 * s && g.links.length < (G2 ? STORE_LINKS : MAX_LINKS)) {
+    if (r() < 0.06 * t && g.links.length < (G2 ? STORE_LINKS : MAX_LINKS)) {
       const from = r.int(g.parts.length), to = r.int(g.parts.length);
       g.links.push(link({ from, to, at: r(), off: from === to ? 0 : 0.6, angle: from === to ? r.gauss() * 0.15 : (r() - 0.5) * TAU, sym: from === to ? 'none' : (r() < 0.6 ? 'mirror' : 'none'), repeat: 1 + r.int(3), scale: 0.75 + r() * 0.2, lo: 0, hi: 1 }));
     }
-    if (r() < 0.02 * s && g.links.length > 1) g.links.splice(r.int(g.links.length), 1);
+    if (r() < 0.02 * t && g.links.length > 1) g.links.splice(r.int(g.links.length), 1);
     if (G2) {
       for (const l of g.links) if (l.id == null) l.id = newId(r);
       // a stretch of an axis splits in two (the body does not change by it)
-      if (r() < 0.05 * s) { const axes = g.parts.map((_, i) => axisOf(g, i)).filter(i => i >= 0); if (axes.length) { const li = axes[r.int(axes.length)], zs = zones(g, li).map((z, i) => [z, i]).filter(q => q[0].len >= 2); if (zs.length) { const [z, zi] = zs[r.int(zs.length)]; splitZone(g, li, zi, 1 + r.int(z.len - 1), r); } } }
+      if (r() < 0.05 * t) { const axes = g.parts.map((_, i) => axisOf(g, i)).filter(i => i >= 0); if (axes.length) { const li = axes[r.int(axes.length)], zs = zones(g, li).map((z, i) => [z, i]).filter(q => q[0].len >= 2); if (zs.length) { const [z, zi] = zs[r.int(zs.length)]; splitZone(g, li, zi, 1 + r.int(z.len - 1), r); } } }
       // a zone grows or shrinks by a segment; rarely, a part comes to be followed by another part altogether (or by none)
-      g.parts.forEach(p => { if (nextOf(p) >= 0 && r() < 0.14 * s) p.span = (p.span || 1) + (r() < 0.5 ? -1 : 1); });
-      if (r() < 0.02 * s && g.parts.length > 1) { const i = r.int(g.parts.length), p = g.parts[i]; if (r() < 0.5) p.next = -1; else { let n = r.int(g.parts.length - 1); if (n >= i) n++; p.next = n; p.span = 1 + r.int(4); } }
+      g.parts.forEach(p => { if (nextOf(p) >= 0 && r() < 0.14 * t) p.span = (p.span || 1) + (r() < 0.5 ? -1 : 1); });
+      if (r() < 0.02 * t && g.parts.length > 1) { const i = r.int(g.parts.length), p = g.parts[i]; if (r() < 0.5) p.next = -1; else { let n = r.int(g.parts.length - 1); if (n >= i) n++; p.next = n; p.span = 1 + r.int(4); } }
       // a dormant part (one nothing leads to) decays
-      if (r() < 0.10 * s) { const live = reach(g), idle = g.parts.map((_, i) => i).filter(i => !live.has(i)); if (idle.length) dropPart(g, idle[r.int(idle.length)]); }
+      if (r() < 0.10 * t) { const live = reach(g), idle = g.parts.map((_, i) => i).filter(i => !live.has(i)); if (idle.length) dropPart(g, idle[r.int(idle.length)]); }
     }
     g.hue += r.gauss() * 6 * s;
     g.freq += r.gauss() * 0.05 * s;
