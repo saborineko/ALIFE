@@ -236,3 +236,18 @@ test('a sense that adapts reports change, not level', () => {
   assert.ok(Math.abs(b.segs[0].a) < 0.05, 'steady rich water: silent ' + b.segs[0].a);
   taste[0] = 0.5; A.neural.local(b, taste, 0); assert.ok(b.segs[0].a < -0.5, 'it got worse: ' + b.segs[0].a);
 });
+
+test('a restored world continues exactly as the saved one would have (pose, velocity, rhythm, nerve state, food, randomness)', () => {
+  for (const opt of [{ seed: 8 }, { seed: 8, map: 'coast' }]) {
+    const w = new A.engine.World(opt), mk = o => { const g = A.genome.primordial(3); Object.assign(g.parts[0], o); return g; };
+    w.seedWith(A.genome.primordial(8));
+    for (let i = 0; i < 6; i++) w.spawn(mk({ cilia: 0.5, beat: -1, nerve: 0.5, nC: 3, mCil: -1, mTurn: 0.5, leak: 0.2, adapt: 0.5 }), 20 + i * 20, 30, 1, null);   // rigid, ciliated, wired
+    for (let i = 0; i < 3; i++) w.spawn(design(Object.assign({}, SAMPLES[0].params, { length: 3, width: 0.7, segments: 5, limbs: 0, tail: 0.3, tailSegs: 2 })), 30 + i * 40, 50, 1, null); // jointed
+    for (let i = 0; i < 30 * 40; i++) w.step();
+    const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save())));
+    for (let i = 0; i < 30 * 40; i++) { w.step(); w2.step(); }
+    const snap = x => JSON.stringify([x.t, x.bodies.map(o => [o.id, o.cx, o.cy, o.E, o.G, o.path, o.b.segs.map(q => [q.a, q.m, q.bx, q.by])]), x.food.length, x.food.slice(0, 50).map(f => [f.x, f.y, f.e]), Array.from(x.nut.slice(0, 200)), x.counts, x.rand.state(), x.census().regions]);
+    assert.strictEqual(snap(w2), snap(w), 'identical after 40 more seconds' + (opt.map ? ' (coast)' : ''));
+    assert.ok(w.bodies.length > 10 && w.counts.births > 0);
+  }
+});
