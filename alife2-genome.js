@@ -87,7 +87,10 @@
     // Matter (marked 'q': these only change in worlds where bodies can secrete). A segment with gland tissue lays inert matter into the water where its outer end is.
     // The matter stays for long after the body is gone; water in it moves less, and drifting grains catch in it (see the engine: nest).
     gland: [0, 1, 0, 'n', 'q'],     // secreting tissue (costs upkeep): how much matter this segment can lay down per second
-    mSec: [-1.5, 1.5, 0, 'n', 'q']  // signal -> how hard this segment's gland secretes (0 = no effect: idle unless a neuron drives it)
+    mSec: [-1.5, 1.5, 0, 'n', 'q'], // signal -> how hard this segment's gland secretes (0 = no effect: idle unless a neuron drives it)
+    // (rewire, marked 'y': these only change in worlds where connections come and go with use) for the segment's own input connections, all at once:
+    nLife: [-1, 1, 0, 'n', 'y'],    // above 0: there at birth, each withers while its input and the signal are not active together. Below 0: not there at birth, forms while they are. The size is the speed
+    nUse: [0.02, 1, 0.15, 'n', 'y'] // how active an input and the signal must be together to count as used
   };
   const LINK_FIELDS = {
     at: [0, 1, 1, 'n'],            // where along the parent
@@ -272,7 +275,7 @@
     if (g.root > i) g.root--;
   }
   // how far a part's numbers are from another's, as a share of each gene's range (0 = a perfect copy)
-  function divergence(a, b) { let d = 0, n = 0; for (const k in PART_FIELDS) { const [lo, hi, , kind, flag] = PART_FIELDS[k]; if ((flag === 's' || flag === 'q') && a[k] === b[k]) continue; /* (genes of sound count only where they differ: the measure reads as before in worlds without sound) */ d += Math.abs(kind === 'a' ? wrapPi(a[k] - b[k]) / TAU : (a[k] - b[k]) / (hi - lo)); n++; } return d / n; }
+  function divergence(a, b) { let d = 0, n = 0; for (const k in PART_FIELDS) { const [lo, hi, , kind, flag] = PART_FIELDS[k]; if ((flag === 's' || flag === 'q' || flag === 'y') && a[k] === b[k]) continue; /* (genes of sound count only where they differ: the measure reads as before in worlds without sound) */ d += Math.abs(kind === 'a' ? wrapPi(a[k] - b[k]) / TAU : (a[k] - b[k]) / (hi - lo)); n++; } return d / n; }
 
   // strength: how wide the steps are, and — unless `structural` is given — also how often the plan of the body and the wiring change.
   function mutate(g0, r, strength, extra, structural) {
@@ -346,8 +349,8 @@
   // genes lie in a row and are cut at one place: one side comes from one parent, the rest from the other — neighbouring genes tend to stay
   // together, genes far apart are easily parted. A part's neurons go with the far end of the row. A shared rule is tuned as in one parent or
   // the other. The genes of the whole body are drawn one by one. A part or rule that the other genome lacks stays as it is.
-  function recombine(a, b, r, sound, cast, late, nest) {
-    const g = copy(a), ids = g.parts.some(p => p.id != null) && b.parts.some(p => p.id != null), K = Object.keys(PART_FIELDS).filter(k => (sound || PART_FIELDS[k][4] !== 's') && (nest || PART_FIELDS[k][4] !== 'q')) /* (the genes of sound, and of glands, join the row only where the world has them: other worlds mix exactly as before) */, pb = new Map(), lb = new Map();
+  function recombine(a, b, r, sound, cast, late, nest, rew) {
+    const g = copy(a), ids = g.parts.some(p => p.id != null) && b.parts.some(p => p.id != null), K = Object.keys(PART_FIELDS).filter(k => (sound || PART_FIELDS[k][4] !== 's') && (nest || PART_FIELDS[k][4] !== 'q') && (rew || PART_FIELDS[k][4] !== 'y')) /* (the genes of sound, and of glands, join the row only where the world has them: other worlds mix exactly as before) */, pb = new Map(), lb = new Map();
     b.parts.forEach((p, i) => { if (!ids || p.id != null) pb.set(ids ? p.id : i, p); }); b.links.forEach((l, i) => { if (!ids || l.id != null) lb.set(ids ? l.id : i, l); });
     g.parts.forEach((p, i) => {
       const q = pb.get(ids ? p.id : i); if (!q) return;

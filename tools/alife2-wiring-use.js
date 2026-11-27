@@ -39,6 +39,7 @@ function sort(w, o) {
     put(!q.out ? 'out' : 'steady', 'nB', abs(p.nB || 0));
     for (const k of ['mCil', 'mTurn', 'mJoint', 'mBite', 'mVoice']) put(!q.eff[k] ? 'partner' : q.driven ? 'through' : p.nB ? 'steady' : 'in', k, abs(p[k] || 0));
     put(p.nn && p.nn.length ? 'neurons' : ['nC', 'sA', 'sB', 'vE', 'hE'].some(k => q.src[k] && p[k]) ? (q.out ? 'through' : 'out') : 'partner', 'adapt', abs(p.adapt || 0)); // how a sense reports: of use only where a sense is read and the signal goes somewhere
+    if (p.nLife) { let v = A.neural.REW.gene * abs(p.nLife); if (p.nLife < 0) for (const k of A.neural.INPUTS) v -= A.neural.REW.share * abs(p[k] || 0); put('neurons', 'nLife', v); } // (rewire) what the ability costs, less the share of inputs that are not there at birth
     if (p.nn) for (const z of p.nn) { let v = 0.5 + abs(z.b); for (const e of z.in) v += abs(e[1]) + (e[2] ? 0.5 * abs(e[2]) : 0); for (const e of z.out) v += abs(e[1]); put('neurons', 'nn', v); }
     per.push(own); }
   // (brain) what reaching far costs on top: half a connection's strength per segment of distance, as the body pays it (see organs). Counted with the neurons.

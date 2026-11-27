@@ -1139,6 +1139,10 @@ test('nest: a gland lays matter into the water when its circuit drives it and th
     const n0 = [w.nut[ci], w.nut[cj]]; for (const k in w.ledger) w.ledger[k] = 0; for (let i = 0; i < 31; i++) w.step(); const gain = w.nut[ci] - n0[0], other = w.nut[cj] - n0[1];
     const m1 = 3 * Math.pow(0.5, 1 / w.matHalf), share = 2 * m1 / (m1 + 1); /* (the matter had faded for one second when the grain ran out) */ assert.ok(Math.abs(w.counts.composted - share) < 1e-5, 'about three quarters of it at matter 3: ' + w.counts.composted); assert.ok(gain > other + 0.3, 'the water there is richer for it (and it spreads to the cells around, as dissolved food does): ' + gain + ' against ' + other);
     assert.ok(Math.abs(w.ledger.composted - share) < 1e-5 && Math.abs(w.ledger.expire - (4 - share)) < 1e-5 && w.ledger.recycled >= share - 1e-5, JSON.stringify([w.ledger.composted, w.ledger.expire, w.ledger.recycled])); }
+  // water with matter in it mixes less: a rich cell inside matter keeps its dissolved food longer than the same cell in open water; mixing itself neither makes nor loses any
+  { const keep = m => { const { w } = world({ nest: 1, nutrientRegrow: 0 }); const ci = w.cellAt(60, 30); if (m) { for (let i = 0; i < w.mat.length; i++) { const x = (i % w.cols + 0.5) * w.cell, y = (Math.floor(i / w.cols) + 0.5) * w.cell; if (Math.abs(x - 60) < 6 && Math.abs(y - 30) < 6) w.mat[i] = m; } w.stepMatter(0); }
+      w.nut.fill(0.3); w.nut[ci] = 1; const total = w.nut.reduce((a, b) => a + b, 0); for (let i = 0; i < 150; i++) { w.food.length = 0; w.step(); } return { left: w.nut[ci] - 0.3, drift: Math.abs(w.nut.reduce((a, b) => a + b, 0) - total) }; };
+    const open = keep(0), mat = keep(4); assert.ok(open.left < 0.12, 'in open water it is gone in 5 s: ' + open.left); assert.ok(mat.left > 2 * open.left && mat.left > 0.15, 'in matter it stays: ' + mat.left + ' against ' + open.left); assert.ok(open.drift < 1e-3 && mat.drift < 1e-3, 'nothing made or lost: ' + open.drift + ' ' + mat.drift); }
   // saved and reloaded, the world goes on exactly as it was going
   { const { w } = world({ nest: 1 }, body(1)); for (let i = 0; i < 917; i++) w.step(); const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), sig = x => JSON.stringify([Array.from(x.mat), Array.from(x.calm), x.bodies.map(o => [o.cx, o.cy, o.E, o.secreted]), x.food.length, x.rand.state()]); assert.strictEqual(sig(c), sig(w)); for (let i = 0; i < 600; i++) { w.step(); c.step(); } assert.strictEqual(sig(c), sig(w)); }
   // ... also where a gland is driven so weakly that a cell holds only a trace of matter, below what the next fading step keeps (a reload used to drop the trace at once,
@@ -1154,7 +1158,7 @@ test('nest: a gland lays matter into the water when its circuit drives it and th
   // (adding two genes to the row once shifted every cut in worlds that mix genomes; the six-world state check caught it)
   { const a = body(1), b = body(0, 0), kids = nest => { let moved = 0; for (let k = 0; k < 60; k++) { const c = G.recombine(a, b, G.rng(100 + k), false, false, false, nest); if (c.parts[0].gland !== a.parts[0].gland || c.parts[0].mSec !== a.parts[0].mSec) moved++; } return moved; };
     assert.strictEqual(kids(false), 0, 'without the rule the mother keeps her gland genes'); assert.ok(kids(true) > 5, 'with it they mix like any other gene');
-    const row = f => Object.keys(G.PART_FIELDS).filter(k => !f.includes(G.PART_FIELDS[k][4])).length; assert.strictEqual(row(['s', 'q']), 45, 'the row that worlds without sound and without glands cut has the length it had'); }
+    const row = f => Object.keys(G.PART_FIELDS).filter(k => !f.includes(G.PART_FIELDS[k][4])).length; assert.strictEqual(row(['s', 'q', 'y']), 45, 'the row that worlds without sound, glands and rewiring cut has the length it had'); }
 });
 
 test('vents: the water regains its dissolved food fast in a few small places and slowly elsewhere, the same capacity over the whole; vents close and open elsewhere; off by default', () => {
@@ -1177,4 +1181,36 @@ test('vents: the water regains its dissolved food fast in a few small places and
   { const w = mk({ vents: 1, ventLife: 20, founders: 20 }); w.seedWith(A.genome.primordial(2)); for (let i = 0; i < 400; i++) w.step(); const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), sig = x => JSON.stringify([Array.from(x.nut), x.ventList, x.rand.state(), x.bodies.map(o => [o.cx, o.cy, o.E])]); assert.strictEqual(sig(c), sig(w)); const before = JSON.stringify(w.ventList);
     for (let i = 0; i < 1200; i++) { w.step(); c.step(); } assert.strictEqual(sig(c), sig(w)); assert.notStrictEqual(JSON.stringify(w.ventList), before, 'the vents have moved');
     const p = mk({ founders: 20 }); p.seedWith(A.genome.primordial(2)); for (let i = 0; i < 60; i++) p.step(); p.enable({ vents: 1 }); assert.ok(p.ventList.length >= 1); for (let i = 0; i < 60; i++) p.step(); p.enable({ vents: 0 }); assert.strictEqual(p.ventList, null); for (let i = 0; i < 30; i++) p.step(); }
+});
+
+test('rewire, the single signal: a segment\'s own input connections wither while unused and form while used, by one gene of the part; the body pays for what is there; off by default', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, N = A.neural, C = A.organs.C, dt = 1 / 30;
+  // one segment whose single signal tastes (strength 3) and feels touch (strength 2) and drives the cilia
+  const one = o => G.create({ parts: [G.part(Object.assign({ len: 1.2, r0: 0.5, r1: 0.45, cilia: 0.5, beat: -1, nerve: 0.5, gut: 0.5, mouth: 0.3, nC: 3, sT: 2, mCil: 1 }, o))], links: [] });
+  const live = (g, taste, secs, rew) => { const b = P.build(develop(g)), t = new Float64Array(1); for (let i = 0; i < secs * 30; i++) { t[0] = taste(i / 30); N.local(b, t, 0.6, null, null, false, true, 0, false, rew == null ? dt : rew); } return b; };
+  const wave = s => 0.5 + 0.45 * Math.sin(s * 1.2), flat = () => 0.5, pw = g => A.organs.profile(develop(g)).wiring, TASTE = N.INPUTS.indexOf('nC'), TOUCH = N.INPUTS.indexOf('sT'), HUNGER = N.INPUTS.indexOf('nH');
+  // born present (+0.5): the taste input, used, stays; the touch input, never used, goes; the wiring paid for shrinks by nine tenths of what went
+  { const g = one({ nLife: 0.5 }), b = live(g, wave, 200), z = b.segs[0].sz; assert.ok(z[TASTE] > 0.7 && z[TOUCH] < 0.1, Array.from(z).join()); assert.ok(Math.abs(b.wd - N.REW.share * (3 * (z[TASTE] - 1) + 2 * (z[TOUCH] - 1))) < 1e-9);
+    assert.ok(Math.abs(pw(g) - pw(one({})) - N.REW.gene * 0.5) < 1e-12, 'the ability costs a fifth of the gene'); assert.ok(live(g, flat, 200).segs[0].sz[TASTE] < 0.1, 'in water that never changes the taste input goes too'); }
+  // a withered input carries nothing: the signal no longer follows the water
+  { const b = live(one({ nLife: 1 }), flat, 300), t = new Float64Array(1); let lo = 9, hi = -9; assert.ok(b.segs[0].sz[TASTE] < 0.01); for (let i = 0; i < 60; i++) { t[0] = wave(i / 30); N.local(b, t, 0.6, null, null, false, true, 0, false, 1e-6); lo = Math.min(lo, b.segs[0].a); hi = Math.max(hi, b.segs[0].a); } assert.ok(hi - lo < 0.05); }
+  // not there at birth (-0.5): a signal with a resting level gathers the inputs that are active with it (taste, hunger) and not the silent one (touch); they cost a tenth until formed.
+  // Without a resting level nothing is ever active together with the signal, and nothing forms.
+  { const g = one({ nLife: -0.5, nH: 2, nB: 1 }), b = live(g, wave, 100), z = b.segs[0].sz; assert.ok(z[TASTE] > 0.5 && z[HUNGER] > 0.8 && z[TOUCH] < 0.05, Array.from(z).join());
+    assert.ok(Math.abs(pw(g) - (pw(one({ nH: 2, nB: 1 })) - N.REW.share * (3 + 2 + 2) + N.REW.gene * 0.5)) < 1e-12); assert.ok(b.wd > 2);
+    const dead = live(one({ nLife: -0.5, nH: 2 }), wave, 100).segs[0].sz; assert.ok(dead[TASTE] === 0 && dead[HUNGER] === 0, 'a silent signal gathers nothing'); }
+  // without the rule the genes do nothing and nothing is tracked
+  { const b = live(one({ nLife: 0.5 }), wave, 20, 0); assert.strictEqual(b.segs[0].sz, undefined); assert.strictEqual(b.wd, undefined); }
+  // in a world: less upkeep is really paid; the state survives save and reload exactly, and growth; a part that builds its circuit late pays nothing for the ability before
+  const spend = (o, rewire) => { const w = new A.engine.World({ seed: 5, founders: 0, cap: 0, contact: 1, rewire, audit: 1 }), b = w.spawn(one(o), 60, 40, 1, null); b.E = b.prof.Emax; for (let i = 0; i < 9000; i++) w.step(); return { w, basal: w.ledger.basal }; };
+  const fixed = spend({}, 1), goes = spend({ nLife: 0.5 }, 1), off = spend({ nLife: 0.5 }, 0); assert.ok(fixed.basal - goes.basal > C.synapse * (0.9 * 2 * 200 - 0.1 * 300), 'saved: ' + (fixed.basal - goes.basal)); assert.ok(off.basal > fixed.basal, 'where the rule is off the gene only costs');
+  { const w = goes.w, w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), sig = x => JSON.stringify(x.bodies.map(q => [q.E, q.cx, q.b.segs.map(s => (s.sz ? Array.from(s.sz) : null))])); assert.strictEqual(sig(w2), sig(w)); for (let i = 0; i < 300; i++) { w.step(); w2.step(); } assert.strictEqual(sig(w2), sig(w)); }
+  { const k = new A.engine.World({ seed: 5, founders: 0, cap: 0, contact: 1, rewire: 1, carry: 1 }), o = k.spawn(one({ nLife: 0.5 }), 60, 40, 0.6, null); for (let i = 0; i < 3000; i++) k.step(); const before = Array.from(o.b.segs[0].sz); assert.ok(before[TOUCH] < 0.2); o.stage = Math.min(1, o.stage + 0.1); k.form(o, o.cx, o.cy, 0); assert.deepStrictEqual(Array.from(o.b.segs[0].sz), before); }
+  assert.strictEqual(A.organs.profile(develop(one({ nLife: 0.5, nAt: 0.9 }), { stage: 0.5, late: 1 })).wiring, 0, 'no circuit yet, nothing to pay');
+  // mutation moves the two genes only where the world has the rule; where genomes mix they join the row only there too
+  const count = flags => { let m = one({}), n = 0; const r = G.rng(11); for (let i = 0; i < 200; i++) { m = G.mutate(m, r, 1, flags); if (m.parts.some(p => p.nLife !== 0 || p.nUse !== 0.15)) n++; } return n; };
+  assert.strictEqual(count('xvgcnl'), 0); assert.ok(count('xvgcny') > 100);
+  { const a = one({ nLife: 0.7, nUse: 0.5 }), b = one({}), kids = rew => { let moved = 0; for (let k = 0; k < 60; k++) { const c = G.recombine(a, b, G.rng(100 + k), false, false, false, false, rew); if (c.parts[0].nLife !== 0.7 || c.parts[0].nUse !== 0.5) moved++; } return moved; }; assert.strictEqual(kids(false), 0); assert.ok(kids(true) > 5);
+    assert.strictEqual(Object.keys(G.PART_FIELDS).filter(k => !['s', 'q', 'y'].includes(G.PART_FIELDS[k][4])).length, 45, 'the row that other worlds cut has the length it had'); }
 });

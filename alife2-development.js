@@ -22,7 +22,7 @@
     const parts = g.parts.map(p => {
       const sum = p.muscle + p.gut + p.gonad + p.store + p.nerve + p.vessel, k = sum > TISSUE_ROOM ? TISSUE_ROOM / sum : 1, q = Object.assign({}, p);
       for (const t of TISSUES) q[t] = p[t] * k;
-      if (opt.late && p.nAt > stage) { for (const c of A.neural.CIRCUIT) q[c] = 0; delete q.nn; } /* (wireLate) this part's circuit is built when the body has grown to stage `nAt`: until then its segments carry no connections, pay for none, and nothing drives them (cilia beat at their plain rate, the mouth stays open, joints follow the body's rhythm alone) */
+      if (opt.late && p.nAt > stage) { for (const c of A.neural.CIRCUIT) q[c] = 0; delete q.nn; if (q.nLife) q.nLife = 0; } /* (wireLate) this part's circuit is built when the body has grown to stage `nAt`: until then its segments carry no connections, pay for none, and nothing drives them (cilia beat at their plain rate, the mouth stays open, joints follow the body's rhythm alone) */
       return q;
     });
     const chainLink = g.parts.map((_, i) => g.links.findIndex(l => l.from === i && l.to === i));

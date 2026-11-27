@@ -54,11 +54,25 @@
       const c = taste[i]; if (s.m == null) s.m = c; s.m += 0.03 * (c - s.m);
       let rel = (c - s.m) / (0.03 + 0.15 * s.m); rel = rel < -1 ? -1 : rel > 1 ? 1 : rel;
       const sense = (1 - p.adapt) * (c - 0.5) * 2 + p.adapt * rel;
-      let x = p.nC * gain * sense + p.nP * par + p.nK * kid + p.nH * hunger + p.nB;
+      let x;
+      if (rew && p.nLife) { // (rewire) the segment's own input connections come and go with use, like a neuron's: each has a presence that this body's life has given it
+        const L = p.nLife, z = s.sz && s.sz.length === SZ ? s.sz : (s.sz = new Float64Array(SZ).fill(L < 0 ? 0 : 1)), v = szV, wt = szW;
+        v[0] = gain * sense; wt[0] = p.nC; v[1] = par; wt[1] = p.nP; v[2] = kid; wt[2] = p.nK; v[3] = hunger; wt[3] = p.nH;
+        if (smA && (p.sA !== 0 || p.sB !== 0)) { v[4] = gain * smell(s, 'mA', smA[i], p.adapt); wt[4] = p.sA; v[5] = gain * smell(s, 'mB', smB[i], p.adapt); wt[5] = p.sB; } else { wt[4] = 0; wt[5] = 0; }
+        if (con && p.sT !== 0) { v[6] = gain * (s.tch / (s.tch + 0.05)); wt[6] = p.sT; } else wt[6] = 0;
+        if (con && p.sW !== 0) { const w = 5 * s.torn + 1 - (s.hp == null ? 1 : s.hp); v[7] = gain * (w > 1 ? 1 : w); wt[7] = p.sW; } else wt[7] = 0;
+        if (vis && p.vE !== 0 && s.v != null) { v[8] = gain * smell(s, 'mV', s.v, p.adapt, 0.3); wt[8] = p.vE; } else wt[8] = 0;
+        if (snd && p.hE !== 0 && s.e != null) { const sg = smell(s, 'mE', s.e, p.adapt, 0.1), ev = gain * p.hE * (sg + 1 - p.adapt) * z[9]; v[9] = gain * sg; wt[9] = p.hE; hd += ev < 0 ? -ev : ev; } else wt[9] = 0;
+        x = p.nB; for (let k = 0; k < SZ; k++) if (wt[k] !== 0) x += wt[k] * v[k] * z[k];
+        const a2 = s.a + p.leak * (Math.tanh(x) - s.a), sp = L < 0 ? -L : L, u = p.nUse == null ? 0.15 : p.nUse, z0 = L < 0 ? 0 : 1; // (what the signal is about to be: used together with it or not)
+        for (let k = 0; k < SZ; k++) { if (wt[k] === 0) continue; const c2 = v[k] * a2; let q = z[k]; q += rew * sp * ((c2 < 0 ? -c2 : c2) > u ? REW.up * (1 - q) : -REW.down * q); z[k] = q < 0 ? 0 : q > 1 ? 1 : q; wd += REW.share * (wt[k] < 0 ? -wt[k] : wt[k]) * (z[k] - z0); }
+      } else {
+      x = p.nC * gain * sense + p.nP * par + p.nK * kid + p.nH * hunger + p.nB;
       if (smA && (p.sA !== 0 || p.sB !== 0)) x += gain * (p.sA * smell(s, 'mA', smA[i], p.adapt) + p.sB * smell(s, 'mB', smB[i], p.adapt));
       if (con) { if (p.sT !== 0) x += gain * p.sT * (s.tch / (s.tch + 0.05)); if (p.sW !== 0) { const w = 5 * s.torn + 1 - (s.hp == null ? 1 : s.hp); x += gain * p.sW * (w > 1 ? 1 : w); } }
       if (vis && p.vE !== 0 && s.v != null) x += gain * p.vE * smell(s, 'mV', s.v, p.adapt, 0.3);
       if (snd && p.hE !== 0 && s.e != null) { const sg = smell(s, 'mE', s.e, p.adapt, 0.1), ev = gain * p.hE * (sg + 1 - p.adapt); x += gain * p.hE * sg; hd += ev < 0 ? -ev : ev; } // (hd counts what sound adds over silence: an ear in silence reports its lowest value, not nothing)
+      }
       s.a += p.leak * (Math.tanh(x) - s.a);
       const cd = 1 + p.mCil * s.a; s.cd = cd < 0 ? 0 : cd > 2 ? 2 : cd; s.ct = p.mTurn * s.a;
       if (con && p.mBite !== 0) { const mo = 1 + p.mBite * s.a; s.mo = mo < 0 ? 0 : mo > 1 ? 1 : mo; }
@@ -117,7 +131,9 @@
   // (rewire) REW: how fast presence follows use (per second, times the gene: towards 1 while used, towards 0 while not), the share of a connection's upkeep that is only
   // paid while it is there, and what the ability itself costs (per unit of the gene, like the ability to learn).
   const REW = { up: 0.2, down: 0.05, share: 0.9, gene: 0.2 };
-  const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) { w += Math.abs(e[1]) + (e[2] ? 0.5 * Math.abs(e[2]) : 0); if (e[3]) w += REW.gene * Math.abs(e[3]) - (e[3] < 0 ? REW.share * Math.abs(e[1]) : 0); /* (a connection that is not there at birth costs its share only once it has formed: see local) */ } for (const e of q.out) w += Math.abs(e[1]); } return w; };
+  // (rewire) the single signal's own inputs, in the order their presences are kept: taste, parent, children, hunger, scent A, scent B, touch, wound, eye, ear
+  const INPUTS = ['nC', 'nP', 'nK', 'nH', 'sA', 'sB', 'sT', 'sW', 'vE', 'hE'], SZ = INPUTS.length, szV = new Float64Array(SZ), szW = new Float64Array(SZ);
+  const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nLife) { w += REW.gene * Math.abs(p.nLife); if (p.nLife < 0) for (const k of INPUTS) w -= REW.share * Math.abs(p[k] || 0); /* (inputs that are not there at birth cost their share only once they have formed) */ } if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) { w += Math.abs(e[1]) + (e[2] ? 0.5 * Math.abs(e[2]) : 0); if (e[3]) w += REW.gene * Math.abs(e[3]) - (e[3] < 0 ? REW.share * Math.abs(e[1]) : 0); /* (a connection that is not there at birth costs its share only once it has formed: see local) */ } for (const e of q.out) w += Math.abs(e[1]); } return w; };
   const presence = nn => { const z = new Float64Array(nn.total); for (const N of nn) for (let e = 0; e < N.life.length; e++) z[N.off + e] = N.life[e] < 0 ? 0 : 1; return z; };
   // neurons, made ready to run: sources and targets as numbers. Done once per part.
   const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14, g: 15, e: 16, r: 17, d: 18 }, EFF = { C: 0, T: 1, J: 2, M: 3, P: 4, V: 5, Q: 6, S: 7 }, ready = new WeakMap();
@@ -135,6 +151,6 @@
   // (wire) the neuron called `id` in another segment: found by its name in that segment's own part (or by its place, if that part's neurons have no names)
   const named = (seg, id) => { if (!seg || !seg.na || !seg.p.nn) return 0; const c = compile(seg.p.nn), i = c.pos ? c.pos.get(id) : id; return i != null && i < seg.na.length ? seg.na[i] : 0; };
 
-  A.neural = { cpg, command, local, wiring, CIRCUIT, compile, far, presence, REW };
+  A.neural = { cpg, command, local, wiring, CIRCUIT, compile, far, presence, REW, INPUTS };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
