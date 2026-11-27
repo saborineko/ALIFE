@@ -54,6 +54,7 @@
     renderEvents($('observerEvents'), stories, true);
     renderEvents($('observerSignals'), book.events.filter(e=>!e.key.startsWith('story-')), false);
     if (!stories.length) $('observerEvents').textContent = '世界の流れを観測中。最初の1分が揃ったら、全体の増減と注目する系統を実況します。';
+    $('observerQuiet').textContent = book.enabled && book.story.lastAt > (book.story.report?.t ?? book.story.lastAt) ? '大きな変化はありません。数値の観測だけを続けています。' : '';
     const ex = book.extinctions; $('observerExtinct').textContent = `観測中の体制消失${ex.total}件（累計1〜2匹${ex.small}件）、移出のみ${ex.departures}件。実況履歴は直近300件、時系列は約1000秒、各時点の系統・形態は上位96件（欠測は?）。`;
     const fresh = book.events.filter(e => e.id > seen && typeof e.spoken === 'string' && e.spoken.length > 0); seen = book.seq;
     if (fresh.length) {

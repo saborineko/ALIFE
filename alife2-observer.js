@@ -145,15 +145,17 @@
       if (ended || departures) this.emit(w.t, 'extinction-summary', '体制の消失を集約', `観測中の累計：死亡を含む消失${this.extinctions.total}件（累計1〜2匹の体制${this.extinctions.small}件）、移出だけの消失${this.extinctions.departures}件。細かな絶滅ログは元の記録に保持。`, { ...this.extinctions }, null, '観測事実', false, 300);
       if (this.ended.size > 6000) this.ended = new Set([...w.clades.values()].filter(c => c.ended != null).map(c => c.id));
     }
-    // One continuing account per minute, assembled from balanced counts. No biological cause is inferred.
+    // Check each minute, but report only meaningful changes since the last report. No periodic reminders.
     narrate(w, s) {
       const z = this.window(60), st = this.story;
       if (!z?.complete || z.residual !== 0 || (st.lastAt != null && w.t - st.lastAt < 60 - 1e-5)) return;
       const c = z.counts, deaths = c.starved+c.aged+c.killed+c.broken, natural = c.births-deaths;
-      const threshold = Math.max(3, z.start*0.03), trend = z.delta > threshold ? 1 : z.delta < -threshold ? -1 : 0;
+      const report = st.report || null;
+      const threshold = Math.max(5, z.start*0.1), trend = z.delta > threshold ? 1 : z.delta < -threshold ? -1 : 0;
+      const [cause, causeN] = Object.keys(CAUSE).map(k=>[k,c[k]]).sort((a,b)=>b[1]-a[1])[0];
       let title = trend > 0 ? '世界全体は増加中' : trend < 0 ? '世界全体は減少中' : '世界全体はほぼ横ばい';
       let text = trend ? `この1分、全体は${Math.abs(z.delta)}匹${trend > 0 ? '増えて' : '減って'}${z.end}匹になりました。` : `この1分、全体は${z.start}匹から${z.end}匹で、ほぼ横ばいです。`;
-      const headline = text;
+      let headline = text;
       if (c.introduced || c.founders) text += `人が加えた個体が${c.introduced+c.founders}匹含まれます。`;
       if (c.arrived || c.left) text += `島の出入りは、移入${c.arrived}匹、移出${c.left}匹です。`;
       if (deaths > 0) {
@@ -175,13 +177,14 @@
       if (st.focus) {
         const f = st.focus, g = s.lines[f.line];
         if (g) {
-          const change = g.n-f.n;
-          focusText = change >= 3 ? `前に注目した系統${f.line}は、${f.n}匹から${g.n}匹へ${f.direction > 0 ? '増え続けています' : '再び増えています'}。`
-            : change <= -3 ? `前に注目した系統${f.line}は、${f.n}匹から${g.n}匹へ減っています。`
+          const anchor = report?.focus?.line === f.line ? report.focus : f;
+          const change = g.n-anchor.n;
+          focusText = change >= 3 ? `前に注目した系統${f.line}は、${anchor.n}匹から${g.n}匹へ増えています。`
+            : change <= -3 ? `前に注目した系統${f.line}は、${anchor.n}匹から${g.n}匹へ減っています。`
               : `前に注目した系統${f.line}は、現在${g.n}匹です。`;
-          if (change >= 3 && trend < 0) { focusText = `全体が減る中でも、系統${f.line}は${f.n}匹から${g.n}匹へ増えています。`; title += '・注目系統は拡大'; }
-          focusChanged = Math.abs(change) >= 3; target = g.target;
-          focusEvidence = { line:f.line, start:f.n, end:g.n, elapsed:s.t-f.t, introduced:g.introduced };
+          if (change >= 3 && trend < 0) { focusText = `全体が減る中でも、系統${f.line}は${anchor.n}匹から${g.n}匹へ増えています。`; title += '・注目系統は拡大'; }
+          focusChanged = Math.abs(change) >= Math.max(3,anchor.n*.25); target = g.target;
+          focusEvidence = { line:f.line, start:anchor.n, end:g.n, elapsed:s.t-anchor.t, introduced:g.introduced };
           st.focus = { ...f, n:g.n, t:s.t, direction:Math.sign(change) || f.direction };
           // A different representative shape is not evidence that this entire lineage has that shape.
           if (s.t-f.since >= 300 || g.n <= 2) st.focus = null;
@@ -194,7 +197,7 @@
       }
       if (!focusText) {
         const candidate = Object.entries(s.lines).map(([line,g])=>({line,g,old:z.a.lines[line]}))
-          .filter(x=>x.old && !x.g.introduced && x.g.n>=5 && x.g.n-x.old.n>=3 && x.g.n>=x.old.n*1.3)
+          .filter(x=>x.old && !x.g.introduced && x.g.n>=Math.max(8,s.n*.02) && x.g.n-x.old.n>=Math.max(5,z.start*.01) && x.g.n>=x.old.n*1.5)
           .sort((a,b)=>(b.g.n-b.old.n)-(a.g.n-a.old.n))[0];
         if (candidate) {
           const {line,g,old} = candidate;
@@ -203,17 +206,42 @@
           focusEvidence = { line,start:old.n,end:g.n,elapsed:z.elapsed,representativeKind:g.target.kind,introduced:false };
         }
       }
-      text += focusText;
-      const news = st.trend !== trend || focusChanged || Math.abs(z.delta)>=Math.max(5,z.start*.1) || st.lastSpokenAt==null || w.t-st.lastSpokenAt>=300;
-      st.lastAt = w.t; st.trend = trend; if (news) st.lastSpokenAt = w.t;
+      const cumulativeChange = !!report && Math.abs(z.end-report.n)>=Math.max(5,report.n*.2);
+      const worldChanged = !report || report.trend!==trend || cumulativeChange;
+      const causeChanged = !!report && deaths>=10 && causeN/deaths>=.6 && report.cause!==cause;
+      const deathSurge = !!previous && deaths>=previous.deaths*2 && deaths-previous.deaths>=Math.max(10,z.start*.1);
+      const intervention = c.introduced+c.founders>0;
+      const news = worldChanged || causeChanged || deathSurge || focusChanged || intervention;
+      st.lastAt = w.t; st.trend = trend;
+      if (!news) return; // Counts keep updating; unchanged situations never create another log entry or utterance.
+      st.lastSpokenAt = w.t;
+      if (cumulativeChange && report.trend===trend) {
+        title = '前の実況から個体数が変化';
+        headline = `前の実況から${Math.round(s.t-report.t)}秒で、全体は${report.n}匹から${z.end}匹になりました。`;
+        text = headline + `直近1分の出生は${c.births}匹、死亡は${deaths}匹です。`;
+      }
+      if (!worldChanged && !intervention) {
+        text = ''; title = deathSurge ? '死亡数が急増' : focusChanged ? '注目系統の続報' : '死亡の内訳が変化';
+        if (deathSurge) text += `直近1分の死亡が前の区間の${previous.deaths}匹から${deaths}匹へ増えました。出生は${c.births}匹です。`;
+        if (causeChanged) text += `最多の死因が${report.cause ? CAUSE[report.cause]+'から' : ''}${CAUSE[cause]}に変わっています。直近1分の死亡${deaths}匹のうち${causeN}匹です。`;
+        if (focusChanged && focusEvidence?.end > focusEvidence?.start) title = '注目系統は拡大';
+      }
+      if (focusChanged) text += focusText;
+      st.report = { t:s.t,n:z.end,trend,cause:deaths ? cause : null,
+        focus:focusChanged ? (st.focus ? { line:st.focus.line,n:st.focus.n,t:s.t } : null) : report?.focus || null };
       const evidence = { from:z.from,to:z.to,start:z.start,end:z.end,delta:z.delta,counts:c,residual:z.residual,naturalBalance:natural,previousMinute:previous,focus:focusEvidence,
+        previousReport:report, triggers:{worldChanged,causeChanged,deathSurge,focusChanged,intervention,cumulativeChange},
         qualification:'個体数の収支と同時に見られた変化の説明です。死因の背景、形態の優位性・適応成功、他島での存続は断定しません。' };
-      let spoken = headline;
+      let spoken = worldChanged || intervention ? headline : '';
       if (c.introduced+c.founders > 0) spoken += `人が加えた${c.introduced+c.founders}匹を含みます。`;
+      else if (!worldChanged) {
+        if (deathSurge) spoken += `直近1分の死亡が${previous.deaths}匹から${deaths}匹へ急増しました。最多の死因は${CAUSE[cause]}です。`;
+        else if (causeChanged) spoken += `最多の死因が${report.cause ? CAUSE[report.cause]+'から' : ''}${CAUSE[cause]}に変わっています。`;
+      }
       else if (c.left-c.arrived > Math.max(0,-natural)) spoken += 'この島を出る個体が、入る個体より多い状態です。';
-      else if (natural < 0) { const cause = Object.keys(CAUSE).sort((a,b)=>c[b]-c[a])[0]; spoken += `出生より死亡が${-natural}匹多く、最も多い死因は${CAUSE[cause]}です。`; }
-      else if (natural > 0) spoken += `死亡より出生が${natural}匹多い状態です。`;
-      spoken += focusText.replace(/代表は\d+体節です。/g,'');
+      else if (natural < 0) { spoken += `${cumulativeChange && report.trend===trend ? '直近1分では、' : ''}出生より死亡が${-natural}匹多い状態です。`; if (!report || causeChanged || deathSurge) spoken += `最も多い死因は${CAUSE[cause]}です。`; }
+      else if (natural > 0) spoken += `${cumulativeChange && report.trend===trend ? '直近1分では、' : ''}死亡より出生が${natural}匹多い状態です。`;
+      if (focusChanged) spoken += focusText.replace(/代表は\d+体節です。/g,'');
       this.emit(w.t, 'story-'+s.segment, title, text, evidence, target, '観測事実', news, 55, news ? spoken : null);
     }
     save(w) { return copy({ format: 'alife2-observer-1', seed: w.seed, t: w.t, tick: w.tick, nextId: w.nextId, rng: w.rand.state(), identity: identity(w), enabled: this.enabled, samples: this.samples, events: this.events, cooldowns: this.cooldowns, records: this.records, regions: this.regions, seq: this.seq, segment: this.segment, lastAnalysis: this.lastAnalysis, extinctions: this.extinctions, ended: [...this.ended], bodyHistory: [...this.bodyHistory], story:this.story }); }
