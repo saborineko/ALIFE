@@ -57,7 +57,7 @@ for (const q of flagged.slice(0, 4)) {
   console.log('  ' + (d.length ? d.map(show).join(' / ') : '差は再現しない') + '\n  配線：' + wiringOf(q.g) + '\n  脳（駆動・旋回・誘導 × 定数・前・左・空腹・揺らぎ）：' + q.g.brain.map(v => v.toFixed(1)).join(' '));
   const rec = { id: q.ids[0], count: q.ids.length, genome: q.g, screen: screen[cands.indexOf(q)], confirm: d, ancestry: [], heirs: [] };
   if (d.length) {
-    const chain = W.ancestors(q.ids[0]).reverse(), seen = new Set(), anc = []; for (const n of chain) { const k = key(n.g); if (!seen.has(k)) { seen.add(k); anc.push({ g: n.g, region: q.region, node: n }); } }
+    const chain = W.ancestors(q.ids[0]).filter(n => n.g).reverse(), seen = new Set(), anc = []; for (const n of chain) { const k = key(n.g); if (!seen.has(k)) { seen.add(k); anc.push({ g: n.g, region: q.region, node: n }); } }
     const ar = compare(anc.slice(-10), [921, 922, 923]);
     console.log('  祖先（古い順、最大 10 世代ぶん）：'); anc.slice(-10).forEach((a, i) => { console.log(`    #${a.node.id} 世代 ${a.node.gen}: ` + (ar[i].length ? ar[i].map(show).join(' / ') : '差なし')); rec.ancestry.push({ id: a.node.id, gen: a.node.gen, diffs: ar[i], genome: a.g }); });
     const heirs = [...groups.values()].filter(h => h !== q && W.ancestors(h.ids[0]).some(n => q.ids.includes(n.id))).slice(0, 6).map(h => Object.assign(h, { region: mode(h.regions) }));

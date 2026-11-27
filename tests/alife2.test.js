@@ -1020,3 +1020,27 @@ test('a reloaded world goes on exactly as the world that was not reloaded, also 
   assert.deepStrictEqual(q.b.segs.map(s => s.theta), o.b.segs.map(s => s.theta), 'the bend the neurons will read');
   for (const n of [1, 30, 300]) { while (w.tick < 47 + n) { w.step(); c.step(); } assert.strictEqual(state(q), state(o), 'after ' + n + ' steps'); }
 });
+
+test('the written past stays within limits: old extinct plans and old ancestors keep their numbers but not their genomes; nothing in the world itself changes', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, mk = () => { const w = new A.engine.World({ seed: 7 }); w.seedWith(G.primordial(7)); for (let i = 0; i < 90; i++) w.step(); return w; }, w = mk(), plain = mk();
+  // a long past, written in by hand: 500 extinct plans of 3 to 502 members, and a trunk of 300 dead ancestors under one living body (every fifth with a changed plan)
+  const g0 = w.bodies[0].g, kind = w.bodies[0].kind;
+  for (let i = 0; i < 500; i++) w.clades.set(900000 + i, { id: 900000 + i, from: 0, line: 1, kind, g: G.copy(g0), V: 1, born: -9000 + i, ended: -8000 + i, members: 3 + i, alive: 0, gen0: 1, genMax: 2, causes: {}, dead: 3 + i, eaten: 0, absorbed: 0, path: 0, lived: 0, kids: 0 });
+  const live = w.tree.get(w.bodies[0].id), root0 = live.parent; let child = live;
+  for (let i = 0; i < 300; i++) { const n = { id: 800000 + i, parent: null, line: live.line, gen: 0, born: -20000 - i * 10, died: -19990 - i * 10, cause: 'aged', kind, V: 1, hue: 1, kids: 1, changed: i % 5 === 0, g: Object.assign(G.copy(g0), { mutations: i }) }; w.tree.set(n.id, n); child.parent = n.id; child = n; }
+  w.thin();
+  const ended = [...w.clades.values()].filter(c => c.ended != null), kept = ended.filter(c => c.g);
+  assert.strictEqual(kept.length, 200); assert.strictEqual(w.genomesDropped, 300); assert.strictEqual(ended.filter(c => c.id >= 900000).length, 500, 'the numbers of every plan stay');
+  assert.ok(kept.some(c => c.members === 502) && kept.some(c => c.ended === -8000 + 499), 'the largest and the latest keep their genomes');
+  const trunk = [...w.tree.values()].filter(n => n.id >= 800000), withG = trunk.filter(n => n.g);
+  assert.ok(w.tree.get(800299).g, 'the one that began the line keeps its genome'); assert.strictEqual(withG.filter(n => n.changed && n.id !== 800299).length, 59 + (800299 % 5 === 0 ? 0 : 1), 'of the old ancestors whose plan changed, the latest sixty');
+  assert.ok(trunk.filter(n => !n.changed && n.id !== 800299).every(n => n.g === null && typeof n.mut === 'number'), 'the others keep the count of their mutations, not the genome');
+  assert.ok(w.bodies.every(o => w.tree.get(o.id).g === o.g), 'the living keep theirs');
+  // the world itself: the same with the long past cut down as without any past written in; and it saves and reloads
+  const state = z => JSON.stringify([z.t, z.rand.state(), z.bodies.map(o => [o.id, o.cx, o.cy, o.E, o.stage]), z.food.length, Array.from(z.nut).slice(0, 50)]);
+  const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); for (let i = 0; i < 900; i++) { w.step(); plain.step(); c.step(); }
+  assert.strictEqual(state(w), state(plain)); assert.strictEqual(state(c), state(plain)); assert.strictEqual(w.ancestors(w.bodies[0].id).filter(n => !n.g).length > 0, true);
+  // limits set very high keep everything
+  const all = mk(); Object.assign(all, { recordPlans: 1e9, recordAge: 1e12, recordSteps: 1e9 }); for (let i = 0; i < 300; i++) all.clades.set(900000 + i, { id: 900000 + i, kind, g: G.copy(g0), born: 0, ended: 1, members: 5, alive: 0, causes: {} }); all.thin(); assert.strictEqual([...all.clades.values()].filter(c => c.g && c.id >= 900000).length, 300);
+});

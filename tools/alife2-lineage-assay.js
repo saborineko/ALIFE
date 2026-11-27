@@ -8,7 +8,7 @@ for (const f of ['development', 'neural', 'physics', 'organs', 'engine']) requir
 const [file, pick, stepArg, secs, ...seedArgs] = process.argv.slice(2), STEP = Number(stepArg) || 10, T = Number(secs) || 150, seeds = seedArgs.length ? seedArgs.map(Number) : [951, 952, 953, 954], C = A.organs.C;
 const W = A.engine.World.restore(JSON.parse(file.endsWith('.gz') ? zlib.gunzipSync(fs.readFileSync(file)) : fs.readFileSync(file)));
 const start = pick && pick !== 'bottom' ? W.bodies.find(o => o.id === Number(pick)) : W.bodies.filter(o => o.cy >= W.yBottom && o.stage >= 1).sort((a, b) => b.path / b.age - a.path / a.age)[0];
-const chain = W.ancestors(start.id).reverse();
+const chain = W.ancestors(start.id).filter(n => n.g).reverse(); // (ancestors older than the world's recordAge keep a genome only where the plan changed)
 const joints = g => A.development.develop(g, { maxSegs: W.maxSegs }).segs.filter(s => s.id > 0 && s.p.muscle > 0.02 && s.p.amp > 0.02).length;
 const firstJoint = chain.find(n => joints(n.g) > 0), pickGen = new Set();
 for (const n of chain) if (n.gen % STEP === 0 || n === chain[chain.length - 1] || (firstJoint && Math.abs(n.gen - firstJoint.gen) <= 6 && (n.gen - firstJoint.gen) % 2 === 0)) pickGen.add(n.gen);

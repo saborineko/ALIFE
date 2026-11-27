@@ -100,6 +100,11 @@
                                           //     angles of its joints, instead of starting again at rest in the pose it was born with. The same holds when it moves to another island
                                           //     and when the population is moved to another map (there it lands at rest, but with its mind). Includes all of `carry`.
     audit: 0,                             // 1 = keep a ledger of all energy entering, leaving and changing form (counting only: nothing behaves differently)
+    // How much of its own past the world keeps written down. These records are notes only: nothing in the world reads them, so the limits change no body and no number
+    // of the world itself. Without limits a save grew for as long as the world ran (28 MB at 149,000 s), and so did the pause of every automatic save.
+    recordPlans: 200,                     // extinct body plans that keep their genome: the half with the most members and the half that ended last. The others keep their numbers
+    recordAge: 6000,                      // an ancestor that died longer ago than this many seconds keeps its genome only if its plan differed from its parent's, or it began a line
+    recordSteps: 60,                      // ... and of those older ancestors whose plan differed, only the latest this many keep it
     genome2: 0,                           // 1 = the newer gene rules: a stretch of an axis can split into two parts without changing the body (and then mutate apart);
                                           // parts nothing leads to are dormant, can be linked in again, and decay slowly; only parts in use count against the limit; genes carry identities
     contact: 0,                           // 1 = bodies cannot pass through one another, and a mouth tears tissue from whatever body it touches. What is torn is lost to its owner:
@@ -663,6 +668,19 @@
       for (const id of this.tree.keys()) if (!keep.has(id)) { this.tree.delete(id); this.pruned++; }
     }
     ancestors(id) { const out = []; let n = this.tree.get(id); while (n) { out.push(n); n = this.tree.get(n.parent); } return out; }
+    // Keep the written past within limits (see recordPlans, recordAge, recordSteps). Only records are touched: genomes of plans and of ancestors that nothing alive carries.
+    thin() {
+      const P = this.recordPlans, ended = []; for (const c of this.clades.values()) if (c.ended != null && c.g) ended.push(c);
+      if (ended.length > P) { const keep = new Set(); ended.sort((a, b) => b.members - a.members || b.ended - a.ended || a.id - b.id); for (let i = 0; i < Math.ceil(P / 2); i++) keep.add(ended[i]);
+        ended.sort((a, b) => b.ended - a.ended || a.id - b.id); for (let i = 0; i < ended.length && keep.size < P; i++) keep.add(ended[i]);
+        for (const c of ended) if (!keep.has(c)) { c.g = null; this.genomesDropped = (this.genomesDropped || 0) + 1; } }
+      const old = this.t - this.recordAge, turned = []; // ancestors: the trunk of the genealogy is one body per generation for as long as the world has run
+      for (const n of this.tree.values()) { if (!n.g || n.died == null || n.died >= old || n.introduction || !this.tree.has(n.parent)) continue; if (n.changed) turned.push(n); else { n.mut = n.g.mutations; n.g = null; } }
+      if (turned.length > this.recordSteps) { turned.sort((a, b) => b.died - a.died || b.id - a.id); for (let i = this.recordSteps; i < turned.length; i++) { turned[i].mut = turned[i].g.mutations; turned[i].g = null; } }
+      if (this.clades.size > 4000) { // the records of one and two bodies went first (above); if plans with more members alone are too many, the smallest and oldest of the extinct go
+        const gone = [...this.clades.values()].filter(c => c.ended != null).sort((a, b) => a.members - b.members || a.ended - b.ended || a.id - b.id);
+        for (let i = 0; i < gone.length && this.clades.size > 3500; i++) { this.clades.delete(gone[i].id); this.cladesDropped = (this.cladesDropped || 0) + 1; } }
+    }
     // dissolved food at a point, interpolated between cell centres (so a body can, in principle, tell one side from the other)
     // What bodies leak spreads through the water and fades. Every living body leaks where it is, in proportion to its resting metabolism.
     stepScent(dt) {
@@ -1051,6 +1069,7 @@
       if (this.tick % 900 === 0) {
         this.prune();
         if (this.clades.size > 4000) { let drop = this.clades.size - 3500; for (const [id, c] of this.clades) { if (drop <= 0) break; if (c.ended != null && c.members <= 2) { this.clades.delete(id); drop--; this.cladesDropped = (this.cladesDropped || 0) + 1; } } }
+        this.thin();
         const c = this.census(); this.history.push(c); if (this.history.length > 1500) this.history.splice(0, 300);
         if (this.sound) this.soundFirsts(c);
         const lines = new Set(this.bodies.map(o => o.line)); for (const k of this.liveLines || []) if (!lines.has(k)) this.log('系統 ' + k + ' が絶滅');
@@ -1068,7 +1087,7 @@
         patch: this.patch, grainDebt: this.grainDebt || 0, bottomDebt: this.bottomDebt || 0, liveLines: this.liveLines ? [...this.liveLines] : null, regionState: this.regions ? this.regions.map(q => ({ debt: q.debt, patch: q.patch })) : null,
         introductions: this.introductions, counts: this.counts, events: this.events, history: this.history, firsts: this.firsts, pruned: this.pruned, tree: [...this.tree.values()],
         // body plans that only one or two bodies ever had keep their numbers but not their genome (worlds begun before this rule still carry them)
-        clades: [...this.clades.values()].map(c => c.ended != null && c.members <= 2 && c.g ? Object.assign({}, c, { g: null }) : c), cladesDropped: this.cladesDropped || 0, faults: this.faults && this.faults.length ? this.faults : undefined /* (bodies taken out by the safety valve: written only if there are any) */,
+        clades: [...this.clades.values()].map(c => c.ended != null && c.members <= 2 && c.g ? Object.assign({}, c, { g: null }) : c), cladesDropped: this.cladesDropped || 0, genomesDropped: this.genomesDropped || undefined, faults: this.faults && this.faults.length ? this.faults : undefined /* (bodies taken out by the safety valve: written only if there are any) */,
         bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home, v0: o.V0, s0: o.stage0, si: o.seepIn || undefined, so: o.seepOut || undefined, hd: o.held == null ? undefined : o.held, p2: o.p2 || undefined, got: o.got ? [o.got.id, o.got.g] : undefined, vo: o.voN ? [o.voOn ? 1 : 0, o.voN, o.voT || 0, o.voE || 0] : undefined, hp: o.hp || undefined, flesh: o.flesh || undefined, lost: o.lost || undefined,
           sig: b.hasCircuit ? b.segs.map(q => q.a) : undefined,
           st: { x: Array.from(b.x), y: Array.from(b.y), vx: Array.from(b.vx), vy: Array.from(b.vy), t: b.t, work: b.work, heat: b.heat, cilia: b.ciliaUse, nerve: b.nerveUse, om: b.om || 0, th: b.th || 0, loc: b.loc ? Array.from(b.loc) : null, inertia: b.inertia == null ? null : b.inertia, carried: b.carried == null ? null : b.carried, cmd: b.cmd,
@@ -1078,7 +1097,7 @@
     // Older saves (without `exact`) lack pose, velocities, rhythm phase, sensory memory and birth region: bodies then restart from rest.
     static restore(d) {
       if (!d || d.format !== 'alife2-world-1') throw new Error('not an ALIFE 2.0 world');
-      const w = new World(d.opt); w.introductions = d.introductions; w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = Object.assign({}, d.counts); for (const k of ['killed', 'flesh', 'torn', 'stillborn']) if (w.counts[k] == null) w.counts[k] = 0; /* worlds saved before bodies could touch */ w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; if (d.faults) w.faults = d.faults; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
+      const w = new World(d.opt); w.introductions = d.introductions; w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = Object.assign({}, d.counts); for (const k of ['killed', 'flesh', 'torn', 'stillborn']) if (w.counts[k] == null) w.counts[k] = 0; /* worlds saved before bodies could touch */ w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; if (d.faults) w.faults = d.faults; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0; if (d.genomesDropped) w.genomesDropped = d.genomesDropped;
       if (w.sound && d.snd) { w.snd = d.snd.f.map(unb64); w.sndIn = d.snd.i.map(unb64); w.sndV = d.snd.v.map(unb64); w.sndVIn = d.snd.vi.map(unb64); w.aco = Object.assign(w.acoNew(), d.snd.aco || {}); while (w.aco.lis.length < 3) w.aco.lis.push(w.acoNew().lis[0]); for (const c of w.aco.lis) if (!c.ids) c.ids = {}; /* (worlds saved before the notebook grew keep what they had) */ }
       for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: d.exact ? f[5] : w.t + f[5] });
       if (d.exact) { w.grainDebt = d.grainDebt; w.bottomDebt = d.bottomDebt; if (d.liveLines) w.liveLines = new Set(d.liveLines); if (d.regionState && w.regions) d.regionState.forEach((q, i) => { w.regions[i].debt = q.debt; w.regions[i].patch = q.patch; }); }

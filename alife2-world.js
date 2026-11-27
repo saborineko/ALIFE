@@ -249,12 +249,12 @@
     list.sort(f === 'recent' ? (a, b) => b.ended - a.ended : (a, b) => b.members - a.members);
     $('lost').textContent = '';
     for (const c of list.slice(0, 12)) card($('lost'), c.g, c.members + '匹 ' + (c.genMax - c.gen0 + 1) + '世代\n' + kindText(c.kind), () => { shown = c; }, shown === c);
-    $('lostNote').textContent = '体制の記録 ' + w.clades.size + '（うち絶滅 ' + all.length + '、該当 ' + list.length + '）' + (w.cladesDropped ? ' / 容量のため省いた2匹以下の記録 ' + w.cladesDropped : '');
+    $('lostNote').textContent = '体制の記録 ' + w.clades.size + '（うち絶滅 ' + all.length + '、該当 ' + list.length + '）' + (w.cladesDropped ? ' / 容量のため省いた記録 ' + w.cladesDropped : '') + (w.genomesDropped ? ' / 数だけ残して遺伝子を省いた絶滅体制 ' + w.genomesDropped : '');
   }
   function ancestry() {
     const box = $('ancestry'); box.textContent = '';
     if (!sel) return;
-    const chain = w.ancestors(sel.id), steps = chain.filter((n, i) => i === 0 || n.changed || i === chain.length - 1);
+    const chain = w.ancestors(sel.id), steps = chain.filter((n, i) => (i === 0 || n.changed || i === chain.length - 1) && n.g); // (an old ancestor may have kept its numbers but not its genome: see recordAge in the engine)
     for (const n of steps.slice(0, 16)) card(box, n.g, '#' + n.id + ' 世代' + n.gen + '\n' + kindText(n.kind), () => { shown = n; }, shown === n);
     if (!steps.length) box.textContent = '記録なし';
   }
@@ -485,7 +485,7 @@
     } catch (e) { $('introNote').textContent = '投入できない：' + e.message; }
     finally { button.disabled = false; }
   };
-  $('csv').onclick = () => { const rows = ['id,parent,line,generation,born,died,cause,segments,mouths,eye,working_joint,adult_volume,children,mutations,introduction_seed,introduction_root,introduction_time']; for (const n of w.tree.values()) rows.push([n.id, n.parent, n.line, n.gen, Math.round(n.born), n.died == null ? '' : Math.round(n.died), n.cause || '', ...n.kind.split('/'), n.V.toFixed(3), n.kids, n.g.mutations, n.introduction ? n.introduction.seed : '', n.introduction ? n.introduction.root : '', n.introduction ? n.introduction.t : ''].join(',')); download('alife2-lineage-t' + Math.round(w.t) + '.csv', rows.join('\n'), 'text/csv'); };
+  $('csv').onclick = () => { const rows = ['id,parent,line,generation,born,died,cause,segments,mouths,eye,working_joint,adult_volume,children,mutations,introduction_seed,introduction_root,introduction_time']; for (const n of w.tree.values()) rows.push([n.id, n.parent, n.line, n.gen, Math.round(n.born), n.died == null ? '' : Math.round(n.died), n.cause || '', ...n.kind.split('/'), n.V.toFixed(3), n.kids, n.g ? n.g.mutations : n.mut == null ? '' : n.mut, n.introduction ? n.introduction.seed : '', n.introduction ? n.introduction.root : '', n.introduction ? n.introduction.t : ''].join(',')); download('alife2-lineage-t' + Math.round(w.t) + '.csv', rows.join('\n'), 'text/csv'); };
   $('rank').onchange = $('lostFilter').onchange = () => { lastPanels = 0; };
   // The choice to save automatically is remembered. With it on, opening the page again (a forced reload included)
   // carries on from the last automatic save instead of starting a new world.
