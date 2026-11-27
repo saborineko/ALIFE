@@ -81,8 +81,9 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <div id="observerTrack" class="note"></div><button id="observerUntrack">実況からの追跡を解除</button>
     <p class="note">観測事実＝数えた変化／相関＝同時に見られた変化／仮説＝未検証の説明。形態や出生だけで成功とは判定しない。死因はエンジンの分類で、背景の因果説明とは別。観測を切ると停止中は欠測になります。</p>
     <div id="observerEvents" style="max-height:450px;overflow:auto"></div>
+    <details><summary>観測メモ・珍しい構造・記録更新（詳細）</summary><div id="observerSignals" style="max-height:350px;overflow:auto"></div></details>
     <div id="observerExtinct" class="note"></div>
-    <div class="controls"><label><input id="observerSpeech" type="checkbox">重要実況の読み上げ（30秒以上あける）</label><label><input id="observerSnapshot" type="checkbox">重要イベント時に世界を記録（毎分最大1回・直近2件）</label><button id="observerSnapshotSave" disabled>直近のイベント世界を保存</button></div>
+    <div class="controls"><label><input id="observerSpeech" type="checkbox">世界の流れを読み上げる（30秒以上あける）</label><label><input id="observerSnapshot" type="checkbox">重要イベント時に世界を記録（毎分最大1回・直近2件）</label><button id="observerSnapshotSave" disabled>直近のイベント世界を保存</button></div>
     <div class="controls"><button id="observerJSON">履歴JSON</button><button id="observerText">実況テキスト</button><label>履歴を確認 <input id="observerImport" type="file" accept=".json"></label></div>
     <div class="note">世界の保存・自動保存には観測履歴も含みます。イベント世界はこの島の状態です。島同士は非同期で進むため同時刻の総計とは扱いません。</div><div id="observerNotice" class="note" role="status"></div>
   </section>

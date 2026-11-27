@@ -14,12 +14,14 @@
       this.enabled = true; this.samples = []; this.events = []; this.cooldowns = {}; this.records = {};
       this.regions = []; this.positions = new Map(); this.seq = 0; this.segment = 0; this.lastAnalysis = -Infinity;
       this.extinctions = { total: 0, small: 0, departures: 0 }; this.ended = new Set(); this.bodyHistory = new Map();
+      this.story = { lastAt: null, lastSpokenAt: null, trend: null, focus: null };
     }
     baseline(w) {
       this.segment++; this.positions.clear(); this.bodyHistory.clear(); this.regions = (w.regions || [{ name: '水槽' }]).map(r => ({ name: r.name, counts: zero() }));
       for (const b of w.bodies) this.positions.set(b.id, this.region(w, b));
       // Existing or unobserved extinctions are history, not newly observed events.
       for (const c of w.clades.values()) if (c.ended != null) this.ended.add(c.id);
+      this.story = { lastAt: w.t, lastSpokenAt: null, trend: null, focus: null };
       this.lastAnalysis = w.t; this.sample(w, true);
     }
     region(w, b) { return w.regions ? w.regionAt(b.cx) : 0; }
@@ -38,10 +40,10 @@
       }
       if (!this.samples.length || w.t - this.samples.at(-1).t >= 2 - 1e-8) this.sample(w);
     }
-    emit(t, key, title, text, evidence = {}, target = null, level = '観測事実', important = false, interval = 300) {
+    emit(t, key, title, text, evidence = {}, target = null, level = '観測事実', important = false, interval = 300, spoken = null) {
       if (this.cooldowns[key] != null && t - this.cooldowns[key] < interval) return;
       this.cooldowns[key] = t;
-      this.events.push({ id: ++this.seq, t, key, title, text, evidence, target, level, important });
+      this.events.push({ id: ++this.seq, t, key, title, text, evidence, target, level, important, spoken });
       if (this.events.length > 300) this.events.splice(0, this.events.length - 300);
       if (this.onEvent) this.onEvent(this.events.at(-1));
       // Bounded even during a very long run with constantly changing clades.
@@ -91,6 +93,7 @@
         residual: delta - net(c), regions: b.regions.map((r, i) => { const p = a.regions[i], c = diff(r.counts, p.counts); return { name: r.name, start: p.n, end: r.n, delta: r.n - p.n, counts: c, residual: r.n - p.n - net(c) }; }), a, b };
     }
     analyse(w, s) {
+      this.narrate(w, s);
       for (const seconds of [60, 300, 1000]) {
         const z = this.window(seconds); if (!z.complete || z.residual !== 0) continue;
         if (Math.abs(z.delta) >= Math.max(5, z.start * 0.15)) {
@@ -114,7 +117,7 @@
       // Establish baseline records silently. A long-lived loaded world did not just set a new record.
       for (const [key, value, label] of [['population', s.n, '個体数'], ['segments', Math.max(0, ...w.bodies.map(b => b.full.segs)), '現存個体の最大体節数'], ['generation', Math.max(0, ...w.bodies.map(b => b.gen)), '現存個体の最大世代']]) {
         const prev = this.records[key]; this.records[key] = Math.max(prev || 0, value);
-        if (prev != null && value > prev) this.emit(w.t, 'record-' + key, '観測開始後の記録更新', `${label}：${prev}→${value}。複雑さや出生世代数だけでは成功とは判定できない。`, { previous: prev, value }, null, '観測事実', true, 60);
+        if (prev != null && value > prev) this.emit(w.t, 'record-' + key, '観測開始後の記録更新', `${label}：${prev}→${value}。複雑さや出生世代数だけでは成功とは判定できない。`, { previous: prev, value }, null, '観測事実', false, 60);
       }
       const rare = Object.entries(s.kinds).filter(([k, g]) => g.n <= 2 && s.n >= 20 && (Number(k.split('/')[0]) >= 4 || k.split('/').slice(2, 4).includes('1')));
       for (const [k, g] of rare.slice(0, 2)) this.emit(w.t, 'rare-' + k, '珍しい構造の候補', `${kindText(k)}：現存${g.n}/${s.n}匹。観測時点で少数。生存・繁殖・世代継承の成功は未判定。`, { n: g.n, population: s.n }, g.target, '観測事実', false, 1000);
@@ -137,11 +140,84 @@
       if (ended || departures) this.emit(w.t, 'extinction-summary', '体制の消失を集約', `観測中の累計：死亡を含む消失${this.extinctions.total}件（累計1〜2匹の体制${this.extinctions.small}件）、移出だけの消失${this.extinctions.departures}件。細かな絶滅ログは元の記録に保持。`, { ...this.extinctions }, null, '観測事実', false, 300);
       if (this.ended.size > 6000) this.ended = new Set([...w.clades.values()].filter(c => c.ended != null).map(c => c.id));
     }
-    save(w) { return copy({ format: 'alife2-observer-1', seed: w.seed, t: w.t, tick: w.tick, nextId: w.nextId, rng: w.rand.state(), identity: identity(w), enabled: this.enabled, samples: this.samples, events: this.events, cooldowns: this.cooldowns, records: this.records, regions: this.regions, seq: this.seq, segment: this.segment, lastAnalysis: this.lastAnalysis, extinctions: this.extinctions, ended: [...this.ended], bodyHistory: [...this.bodyHistory] }); }
+    // One continuing account per minute, assembled from balanced counts. No biological cause is inferred.
+    narrate(w, s) {
+      const z = this.window(60), st = this.story;
+      if (!z?.complete || z.residual !== 0 || (st.lastAt != null && w.t - st.lastAt < 60 - 1e-5)) return;
+      const c = z.counts, deaths = c.starved+c.aged+c.killed+c.broken, natural = c.births-deaths;
+      const threshold = Math.max(3, z.start*0.03), trend = z.delta > threshold ? 1 : z.delta < -threshold ? -1 : 0;
+      let title = trend > 0 ? '世界全体は増加中' : trend < 0 ? '世界全体は減少中' : '世界全体はほぼ横ばい';
+      let text = trend ? `この1分、全体は${Math.abs(z.delta)}匹${trend > 0 ? '増えて' : '減って'}${z.end}匹になりました。` : `この1分、全体は${z.start}匹から${z.end}匹で、ほぼ横ばいです。`;
+      const headline = text;
+      if (c.introduced || c.founders) text += `人が加えた個体が${c.introduced+c.founders}匹含まれます。`;
+      if (c.arrived || c.left) text += `島の出入りは、移入${c.arrived}匹、移出${c.left}匹です。`;
+      if (deaths > 0) {
+        const [cause, n] = Object.keys(CAUSE).map(k=>[k,c[k]]).sort((a,b)=>b[1]-a[1])[0];
+        text += `出生${c.births}匹に対し死亡${deaths}匹で、${n === deaths ? '死因は' : '最も多い死因は'}${CAUSE[cause]}です。`;
+      } else if (c.births > 0) text += `出生は${c.births}匹で、この間に死亡はありません。`;
+      // Compare adjacent, complete minutes; never compare lifetime totals or bridge missing observations.
+      const priorEnd = z.a, priorStart = this.samples.find(p=>p.segment===s.segment && p.t >= priorEnd.t-60-1e-7);
+      let previous = null;
+      if (priorStart && priorEnd.t-priorStart.t >= 60-1e-5) {
+        const d = diff(priorEnd.counts,priorStart.counts), n = d.starved+d.aged+d.killed+d.broken;
+        if (priorEnd.n-priorStart.n === net(d)) {
+          previous = { births:d.births, deaths:n, delta:priorEnd.n-priorStart.n };
+          if (trend < 0 && c.births < d.births && d.births-c.births >= 3 && d.births-c.births >= deaths-n) text += `前の1分より出生が${d.births-c.births}匹減っています。`;
+          else if (trend < 0 && deaths-n >= 3) text += `前の1分より死亡が${deaths-n}匹増えています。`;
+        }
+      }
+      let focusText = '', target = null, focusChanged = false, focusEvidence = null;
+      if (st.focus) {
+        const f = st.focus, g = s.lines[f.line];
+        if (g) {
+          const change = g.n-f.n;
+          focusText = change >= 3 ? `前に注目した系統${f.line}は、${f.n}匹から${g.n}匹へ${f.direction > 0 ? '増え続けています' : '再び増えています'}。`
+            : change <= -3 ? `前に注目した系統${f.line}は、${f.n}匹から${g.n}匹へ減っています。`
+              : `前に注目した系統${f.line}は、現在${g.n}匹です。`;
+          if (change >= 3 && trend < 0) { focusText = `全体が減る中でも、系統${f.line}は${f.n}匹から${g.n}匹へ増えています。`; title += '・注目系統は拡大'; }
+          focusChanged = Math.abs(change) >= 3; target = g.target;
+          focusEvidence = { line:f.line, start:f.n, end:g.n, elapsed:s.t-f.t, introduced:g.introduced };
+          st.focus = { ...f, n:g.n, t:s.t, direction:Math.sign(change) || f.direction };
+          // A different representative shape is not evidence that this entire lineage has that shape.
+          if (s.t-f.since >= 300 || g.n <= 2) st.focus = null;
+        } else if (w.bodies.some(b=>String(b.line)===String(f.line))) {
+          focusText = `系統${f.line}は集計の上位から外れました。姿を消したとは限りません。`; st.focus = null;
+        } else {
+          focusText = `前に注目した系統${f.line}は、この島から姿を消しました。`; focusChanged = true;
+          focusEvidence = { line:f.line, previous:f.n, aliveOnThisIsland:0, survivalElsewhere:'未確認' }; st.focus = null;
+        }
+      }
+      if (!focusText) {
+        const candidate = Object.entries(s.lines).map(([line,g])=>({line,g,old:z.a.lines[line]}))
+          .filter(x=>x.old && !x.g.introduced && x.g.n>=5 && x.g.n-x.old.n>=3 && x.g.n>=x.old.n*1.3)
+          .sort((a,b)=>(b.g.n-b.old.n)-(a.g.n-a.old.n))[0];
+        if (candidate) {
+          const {line,g,old} = candidate;
+          focusText = `${trend < 0 ? '全体が減る中でも' : 'その中で'}、系統${line}は${old.n}匹から${g.n}匹へ増えています。代表は${g.target.kind.split('/')[0]}体節です。`;
+          st.focus = { line, n:g.n, t:s.t, since:s.t, direction:1 }; target = g.target; focusChanged = true;
+          focusEvidence = { line,start:old.n,end:g.n,elapsed:z.elapsed,representativeKind:g.target.kind,introduced:false };
+        }
+      }
+      text += focusText;
+      const news = st.trend !== trend || focusChanged || Math.abs(z.delta)>=Math.max(5,z.start*.1) || st.lastSpokenAt==null || w.t-st.lastSpokenAt>=300;
+      st.lastAt = w.t; st.trend = trend; if (news) st.lastSpokenAt = w.t;
+      const evidence = { from:z.from,to:z.to,start:z.start,end:z.end,delta:z.delta,counts:c,residual:z.residual,naturalBalance:natural,previousMinute:previous,focus:focusEvidence,
+        qualification:'個体数の収支と同時に見られた変化の説明です。死因の背景、形態の優位性・適応成功、他島での存続は断定しません。' };
+      let spoken = headline;
+      if (c.introduced+c.founders > 0) spoken += `人が加えた${c.introduced+c.founders}匹を含みます。`;
+      else if (c.left-c.arrived > Math.max(0,-natural)) spoken += 'この島を出る個体が、入る個体より多い状態です。';
+      else if (natural < 0) { const cause = Object.keys(CAUSE).sort((a,b)=>c[b]-c[a])[0]; spoken += `出生より死亡が${-natural}匹多く、最も多い死因は${CAUSE[cause]}です。`; }
+      else if (natural > 0) spoken += `死亡より出生が${natural}匹多い状態です。`;
+      spoken += focusText.replace(/代表は\d+体節です。/g,'');
+      this.emit(w.t, 'story-'+s.segment, title, text, evidence, target, '観測事実', news, 55, news ? spoken : null);
+    }
+    save(w) { return copy({ format: 'alife2-observer-1', seed: w.seed, t: w.t, tick: w.tick, nextId: w.nextId, rng: w.rand.state(), identity: identity(w), enabled: this.enabled, samples: this.samples, events: this.events, cooldowns: this.cooldowns, records: this.records, regions: this.regions, seq: this.seq, segment: this.segment, lastAnalysis: this.lastAnalysis, extinctions: this.extinctions, ended: [...this.ended], bodyHistory: [...this.bodyHistory], story:this.story }); }
     restore(w, saved) {
       if (!saved || saved.format !== 'alife2-observer-1' || saved.seed !== w.seed || saved.tick !== w.tick || saved.nextId !== w.nextId || Math.abs(saved.t-w.t) > 1e-7 || JSON.stringify(saved.rng) !== JSON.stringify(w.rand.state()) || saved.identity !== identity(w)) return false;
       if (!Array.isArray(saved.samples) || saved.samples.length > 502 || !Array.isArray(saved.events) || saved.events.length > 300 || !Array.isArray(saved.regions) || saved.regions.length !== this.regions.length || saved.samples.some(s => !Number.isFinite(s.t) || !s.counts || !Array.isArray(s.regions)) || saved.events.some(e => !Number.isSafeInteger(e.id) || !Number.isFinite(e.t) || typeof e.text !== 'string')) return false;
       for (const k of ['enabled', 'seq', 'segment', 'lastAnalysis', 'records', 'extinctions', 'regions', 'cooldowns']) if (saved[k] != null) this[k] = copy(saved[k]);
+      if (saved.story && (saved.story.lastAt==null || Number.isFinite(saved.story.lastAt))) this.story=copy(saved.story);
+      else this.story={lastAt:null,lastSpokenAt:null,trend:null,focus:null};
       this.samples = copy(saved.samples); this.events = copy(saved.events); this.ended = new Set(saved.ended || []); this.bodyHistory = new Map(saved.bodyHistory || []); return true;
     }
     text() { return this.events.map(e => `${e.t.toFixed(1)}秒【${e.level}】${e.title}：${e.text}`).join('\n'); }
