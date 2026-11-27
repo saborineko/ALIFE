@@ -239,7 +239,7 @@
       if (this.noCilia) for (const p of g.parts) p.cilia = 0;
       const o = { id: this.nextId++, g, stage, taxDot: 0, taxLen: 0, taxN: 0, sx: x, sy: y, age: 0, G: 0, egg: 0, grow: 0, dead: false, noise: 0, wander: this.rand() * TAU, path: 0, eaten: 0, absorbed: 0, kids: 0,
         parent: parent ? parent.id : 0, line: parent ? parent.line : this.nextId - 1, gen: parent ? parent.gen + 1 : 0, born: this.t };
-      if (parent && parent.introduction) o.introduction = parent.introduction;
+      if (parent && (parent.introduction || parent.introFrom)) o.introduction = parent.introduction || parent.introFrom;
       const C = A.organs.C, baby = A.organs.profile(A.development.develop(g, { stage: g.birth, maxSegs: this.maxSegs, pair: this.pair }));
       { const plan = A.development.develop(g, { maxSegs: this.maxSegs }); o.full = A.organs.profile(plan); o.gu = this.geneUse(g, plan); } o.life = o.full.life * (0.85 + 0.3 * this.rand());
       { const y = this.yolkOf(g); o.eggCost = C.eggFixed + baby.buildCost + y * baby.Emax; o.eggE = y * baby.Emax; }
@@ -980,11 +980,12 @@
       }
       for (const o of born) {
         const split = this.mutsplit, mm = this.metamut || split ? (o.g.mut == null ? 1 : o.g.mut) : 1, mw = split ? (o.g.mutW == null ? mm : o.g.mutW) : 1; // (a lineage that comes from the one-gene rule starts with the width it had)
-        let src = o.g, two = 0; if (this.mix && o.got) { src = A.genome.recombine(o.g, o.got.g, this.rand, this.sound); two = o.got.id; o.got = null; } // an egg made from two genomes; the material taken up is used
+        let src = o.g, two = 0, mate = null; if (this.mix && o.got) { src = A.genome.recombine(o.g, o.got.g, this.rand, this.sound); two = o.got.id; mate = o.got.g.origin; o.got = null; } // an egg made from two genomes; the material taken up is used
         const g = this.rand() < this.mutation * mm ? A.genome.mutate(src, this.rand, split ? mw : this.metamut ? mm : undefined, A.rules.flags(this), split ? 1 : undefined) : two ? src : A.genome.copy(o.g);
         if (split) { if (this.rand() < this.mutation) g.mut = clamp(mm * Math.exp(this.rand.gauss() * 0.15), 0.1, 3); if (this.rand() < this.mutation) g.mutW = clamp(mw * Math.exp(this.rand.gauss() * 0.15), 0.1, 3); } // the two genes drift whether or not this birth mutates
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
-        g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
+        // (an egg made from two genomes is of natural descent only if both are: genes of a designed, explored or introduced body carry their mark through mixing too)
+        g.origin = (o.g.origin === 'primordial' || o.g.origin === 'evolved') && (!two || mate === 'primordial' || mate === 'evolved') ? 'evolved' : 'evolved-from-artificial';
         const a = this.rand() * TAU, d = Math.sqrt(o.prof.V) + 1, bx = o.cx + Math.cos(a) * d, by = clamp(o.cy + Math.sin(a) * d, 2, this.H - 2), B = o.eggCost - C.eggFixed; // B: what the egg holds
         let stage = g.birth;
         if (this.budget) {
@@ -994,7 +995,8 @@
             this.counts.stillborn++; o.kids--; if (lg) { lg.eggFixed += C.eggFixed; lg.stillborn += B - (e0 - e); } if (this.recycle) this.giveBack(bx, by, B - (e0 - e)); continue;
           }
         }
-        const kid = this.spawn(g, bx, by, stage, o); this.counts.births++; if (two) { kid.p2 = two; this.tree.get(kid.id).p2 = two; this.counts.mixed = (this.counts.mixed || 0) + 1; }
+        if (two && !o.introduction) { const n2 = this.tree.get(two); if (n2 && n2.introduction) o.introFrom = n2.introduction; } // the other genome came from an introduced line: the young is of that line's making too
+        const kid = this.spawn(g, bx, by, stage, o); this.counts.births++; if (o.introFrom) o.introFrom = null; if (two) { kid.p2 = two; this.tree.get(kid.id).p2 = two; this.counts.mixed = (this.counts.mixed || 0) + 1; }
         if (this.budget) { const left = B - kid.prof.buildCost; kid.E = Math.min(kid.prof.Emax, left); const yolk = left - kid.E; if (yolk > 0) { if (kid.stage < 1) kid.grow += yolk; else kid.egg += yolk; } } // what the body and its reserve do not use stays with the young as yolk
         if (lg) { lg.eggFixed += C.eggFixed; lg.mutation += kid.prof.buildCost + kid.E + kid.grow + kid.egg - B; } // (earlier rule: the parent paid for the young its own genes describe, the young is built from its own)
       }

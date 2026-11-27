@@ -64,3 +64,17 @@ test('ordinary reproduction marks descendants as artificial ancestry', () => {
   assert.deepEqual(kid.introduction,root.introduction); assert.equal(kid.line,root.line);
   assert.deepEqual(w.firsts,{});
 });
+
+test('where genes mix, a young that carries an introduced body\'s genes is marked as of artificial descent, whichever parent laid the egg', () => {
+  const w = W({ contact: 1, mix: 1, mutation: 0 }); w.seedWith(genome(), 2); for (let i = 0; i < 3; i++) w.step();
+  const mother = w.bodies[0]; mother.g.origin = 'evolved'; const guest = w.introduce(Object.assign(A.genome.primordial(9), { hue: 300 }), { count: 1 })[0];
+  mother.got = { id: guest.id, g: guest.g }; mother.E = mother.prof.Emax; mother.egg = mother.eggCost;
+  for (let i = 0; i < 5 && !w.bodies.some(o => o.parent === mother.id); i++) w.step();
+  const kid = w.bodies.find(o => o.parent === mother.id); assert.ok(kid && kid.p2 === guest.id);
+  assert.equal(kid.g.origin, 'evolved-from-artificial'); assert.deepEqual(kid.introduction, guest.introduction); assert.deepEqual(w.tree.get(kid.id).introduction, guest.introduction);
+  assert.equal(kid.line, mother.line); assert.equal(mother.introduction, undefined); assert.deepEqual(w.firsts, {});
+  // two natural parents: nothing changes
+  const v = W({ contact: 1, mix: 1, mutation: 0 }); v.seedWith(genome(), 2); for (let i = 0; i < 3; i++) v.step(); const [a, b] = v.bodies; a.g.origin = b.g.origin = 'evolved';
+  a.got = { id: b.id, g: b.g }; a.E = a.prof.Emax; a.egg = a.eggCost; for (let i = 0; i < 5 && !v.bodies.some(o => o.parent === a.id); i++) v.step();
+  const k2 = v.bodies.find(o => o.parent === a.id); assert.ok(k2 && k2.p2 === b.id); assert.equal(k2.g.origin, 'evolved'); assert.equal(k2.introduction, undefined);
+});
