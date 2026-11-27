@@ -44,3 +44,9 @@ test('no record or rare structure is voiced; focus and timing survive history re
 test('a quiet unchanged world does not repeat the same spoken report every minute',()=>{
   const {say}=fixture();assert.ok(say(60,100,0,0,3).spoken);assert.equal(say(120,100,0,0,3).spoken,null);
 });
+test('a burst of observation notes cannot evict the narrative before the UI or speaker sees it',()=>{
+  const {say,o,w}=fixture(),story=say(60,80,10,30,8);
+  for(let i=0;i<400;i++)o.emit(w.t,'note-'+i,'詳細','詳細');
+  assert.equal(o.events.length,300);assert.ok(o.events.some(e=>e.id===story.id&&e.spoken));
+  assert.ok(o.events.every((e,i)=>!i||o.events[i-1].id<e.id));
+});

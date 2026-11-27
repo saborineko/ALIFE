@@ -44,8 +44,13 @@
       if (this.cooldowns[key] != null && t - this.cooldowns[key] < interval) return;
       this.cooldowns[key] = t;
       this.events.push({ id: ++this.seq, t, key, title, text, evidence, target, level, important, spoken });
-      if (this.events.length > 300) this.events.splice(0, this.events.length - 300);
-      if (this.onEvent) this.onEvent(this.events.at(-1));
+      const emitted = this.events.at(-1);
+      if (this.events.length > 300) {
+        const stories = this.events.filter(e=>e.key.startsWith('story-')).slice(-16);
+        const notes = this.events.filter(e=>!e.key.startsWith('story-')).slice(-(300-stories.length));
+        this.events = [...stories,...notes].sort((a,b)=>a.id-b.id);
+      }
+      if (this.onEvent) this.onEvent(emitted);
       // Bounded even during a very long run with constantly changing clades.
       if (Object.keys(this.cooldowns).length > 2000) for (const k of Object.keys(this.cooldowns)) if (t - this.cooldowns[k] > 1000) delete this.cooldowns[k];
     }
