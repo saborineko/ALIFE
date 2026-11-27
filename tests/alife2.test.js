@@ -1075,3 +1075,34 @@ test('brain: neurons can be wired to the root segment and to a name over the who
   const w = new A.engine.World({ seed: 5, founders: 0, cap: 0, nerve2: 1, wire: 1, brain: 1 }); w.spawn(G.copy(big), 60, 40, 1, null); for (let i = 0; i < 200; i++) w.step();
   const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); for (let i = 0; i < 200; i++) { w.step(); w2.step(); } const sig = x => JSON.stringify(x.bodies.map(q => [q.cx, q.cy, q.E, q.b.segs.map(s => (s.na ? Array.from(s.na) : null))])); assert.strictEqual(sig(w2), sig(w)); assert.ok(w.bodies[0].b.segs[0].na.length === 12);
 });
+
+test('rewire: a connection withers while it is not used and forms while it is, at a heritable speed; the body pays only for what is there; the same genome wires differently in different lives; off by default', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, N = A.neural, C = A.organs.C, dt = 1 / 30;
+  // one segment, one neuron that drives the cilia; its connections are given in each case
+  const one = ins => G.create({ parts: [G.part({ len: 1.2, r0: 0.5, r1: 0.45, cilia: 0.5, beat: -1, nerve: 0.5, gut: 0.5, mouth: 0.3, nn: [{ id: 0, b: 0, k: 1, in: ins, out: [['C', 1]] }] })], links: [] });
+  const live = (g, taste, secs, rew) => { const b = P.build(develop(g)), t = new Float64Array(1); for (let i = 0; i < secs * 30; i++) { t[0] = taste(i / 30); N.local(b, t, 0.6, null, null, false, true, 0, false, rew == null ? dt : rew); } return b; };
+  const wave = s => 0.5 + 0.45 * Math.sin(s * 1.2), flat = () => 0.5, pw = g => A.organs.profile(develop(g)).wiring;
+  // born present (+0.5): the taste connection, used, stays; the touch connection, never used (nothing touches), is gone after 200 s, and the wiring paid for shrinks by its share
+  { const g = one([['c', 3, 0, 0.5], ['t', 2, 0, 0.5]]), b = live(g, wave, 200), z = b.segs[0].nz; assert.ok(z[0] > 0.8 && z[1] < 0.1, Array.from(z).join());
+    assert.ok(Math.abs(b.wd - N.REW.share * (3 * (z[0] - 1) + 2 * (z[1] - 1))) < 1e-9, 'what it now pays less'); assert.ok(pw(g) + b.wd < pw(g) - 1.7);
+    // the same genome in water that never changes: the taste connection is not used either, and goes
+    const still = live(g, flat, 200); assert.ok(still.segs[0].nz[0] < 0.1 && z[0] - still.segs[0].nz[0] > 0.3, 'two lives, two circuits'); }
+  // not there at birth (-0.5): costs a tenth of its strength until it forms; forms from a source that is active with the neuron (hunger), not from a silent one (touch)
+  { const g = one([['c', 3], ['h', 2, 0, -0.5], ['t', 2, 0, -0.5]]), b0 = live(g, wave, 0.1), b = live(g, wave, 100), z = b.segs[0].nz; assert.ok(b0.segs[0].nz[1] < 0.02 && b0.segs[0].nz[0] === 1); assert.ok(z[1] > 0.8 && z[2] < 0.05, Array.from(z).join());
+    assert.ok(Math.abs(pw(g) - (pw(one([['c', 3], ['h', 2], ['t', 2]])) - 2 * N.REW.share * 2 + 2 * N.REW.gene * 0.5)) < 1e-12, 'static cost: the share that is only paid once formed is left out, the ability itself is charged'); assert.ok(b.wd > 1.5); }
+  // a connection that is not there carries nothing: with the taste connection withered, the neuron no longer follows the water
+  { const g = one([['c', 3, 0, 1]]), b = live(g, flat, 300), t = new Float64Array(1); let lo = 9, hi = -9; assert.ok(b.segs[0].nz[0] < 0.01); for (let i = 0; i < 60; i++) { t[0] = wave(i / 30); N.local(b, t, 0.6, null, null, false, true, 0, false, 0.000001); lo = Math.min(lo, b.segs[0].na[0]); hi = Math.max(hi, b.segs[0].na[0]); } assert.ok(hi - lo < 0.05, 'deaf to it: ' + (hi - lo)); }
+  // without the rule (no time passed to the rule): the genes do nothing, every connection is there in full, nothing is tracked
+  { const b = live(one([['c', 3, 0, 0.5], ['t', 2, 0, -0.5]]), wave, 20, 0); assert.strictEqual(b.segs[0].nz, undefined); assert.strictEqual(b.wd, undefined); }
+  // in a world: the upkeep really paid is lower by what has withered; the state survives save and reload exactly, and growth; off by default
+  const spend = (ins, rewire) => { const w = new A.engine.World({ seed: 5, founders: 0, cap: 0, nerve2: 1, contact: 1, rewire, audit: 1 }), o = w.spawn(one(ins), 60, 40, 1, null); o.E = o.prof.Emax; for (let i = 0; i < 9000; i++) w.step(); return { w, basal: w.ledger.basal }; };
+  const fixed = spend([['c', 3], ['t', 2]], 1), goes = spend([['c', 3], ['t', 2, 0, 0.5]], 1), off = spend([['c', 3], ['t', 2, 0, 0.5]], 0);
+  assert.ok(fixed.basal - goes.basal > C.synapse * (0.9 * 2 * 200 - 0.1 * 300) && fixed.basal - goes.basal < C.synapse * 0.9 * 2 * 300, 'saved: ' + (fixed.basal - goes.basal)); assert.ok(off.basal > fixed.basal, 'where the rule is off the gene only costs');
+  assert.strictEqual(new A.engine.World({ seed: 1 }).rewire, 0); assert.strictEqual(A.rules.normalize({ rewire: 1 }).nerve2, 1);
+  const w = goes.w, w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), nz = x => JSON.stringify(x.bodies.map(q => [q.E, q.b.segs.map(s => (s.nz ? Array.from(s.nz) : null))])); assert.strictEqual(nz(w2), nz(w)); for (let i = 0; i < 300; i++) { w.step(); w2.step(); } assert.strictEqual(nz(w2), nz(w));
+  { const k = new A.engine.World({ seed: 5, founders: 0, cap: 0, nerve2: 1, contact: 1, rewire: 1, carry: 1 }), o = k.spawn(one([['c', 3], ['t', 2, 0, 0.5]]), 60, 40, 0.6, null); for (let i = 0; i < 3000; i++) k.step(); const before = Array.from(o.b.segs[0].nz); assert.ok(before[1] < 0.2); o.stage = Math.min(1, o.stage + 0.1); k.form(o, o.cx, o.cy, 0); assert.deepStrictEqual(Array.from(o.b.segs[0].nz), before, 'what a body has wired stays through growth'); }
+  // mutation gives the genes only where the world has the rule
+  const count = flags => { let m = one([['c', 3], ['t', 2]]), n = 0; const r = G.rng(11); for (let i = 0; i < 200; i++) { m = G.mutate(m, r, 1, flags); if (m.parts.some(p => (p.nn || []).some(q => q.u != null || q.in.some(e => e[3])))) n++; } return n; };
+  assert.strictEqual(count('nwl'), 0); assert.ok(count('nwy') > 100);
+});

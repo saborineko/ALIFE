@@ -81,6 +81,10 @@
                                           // 0 = the earlier rule: the young is born at the stage and size its own genes describe, whatever the parent paid
     carry: 0,                             // 1 = when a body is rebuilt for growth, each segment keeps its nerve signal, what its senses had adapted to, and the body keeps its rhythm
                                           // (a segment is known by its address). 0 = the earlier rule: these start from nothing at every growth step
+    rewire: 0,                            // 1 (needs nerve2) = the wiring itself changes in a body's life. A connection may carry a heritable number: above 0 it is there at
+                                          // birth and withers while its neuron and its source are not active together; below 0 it is not there at birth and forms while they are.
+                                          // The size of the number is the speed; a neuron has a heritable threshold for "active together". What is not there carries no signal and
+                                          // costs no upkeep, so two bodies with one genome and different lives end with different circuits. 0 or absent = fixed, as before.
     brain: 0,                             // 1 (needs wire) = the nervous system can grow apart from the body. A part may carry up to 16 neurons instead of 4; a neuron can be wired
                                           // to the neuron of a given name in the root segment (r) or to the mean of that name over all the other segments (d), so a centre can gather
                                           // from the whole body and speak to all of it; mutation can copy a block of neurons from one part into another. Reach costs upkeep: a far
@@ -287,7 +291,7 @@
       // wounds stay with the segments they are on while the body is rebuilt for growth (a segment is known by its address, not its number)
       const was = o.hp && o.plan ? new Map(o.plan.segs.map((s, i) => [s.addr, o.hp[i]])) : null;
       const kept = this.keep && o.b && o.plan ? this.mindOf(o, true) : null;
-      const mind = !kept && this.carry && o.b && o.plan ? { t: o.b.t, seg: new Map(o.plan.segs.map((s, i) => { const q = o.b.segs[i]; return [s.addr, [q.a, q.m, q.mA, q.mB, q.mV, q.v, q.na ? Float64Array.from(q.na) : null, q.nA, q.nB, q.nV, q.nw ? Float64Array.from(q.nw) : null]]; })) } : null;
+      const mind = !kept && this.carry && o.b && o.plan ? { t: o.b.t, seg: new Map(o.plan.segs.map((s, i) => { const q = o.b.segs[i]; return [s.addr, [q.a, q.m, q.mA, q.mB, q.mV, q.v, q.na ? Float64Array.from(q.na) : null, q.nA, q.nB, q.nV, q.nw ? Float64Array.from(q.nw) : null, q.nz ? Float64Array.from(q.nz) : null]]; })) } : null;
       o.plan = A.development.develop(o.g, { stage: o.stage, maxSegs: this.maxSegs, pair: this.pair, late: this.wireLate, ends: this.wireEnds ? this : null }); o.prof = A.organs.profile(o.plan);
       if (was) { o.hp = o.plan.segs.map(s => (was.has(s.addr) ? was.get(s.addr) : 1)); if (this.solid) for (let i = 1; i < o.hp.length; i++) { const pa = o.plan.segs[i].parent; if (pa > 0 && o.hp[pa] <= 0) o.hp[i] = 0; } } // (solid) nothing grows beyond a cut
       o.b = A.physics.build(o.plan, { x, y, angle: ang, env: { fluid: 1, ground: false, gravity: 4, flowX: 0, flowY: 0 } });
@@ -296,7 +300,7 @@
       A.physics.pose(o.b); o.cx = x; o.cy = y; o.work0 = 0;
       if (this.solid) { o.b.hard = true; o.self = this.selfPairs(o); } // (as the body is built, before its joints are set to where they were)
       if (kept) this.mindTo(o, kept, true);
-      if (mind) { o.b.t = mind.t; o.plan.segs.forEach((s, i) => { const v = mind.seg.get(s.addr); if (!v) return; const q = o.b.segs[i]; q.a = v[0]; q.m = v[1]; if (v[2] != null) q.mA = v[2]; if (v[3] != null) q.mB = v[3]; if (v[4] != null) q.mV = v[4]; if (v[5] != null) q.v = v[5]; if (v[6] && q.p.nn && q.p.nn.length === v[6].length) { q.na = v[6]; q.nb = new Float64Array(v[6].length); } if (v[7] != null) q.nA = v[7]; if (v[8] != null) q.nB = v[8]; if (v[9] != null) q.nV = v[9]; if (v[10] && q.p.nn && A.neural.compile(q.p.nn).total === v[10].length) q.nw = v[10]; }); }
+      if (mind) { o.b.t = mind.t; o.plan.segs.forEach((s, i) => { const v = mind.seg.get(s.addr); if (!v) return; const q = o.b.segs[i]; q.a = v[0]; q.m = v[1]; if (v[2] != null) q.mA = v[2]; if (v[3] != null) q.mB = v[3]; if (v[4] != null) q.mV = v[4]; if (v[5] != null) q.v = v[5]; if (v[6] && q.p.nn && q.p.nn.length === v[6].length) { q.na = v[6]; q.nb = new Float64Array(v[6].length); } if (v[7] != null) q.nA = v[7]; if (v[8] != null) q.nB = v[8]; if (v[9] != null) q.nV = v[9]; if (v[10] && q.p.nn && A.neural.compile(q.p.nn).total === v[10].length) q.nw = v[10]; if (v[11] && q.p.nn && A.neural.compile(q.p.nn).total === v[11].length) q.nz = v[11]; }); }
       // a body with no working joint cannot do anything but drift: move it with the water instead of simulating it
       if (!this.rigid) o.b.rigid = false; // control experiment: solve every body with the jointed solver
       if (o.b.rigid) o.self = null;
@@ -355,7 +359,7 @@
     // (keep) What a body's nerves hold, segment by segment (a segment is known by its address in the body, not by its number), and — with `motion` — how the
     // body is moving: the speed of its centre, its spin, and the angle of every joint. Plain numbers and lists, so that it can travel between islands.
     mindOf(o, motion) {
-      const b = o.b, P = A.physics, seg = o.plan.segs.map((s, i) => { const q = b.segs[i], e = {}; for (const k of MIND) if (q[k] != null) e[k] = q[k]; if (q.na) e.na = Array.from(q.na); if (q.nw) e.nw = Array.from(q.nw); if (motion && i) e.th = Math.atan2(b.segs[q.parent].dx * q.dy - b.segs[q.parent].dy * q.dx, b.segs[q.parent].dx * q.dx + b.segs[q.parent].dy * q.dy); return [s.addr, e]; });
+      const b = o.b, P = A.physics, seg = o.plan.segs.map((s, i) => { const q = b.segs[i], e = {}; for (const k of MIND) if (q[k] != null) e[k] = q[k]; if (q.na) e.na = Array.from(q.na); if (q.nw) e.nw = Array.from(q.nw); if (q.nz) e.nz = Array.from(q.nz); if (motion && i) e.th = Math.atan2(b.segs[q.parent].dx * q.dy - b.segs[q.parent].dy * q.dx, b.segs[q.parent].dx * q.dx + b.segs[q.parent].dy * q.dy); return [s.addr, e]; });
       const mind = { t: b.t, seg };
       if (motion) { const c = P.com(b), mo = P.momentum(b); let I = 0; for (let k = 0; k < b.np; k++) I += b.m[k] * ((b.x[k] - c[0]) ** 2 + (b.y[k] - c[1]) ** 2); mind.vx = mo[0] / b.mass; mind.vy = mo[1] / b.mass; mind.om = I > 1e-12 ? (mo[2] - b.mass * (c[0] * mind.vy - c[1] * mind.vx)) / I : 0; }
       return mind;
@@ -364,7 +368,8 @@
       const b = o.b, P = A.physics, at = new Map(mind.seg); b.t = mind.t;
       o.plan.segs.forEach((s, i) => { const e = at.get(s.addr); if (!e) return; const q = b.segs[i]; for (const k of MIND) if (e[k] != null) q[k] = e[k];
         if (e.na && q.p.nn && q.p.nn.length === e.na.length) { q.na = Float64Array.from(e.na); q.nb = new Float64Array(e.na.length); }
-        if (e.nw && q.p.nn && A.neural.compile(q.p.nn).total === e.nw.length) q.nw = Float64Array.from(e.nw); });
+        if (e.nw && q.p.nn && A.neural.compile(q.p.nn).total === e.nw.length) q.nw = Float64Array.from(e.nw);
+        if (e.nz && q.p.nn && A.neural.compile(q.p.nn).total === e.nz.length) q.nz = Float64Array.from(e.nz); });
       if (!motion || mind.vx == null) return;
       // the joints that were there before stand at the angle they had (a body that keeps its shape has no joint to set), then the whole body moves on as it did
       if (!b.rigid) { const c0 = P.com(b), ang = new Float64Array(b.segs.length); ang[0] = Math.atan2(b.segs[0].dy, b.segs[0].dx);
@@ -405,6 +410,7 @@
       if (o.solid != null && !!o.solid !== !!this.solid) { this.solid = o.solid ? 1 : 0; for (const q of this.bodies) { q.b.hard = !!this.solid; q.self = this.solid && !q.b.rigid ? this.selfPairs(q) : null; if (q.hp) this.wound(q); } this.log('世界の設定を変更：身体を全長にわたって固い物体として扱う規則（側面の接触・自分自身との接触・関節の止まり・失った組織の重さ・切断）を' + (o.solid ? '有効にした' : '無効にした')); }
       if (o.wireEnds != null && !!o.wireEnds !== !!this.wireEnds) { this.wireEnds = o.wireEnds ? 1 : 0; for (const q of this.bodies) { q.nextCost = null; const root = q.b.segs[0]; this.form(q, q.cx, q.cy, Math.atan2(root.dy, root.dx)); } this.log('世界の設定を変更：相手（感覚・効果器・隣の体節）のある結合だけを作り、相手の無い結合には維持費がかからない規則を' + (o.wireEnds ? '有効にした（身体のすることは変わらない）' : '無効にした')); }
       if (o.wireLate != null && !!o.wireLate !== !!this.wireLate) { this.wireLate = o.wireLate ? 1 : 0; for (const q of this.bodies) if (q.stage < 1 && q.g.parts.some(p => p.nAt > q.stage)) { q.nextCost = null; const root = q.b.segs[0]; this.form(q, q.cx, q.cy, Math.atan2(root.dy, root.dx)); } this.log('世界の設定を変更：部品ごとに、回路を作る成長の段階が遺伝し、変異する規則を' + (o.wireLate ? '有効にした（遺伝子の無い部品は、これまでどおり生まれたときから回路を持つ）' : '無効にした（どの回路も生まれたときからある）')); }
+      if (o.rewire != null && !!o.rewire !== !!this.rewire) { this.rewire = o.rewire ? 1 : 0; this.log('世界の設定を変更：神経の結合そのものが一生のうちに細る・できる規則を' + (o.rewire ? '有効にした（使われない結合は細って維持費がかからなくなり、使われる結合ができる。速さと条件は遺伝する）' : '無効にした（結合はいまの遺伝子どおりに固定される）')); if (!this.rewire) for (const q of this.bodies) { q.b.wd = 0; for (const sg of q.b.segs) delete sg.nz; } }
       if (o.brain != null && !!o.brain !== !!this.brain) { this.brain = o.brain ? 1 : 0; this.log('世界の設定を変更：神経系が身体と別に増える・遠くへつながる規則を' + (o.brain ? '有効にした（部品あたり 16 神経まで、根の体節と全身への結合、神経のまとまりの複製）' : '無効にした（いまある神経と結合はそのまま働く）')); }
       if (o.wire != null && !!o.wire !== !!this.wire) { this.wire = o.wire ? 1 : 0; this.log('世界の設定を変更：神経に名前を付け、結合が相手を名前で指す規則を' + (o.wire ? '有効にした（神経が減っても増えても、ほかの結合はずれない）' : '無効にした')); }
       if (o.keep != null && !!o.keep !== !!this.keep) { this.keep = o.keep ? 1 : 0; this.log('世界の設定を変更：身体が作り直されても・移されても、神経の状態・身につけた結合・動きを保つ規則を' + (o.keep ? '有効にした' : '無効にした')); }
@@ -964,7 +970,7 @@
           }
           if (this.contact && (this.numbSkin || o.numbSkin)) for (let i = 0; i < segs.length; i++) { segs[i].tch = 0; segs[i].torn = 0; }
           if (this.sound && b.hasEar) this.hear(o);
-          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax, smA, smB, this.vision, this.contact, this.learn ? dt : 0, this.sound) * dt;
+          b.nerveUse += A.neural.local(b, taste, 1 - o.E / pr.Emax, smA, smB, this.vision, this.contact, this.learn ? dt : 0, this.sound, this.rewire ? dt : 0) * dt;
           if (this.sound && b.hasVoice) { if (this.mute || o.mute) { o.voOn = false; o.voL = 0; } else this.voiceOut(o, dt); if ((this.tick + o.id) % 30 === 0 && (o.voN > 0 || o.voOn)) this.voiceNote(o); /* (only bodies that have ever sounded: the record is about when a caller calls, not about who has a voice) */ }
         }
         // a body that cannot move itself is simply carried by the water, and lies still on a stepped floor. On a sloping floor it gets the same physics as any body: the current drags it, the floor holds it by its weight
@@ -1012,6 +1018,7 @@
         if (this.sound) { const dC = b.ciliaUse - o.cil0, dW = b.work - o.work0; if (dC > 0) this.emit(o.cx, o.cy, o.sp, this.soundWork ? SND.muscle * P.K.cilia * dC * (o.vSelf || 0) : SND.cilia * dC, 'cilia'); if (dW > 0) this.emit(o.cx, o.cy, o.sp, SND.muscle * dW, 'muscle'); }
         if (lg) { lg.basal += pr.basal * dt; lg.work += C.work * (b.work - o.work0); lg.cilia += C.ciliaWork * (b.ciliaUse - o.cil0); lg.nerve += C.spike * (b.nerveUse - o.nerve0); }
         o.E -= pr.basal * dt + C.work * (b.work - o.work0) + C.ciliaWork * (b.ciliaUse - o.cil0) + C.spike * (b.nerveUse - o.nerve0); o.work0 = b.work; o.cil0 = b.ciliaUse; o.nerve0 = b.nerveUse;
+        if (this.rewire && b.wd) { const e = C.synapse * b.wd * dt; o.E -= e; if (lg) lg.basal += e; } // (rewire) upkeep follows the wiring that is there now: less for what has withered, more for what has formed
         if (o.E > pr.Emax) { if (lg) lg.clip += o.E - pr.Emax; if (this.recycle) this.giveBack(o.cx, o.cy, o.E - pr.Emax); o.E = pr.Emax; }
         o.age += dt;
         if (o.E <= 0) { o.dead = 'starved'; continue; }
@@ -1096,7 +1103,7 @@
         bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home, v0: o.V0, s0: o.stage0, si: o.seepIn || undefined, so: o.seepOut || undefined, hd: o.held == null ? undefined : o.held, p2: o.p2 || undefined, got: o.got ? [o.got.id, o.got.g] : undefined, vo: o.voN ? [o.voOn ? 1 : 0, o.voN, o.voT || 0, o.voE || 0] : undefined, hp: o.hp || undefined, flesh: o.flesh || undefined, lost: o.lost || undefined,
           sig: b.hasCircuit ? b.segs.map(q => q.a) : undefined,
           st: { x: Array.from(b.x), y: Array.from(b.y), vx: Array.from(b.vx), vy: Array.from(b.vy), t: b.t, work: b.work, heat: b.heat, cilia: b.ciliaUse, nerve: b.nerveUse, om: b.om || 0, th: b.th || 0, loc: b.loc ? Array.from(b.loc) : null, inertia: b.inertia == null ? null : b.inertia, carried: b.carried == null ? null : b.carried, cmd: b.cmd,
-            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB, q.v == null ? null : q.v, q.mV == null ? null : q.mV, q.mo == null ? null : q.mo, q.na ? Array.from(q.na) : null, q.na ? [q.nA == null ? null : q.nA, q.nB == null ? null : q.nB, q.nV == null ? null : q.nV] : null].concat(q.nw || q.ate || q.mE != null || q.nE != null || q.theta != null ? [q.nw ? Array.from(q.nw) : null, q.ate || 0, q.mE == null ? null : q.mE, q.nE == null ? null : q.nE].concat(q.theta != null ? [q.theta] : []) : [])), /* (the last number: the bend of the segment's joint as its neurons will read it at the next step, which is the bend before the last move, not the one the saved positions give) */ noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
+            segs: b.segs.map(q => [q.a, q.m, q.cd, q.ct, q.press, q.target, q.act, q.osc, q.dir, q.mA == null ? null : q.mA, q.mB == null ? null : q.mB, q.v == null ? null : q.v, q.mV == null ? null : q.mV, q.mo == null ? null : q.mo, q.na ? Array.from(q.na) : null, q.na ? [q.nA == null ? null : q.nA, q.nB == null ? null : q.nB, q.nV == null ? null : q.nV] : null].concat(q.nw || q.ate || q.mE != null || q.nE != null || q.theta != null || q.nz ? [q.nw ? Array.from(q.nw) : null, q.ate || 0, q.mE == null ? null : q.mE, q.nE == null ? null : q.nE].concat(q.theta != null || q.nz ? [q.theta == null ? null : q.theta] : []).concat(q.nz ? [Array.from(q.nz)] : []) : [])), /* (the last number: the bend of the segment's joint as its neurons will read it at the next step, which is the bend before the last move, not the one the saved positions give) */ noise: o.noise, wander: o.wander, seen: o.seen || null, sx: o.sx, sy: o.sy, sdt: o.sdt || 0, taxDot: o.taxDot, taxLen: o.taxLen, taxN: o.taxN, work0: o.work0, cil0: o.cil0, nerve0: o.nerve0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage } }; })
       };
     }
     // Older saves (without `exact`) lack pose, velocities, rhythm phase, sensory memory and birth region: bodies then restart from rest.
@@ -1123,7 +1130,7 @@
         if (st) { // put the body back exactly as it was
           const b = o.b; b.x.set(st.x); b.y.set(st.y); b.vx.set(st.vx); b.vy.set(st.vy); b.t = st.t; b.work = st.work; b.heat = st.heat; b.ciliaUse = st.cilia; b.nerveUse = st.nerve; b.carried = st.carried == null ? undefined : st.carried; b.cmd = st.cmd;
           if (b.rigid && st.loc) { b.om = st.om; b.th = st.th; b.loc.set(st.loc); b.inertia = st.inertia; } // the same numbers, not the same quantities recomputed in another orientation
-          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; if (v[11] != null) q.v = v[11]; if (v[12] != null) q.mV = v[12]; if (v[13] != null) q.mo = v[13]; if (v[14]) { q.na = Float64Array.from(v[14]); q.nb = new Float64Array(q.na.length); } if (v[15]) { if (v[15][0] != null) q.nA = v[15][0]; if (v[15][1] != null) q.nB = v[15][1]; if (v[15][2] != null) q.nV = v[15][2]; } if (v[16]) q.nw = Float64Array.from(v[16]); if (v[17]) q.ate = v[17]; if (v[18] != null) q.mE = v[18]; if (v[19] != null) q.nE = v[19]; if (v[20] != null) q.theta = v[20]; });
+          st.segs.forEach((v, i) => { const q = b.segs[i]; q.a = v[0]; q.m = v[1]; q.cd = v[2]; q.ct = v[3]; q.press = v[4]; q.target = v[5]; q.act = v[6]; q.osc = v[7]; q.dir = v[8]; if (v[9] != null) q.mA = v[9]; if (v[10] != null) q.mB = v[10]; if (v[11] != null) q.v = v[11]; if (v[12] != null) q.mV = v[12]; if (v[13] != null) q.mo = v[13]; if (v[14]) { q.na = Float64Array.from(v[14]); q.nb = new Float64Array(q.na.length); } if (v[15]) { if (v[15][0] != null) q.nA = v[15][0]; if (v[15][1] != null) q.nB = v[15][1]; if (v[15][2] != null) q.nV = v[15][2]; } if (v[16]) q.nw = Float64Array.from(v[16]); if (v[17]) q.ate = v[17]; if (v[18] != null) q.mE = v[18]; if (v[19] != null) q.nE = v[19]; if (v[20] != null) q.theta = v[20]; if (v[21]) q.nz = Float64Array.from(v[21]); });
           A.physics.pose(b); o.cx = s.x; o.cy = s.y;
           Object.assign(o, { noise: st.noise, wander: st.wander, seen: st.seen, sx: st.sx, sy: st.sy, sdt: st.sdt, taxDot: st.taxDot, taxLen: st.taxLen, taxN: st.taxN, work0: st.work0, cil0: st.cil0, nerve0: st.nerve0, nextCost: st.nextCost, nextStage: st.nextStage });
         }

@@ -43,8 +43,8 @@
   // con: bodies touch in this world; each segment carries the push on it (s.tch), the tearing of it (s.torn) and what is left of it (s.hp).
   // snd: sound exists in this world; each segment with an ear carries how loud the water is at its outer end, over the pitches it is tuned to, in s.e.
   // Then a segment's signal and neurons can also drive its voice: s.vo (0 silent .. 1 full) and s.vq (its pitch pushed down -1 .. up 1).
-  function local(body, taste, hunger, smA, smB, vis, con, learn, snd) {
-    const segs = body.segs; let use = 0, hd = 0, bus = false; // hd (record only): how hard what the ears report is pushing on this body's circuit right now
+  function local(body, taste, hunger, smA, smB, vis, con, learn, snd, rew) {
+    const segs = body.segs; let use = 0, hd = 0, bus = false, wd = 0; // wd (rewire): how much more, or less, wiring this body has now than it was born with; hd (record only): how hard what the ears report is pushing on this body's circuit right now
     for (let i = 0; i < segs.length; i++) {
       const s = segs[i]; if (!s.circ) continue;
       const p = s.p, kids = s.kids; let kid = 0;
@@ -69,6 +69,10 @@
         const na = s.na, nb = s.nb, parentSeg = s.parent >= 0 ? segs[s.parent] : null, twin = s.twin >= 0 ? segs[s.twin] : null; let eC = 0, eT = 0, eJ = 0, eM = 0, eP = 0, eV = 0, eQ = 0, any = 0;
         // (learn) connections that change with use: each has, beside the strength its genes give it, a part that this body has acquired in its life
         const lw = learn && nn.learns ? (s.nw && s.nw.length === nn.total ? s.nw : (s.nw = new Float64Array(nn.total))) : null;
+        // (rewire) connections that come and go with use: each has a presence, 0 (not there) to 1 (there), that this body's life has given it. A connection born present
+        // (its gene > 0) starts at 1, one that must form (gene < 0) at 0. While the neuron and the source are active together it moves towards 1, otherwise towards 0,
+        // at a speed set by the gene. What is not there carries no signal and costs no upkeep.
+        const lz = rew && nn.rewires ? (s.nz && s.nz.length === nn.total ? s.nz : (s.nz = presence(nn))) : null;
         for (let q = 0; q < n; q++) { const N = nn[q]; let y = N.b;
           for (let e = 0; e < N.src.length; e++) { let v = 0; const j = N.idx[e];
             switch (N.src[e]) {
@@ -84,18 +88,21 @@
               case 17: v = named(segs[0], j); break; // (brain) the neuron of that name in the root segment
               case 18: { if (!bus) bus = busOf(segs); const own = nn.pos ? nn.pos.get(j) : (j < n ? j : null), k2 = busN[j] - (own != null ? 1 : 0); v = k2 > 0 ? (busSum[j] - (own != null ? na[own] : 0)) / k2 : 0; } break; // (brain) the mean of the neurons of that name in all the other segments
             }
-            if (lw) { pre[e] = v; y += (N.w[e] + lw[N.off + e]) * v; } else y += N.w[e] * v;
+            if (lz) { pre[e] = v; y += (lw ? N.w[e] + lw[N.off + e] : N.w[e]) * (N.life[e] !== 0 ? lz[N.off + e] : 1) * v; } else if (lw) { pre[e] = v; y += (N.w[e] + lw[N.off + e]) * v; } else y += N.w[e] * v;
             if (snd && N.src[e] === 16 && s.e != null) { const ev = N.w[e] * (v + 1 - p.adapt); hd += ev < 0 ? -ev : ev; } } // (record; only where the segment has an ear: a neuron that reads an ear the segment lacks reads nothing)
           const v2 = na[q] + N.k * (Math.tanh(y) - na[q]); nb[q] = v2; use += v2 < 0 ? -v2 : v2;
           if (lw && N.plastic) { // used together, a connection grows (or shrinks, by its gene); where one input gates the change, only while that input is active. What was acquired fades slowly.
             const gate = N.m >= 0 && N.m < N.src.length ? pre[N.m] : 1;
             for (let e = 0; e < N.eta.length; e++) if (N.eta[e] !== 0) { let d = lw[N.off + e]; d += learn * (N.eta[e] * pre[e] * v2 * gate - 0.005 * d); lw[N.off + e] = d < -2 ? -2 : d > 2 ? 2 : d; } }
+          if (lz && N.rew) for (let e = 0; e < N.life.length; e++) { const L = N.life[e]; if (L === 0) continue; let z = lz[N.off + e]; const a2 = pre[e] * v2, sp = L < 0 ? -L : L;
+            z += rew * sp * ((a2 < 0 ? -a2 : a2) > N.u ? REW.up * (1 - z) : -REW.down * z); lz[N.off + e] = z < 0 ? 0 : z > 1 ? 1 : z; wd += REW.share * N.aw[e] * (z - (L < 0 ? 0 : 1)); }
           for (let e = 0; e < N.eff.length; e++) { const z = N.ew[e] * v2; any = 1; switch (N.eff[e]) { case 0: eC += z; break; case 1: eT += z; break; case 2: eJ += z; break; case 3: eM += z; break; case 4: eP += z; break; case 5: eV += z; break; case 6: eQ += z; } } }
         if (any) { const c3 = s.cd + eC; s.cd = c3 < 0 ? 0 : c3 > 2 ? 2 : c3; s.ct += eT; s.nj = eJ; s.np = eP; if (eM !== 0) { const mo = (s.mo == null ? 1 : s.mo) + eM; s.mo = mo < 0 ? 0 : mo > 1 ? 1 : mo; } if (snd) { const vo = s.vo + eV; s.vo = vo < 0 ? 0 : vo > 1 ? 1 : vo; s.vq = eQ < -1 ? -1 : eQ > 1 ? 1 : eQ; } }
       }
     }
     for (let i = 0; i < segs.length; i++) { const s = segs[i]; if (s.na && s.nb) { const t = s.na; s.na = s.nb; s.nb = t; } } // all neurons step together
     if (snd) body.hd = hd;
+    if (rew) body.wd = wd;
     return use;
   }
   // One smell receptor: the same two readings as taste (how much there is; or, as far as it adapts, the change against a slow average).
@@ -106,11 +113,15 @@
   }
   const CIRCUIT = ['nC', 'nP', 'nK', 'nH', 'nB', 'mCil', 'mTurn', 'mJoint', 'adapt', 'sA', 'sB', 'vE', 'sT', 'sW', 'mBite', 'hE', 'mVoice'];
   // what a part's wiring costs to keep: the strengths of the single signal's connections, and for each neuron its connections and a share for the cell itself
-  const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) w += Math.abs(e[1]) + (e[2] ? 0.5 * Math.abs(e[2]) : 0); for (const e of q.out) w += Math.abs(e[1]); } return w; };
+  // (rewire) REW: how fast presence follows use (per second, times the gene: towards 1 while used, towards 0 while not), the share of a connection's upkeep that is only
+  // paid while it is there, and what the ability itself costs (per unit of the gene, like the ability to learn).
+  const REW = { up: 0.2, down: 0.05, share: 0.9, gene: 0.2 };
+  const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) { w += Math.abs(e[1]) + (e[2] ? 0.5 * Math.abs(e[2]) : 0); if (e[3]) w += REW.gene * Math.abs(e[3]) - (e[3] < 0 ? REW.share * Math.abs(e[1]) : 0); /* (a connection that is not there at birth costs its share only once it has formed: see local) */ } for (const e of q.out) w += Math.abs(e[1]); } return w; };
+  const presence = nn => { const z = new Float64Array(nn.total); for (const N of nn) for (let e = 0; e < N.life.length; e++) z[N.off + e] = N.life[e] < 0 ? 0 : 1; return z; };
   // neurons, made ready to run: sources and targets as numbers. Done once per part.
   const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14, g: 15, e: 16, r: 17, d: 18 }, EFF = { C: 0, T: 1, J: 2, M: 3, P: 4, V: 5, Q: 6 }, ready = new WeakMap();
   function compile(nn) { let c = ready.get(nn); if (!c) { let off = 0; const named = nn.some(q => q.id != null), pos = named ? new Map(nn.map((q, i) => [q.id == null ? i : q.id, i])) : null, at = e => { const id = NAME.indexOf(e[0][1]); if (e[0][0] === 'p' || e[0][0] === 'k' || e[0][0] === 'r' || e[0][0] === 'd') return id; const i = pos.get(id); return i == null ? 255 : i; }; /* (wire) neurons with names: a reference means the neuron of that name. Those to this part (s, m) are settled here; those to another segment (p, k) when read; a name nobody has reads 0 */
-    c = nn.map(q => { const N = { b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? (named ? at(e) : +e[0][1]) : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]), eta: q.in.map(e => e[2] || 0), m: q.m == null ? -1 : q.m, off }; N.plastic = N.eta.some(x => x !== 0); off += q.in.length; return N; }); c.total = off; c.pos = pos; c.learns = c.some(N => N.plastic); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); c.ids = nn.map((q, i) => (q.id == null ? i : q.id)); /* (brain) the name of each neuron, for the body-wide reading */ ready.set(nn, c); } return c; }
+    c = nn.map(q => { const N = { b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? (named ? at(e) : +e[0][1]) : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]), eta: q.in.map(e => e[2] || 0), m: q.m == null ? -1 : q.m, off, life: q.in.map(e => e[3] || 0), aw: q.in.map(e => Math.abs(e[1])), u: q.u == null ? 0.15 : q.u }; N.plastic = N.eta.some(x => x !== 0); N.rew = N.life.some(x => x !== 0); off += q.in.length; return N; }); c.total = off; c.pos = pos; c.learns = c.some(N => N.plastic); c.rewires = c.some(N => N.rew); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); c.ids = nn.map((q, i) => (q.id == null ? i : q.id)); /* (brain) the name of each neuron, for the body-wide reading */ ready.set(nn, c); } return c; }
   const pre = new Float64Array(8); // (the inputs of the neuron being worked on)
   // (brain) every name's sum and count over the whole body, from the neurons' values of a moment ago. Made once per body per step, and only if some neuron asks.
   const busSum = new Float64Array(36), busN = new Float64Array(36);
@@ -123,6 +134,6 @@
   // (wire) the neuron called `id` in another segment: found by its name in that segment's own part (or by its place, if that part's neurons have no names)
   const named = (seg, id) => { if (!seg || !seg.na || !seg.p.nn) return 0; const c = compile(seg.p.nn), i = c.pos ? c.pos.get(id) : id; return i != null && i < seg.na.length ? seg.na[i] : 0; };
 
-  A.neural = { cpg, command, local, wiring, CIRCUIT, compile, far };
+  A.neural = { cpg, command, local, wiring, CIRCUIT, compile, far, presence, REW };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

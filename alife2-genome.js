@@ -223,22 +223,28 @@
     if (p.nn == null) return; if (!Array.isArray(p.nn)) { delete p.nn; return; }
     p.nn = p.nn.slice(0, NN_BIG).filter(q => q && typeof q === 'object').map(q => ({ // (more than NN_MAX only arise where the world lets them: see mutateNN)
       b: clamp(Number.isFinite(q.b) ? q.b : 0, -2, 2), k: clamp(Number.isFinite(q.k) ? q.k : 1, 0.02, 1),
-      in: (Array.isArray(q.in) ? q.in : []).filter(e => Array.isArray(e) && nnValid(e[0]) && Number.isFinite(e[1])).slice(0, NN_IN).map(e => (Number.isFinite(e[2]) && e[2] !== 0 ? [e[0], clamp(e[1], -4, 4), clamp(e[2], -1, 1)] : [e[0], clamp(e[1], -4, 4)])), // (a third number: how fast this connection changes with use, in worlds where connections can)
-      m: q.m,
+      in: (Array.isArray(q.in) ? q.in : []).filter(e => Array.isArray(e) && nnValid(e[0]) && Number.isFinite(e[1])).slice(0, NN_IN).map(e => (Number.isFinite(e[3]) && e[3] !== 0 ? [e[0], clamp(e[1], -4, 4), Number.isFinite(e[2]) ? clamp(e[2], -1, 1) : 0, clamp(e[3], -1, 1)] /* (rewire: a fourth number, how the connection itself comes and goes with use) */ : Number.isFinite(e[2]) && e[2] !== 0 ? [e[0], clamp(e[1], -4, 4), clamp(e[2], -1, 1)] : [e[0], clamp(e[1], -4, 4)])), // (a third number: how fast this connection changes with use, in worlds where connections can)
+      m: q.m, u: q.u,
       out: (Array.isArray(q.out) ? q.out : []).filter(e => Array.isArray(e) && NN_EFF_S.includes(e[0]) && Number.isFinite(e[1])).slice(0, NN_OUT).map(e => [e[0], clamp(e[1], -2, 2)]),
       id: q.id
     }));
     { const seen = new Set(); let named = false; for (const q of p.nn) { if (Number.isInteger(q.id) && q.id >= 0 && q.id < 36 && !seen.has(q.id)) { seen.add(q.id); named = true; } else delete q.id; } if (named) nameNeurons(p); }
-    for (const q of p.nn) if (!(Number.isInteger(q.m) && q.m >= 0 && q.m < q.in.length)) delete q.m; // (which of its own inputs gates the changing of its connections; none: they change with use alone)
+    for (const q of p.nn) if (!(Number.isInteger(q.m) && q.m >= 0 && q.m < q.in.length)) delete q.m;
+    for (const q of p.nn) { if (Number.isFinite(q.u)) q.u = clamp(q.u, 0.02, 1); else delete q.u; } // (rewire: how active a neuron and a source must be together for their connection to count as used; absent = 0.15) // (which of its own inputs gates the changing of its connections; none: they change with use alone)
     if (!p.nn.length) delete p.nn;
   }
-  function mutateNN(p, r, s, L, S, t, W, B) {
+  function mutateNN(p, r, s, L, S, t, W, B, Y) {
     if (t == null) t = s; // t: how often the wiring changes; s: how wide the steps are (the same number, unless the world keeps them as two genes)
     const nn = p.nn || [], EFF = S ? NN_EFF_S : NN_EFF;
     // (wire: W = { g, all }) a new reference is made to a neuron that exists: one of this part for `s` and `m`, one of any part for `p` and `k`
     const src = W ? () => { if (r() < 0.6) { const pool = NN_POOL[(L ? 1 : 0) + (S ? 2 : 0)]; return pool[r.int(pool.length)]; } const kind = B ? NN_REF_B[r.int(NN_REF_B.length)] : NN_REF[r.int(NN_REF.length)], from = kind === 's' || kind === 'm' ? nn.map(q => q.id) : kind === 'r' ? W.root : W.all; /* (brain: B) also to the root's neurons and to a name over the whole body */ if (!from.length) { const pool = NN_POOL[(L ? 1 : 0) + (S ? 2 : 0)]; return pool[r.int(pool.length)]; } return kind + NAME[from[r.int(from.length)]]; } : () => nnSource(r, L, S);
     for (const q of nn) {
-      if (L) { for (const e of q.in) if (r() < 0.08) { const v = clamp((e[2] || 0) + r.gauss() * 0.15 * s, -1, 1); if (v !== 0) e[2] = v; else e.length = 2; } if (r() < 0.03 * t) { if (q.m == null && q.in.length) q.m = r.int(q.in.length); else delete q.m; } }
+      if (L) { for (const e of q.in) if (r() < 0.08) { const v = clamp((e[2] || 0) + r.gauss() * 0.15 * s, -1, 1); if (v !== 0) e[2] = v; else if (e.length > 3) e[2] = 0; else e.length = 2; } if (r() < 0.03 * t) { if (q.m == null && q.in.length) q.m = r.int(q.in.length); else delete q.m; } }
+      // (rewire: Y) the number that lets a connection wither or form drifts like the others; so does the neuron's threshold for "used"; and a neuron can gain a
+      // connection that is not there at birth and forms only if it is used
+      if (Y) { for (const e of q.in) if (r() < 0.08) { const v = clamp((e[3] || 0) + r.gauss() * 0.15 * s, -1, 1); if (v !== 0) { if (e[2] == null) e[2] = 0; e[3] = v; } else if (e.length > 3) { e.length = 3; if (!e[2]) e.length = 2; } }
+        if (r() < 0.05 * t) q.u = clamp((q.u == null ? 0.15 : q.u) + r.gauss() * 0.05 * s, 0.02, 1);
+        if (r() < 0.04 * t && q.in.length < NN_IN) q.in.push([src(), r.gauss(), 0, -(0.1 + 0.4 * r())]); }
       if (r() < 0.12) q.b += r.gauss() * 0.3 * s; if (r() < 0.12) q.k += r.gauss() * 0.07 * s;
       for (const e of q.in) if (r() < 0.12) e[1] += r.gauss() * 0.5 * s; for (const e of q.out) if (r() < 0.12) e[1] += r.gauss() * 0.3 * s;
       if (r() < 0.05 * t && q.in.length < NN_IN) q.in.push([src(), r.gauss()]);
@@ -279,7 +285,7 @@
     for (const p of g.parts) num(p, PART_FIELDS);
     if (extra === true || (extra && extra.includes('n'))) { let W = null; if (extra && extra !== true && extra.includes('w')) { for (const p of g.parts) nameNeurons(p); W = { g, all: g.parts.flatMap(p => (p.nn || []).map(q => q.id)), root: ((g.parts[g.root] || {}).nn || []).map(q => q.id) }; }
       const B = !!(W && extra.includes('b'));
-      for (const p of g.parts) mutateNN(p, r, s, !!(extra && extra !== true && extra.includes('l')), !!(extra && extra !== true && extra.includes('s')), t, W, B);
+      for (const p of g.parts) mutateNN(p, r, s, !!(extra && extra !== true && extra.includes('l')), !!(extra && extra !== true && extra.includes('s')), t, W, B, !!(extra && extra !== true && extra.includes('y')));
       // (brain) a block of neurons is copied from one part into another, wiring and all: a circuit that works in one place can be tried in another, or doubled in the trunk
       if (B && r() < 0.03 * t) { const from = g.parts.filter(p => p.nn && p.nn.length); if (from.length && g.parts.length > 1) { const src = from[r.int(from.length)]; let to = g.parts[r.int(g.parts.length)]; if (to === src) to = g.parts[(g.parts.indexOf(src) + 1) % g.parts.length];
           const at = r.int(src.nn.length), n = 1 + r.int(src.nn.length - at), block = src.nn.slice(at, at + n).map(q => copy(q)), mine = to.nn || [], used = new Set(mine.map(q => q.id)), re = new Map();
