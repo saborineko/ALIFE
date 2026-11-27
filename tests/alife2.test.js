@@ -854,3 +854,139 @@ test('the record of sound is only a notebook: wiping it changes nothing in the w
     for (const k of ['lisEffect', 'alternation', 'sequenceOrder', 'dialectBits', 'resemble', 'answer', 'callsEnded']) assert.ok(Number.isFinite(c[k]), k + ' after loading an older save: ' + c[k]); }
 });
 
+
+test('wireLate: a part can build its circuit at a later stage of growth; until then it pays for no connections and nothing drives it; off by default, and the gene does nothing where the rule does not hold', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, C = A.organs.C, P = o => G.part(Object.assign({ len: 0.5, r0: 0.5, r1: 0.5, muscle: 0, nerve: 1, skin: 0.2, cilia: 1, nC: 1, mCil: 1 }, o));
+  assert.strictEqual(A.engine.DEFAULTS.wireLate, 0, 'off by default');
+  const plain = G.create({ parts: [P({})] }), late = G.create({ parts: [P({ nAt: 0.6 })] }), prof = (g, stage, on) => A.organs.profile(A.development.develop(g, { stage, late: on }));
+  // before its stage: no wiring, and the upkeep is lower by exactly what the connections cost; from its stage on: the same body as without the gene
+  for (const st of [0.3, 0.44, 0.58]) { const a = prof(plain, st, 1), b = prof(late, st, 1); assert.strictEqual(b.wiring, 0); assert.ok(Math.abs((a.basal - b.basal) - a.wiring * C.synapse) < 1e-12, 'stage ' + st); assert.strictEqual(a.V, b.V); assert.strictEqual(a.buildCost, b.buildCost); }
+  for (const st of [0.6, 0.72, 1]) assert.deepStrictEqual(prof(late, st, 1), prof(plain, st, 1), 'stage ' + st);
+  // where the rule does not hold the gene is not read
+  for (const st of [0.3, 0.58, 1]) assert.deepStrictEqual(prof(late, st, 0), prof(plain, st, 0));
+  // a gene at or below the stage of birth changes nothing
+  assert.deepStrictEqual(prof(G.create({ parts: [P({ nAt: 0.3 })] }), 0.3, 1), prof(plain, 0.3, 1));
+  // in a world: the young one's cilia beat at their plain rate and its signal stays at 0; when it has grown past its stage the circuit works
+  const w = new A.engine.World({ seed: 2, n: 0, wireLate: 1 }), o = w.spawn(late, w.W / 2, w.H / 2, 0.3), q = w.spawn(plain, w.W / 2 + 6, w.H / 2, 0.3);
+  for (let i = 0; i < 90; i++) w.step();
+  assert.strictEqual(o.b.segs[0].circ, false); assert.strictEqual(o.b.segs[0].cd, 1); assert.strictEqual(o.b.segs[0].a, 0); assert.ok(q.b.segs[0].circ && q.b.segs[0].a !== 0, 'the plain one is wired from birth');
+  assert.ok(o.prof.basal < q.prof.basal);
+  o.stage = 0.72; o.nextCost = null; w.form(o, o.cx, o.cy, 0); for (let i = 0; i < 90; i++) w.step();
+  assert.strictEqual(o.b.segs[0].circ, true); assert.ok(o.b.segs[0].a !== 0, 'grown past its stage, the circuit runs');
+  // switching the rule off in a running world builds the circuits that were waiting; a saved world keeps the rule
+  const w2 = new A.engine.World({ seed: 2, n: 0, wireLate: 1 }), y = w2.spawn(late, w2.W / 2, w2.H / 2, 0.3); for (let i = 0; i < 30; i++) w2.step();
+  const back = A.engine.World.restore(JSON.parse(JSON.stringify(w2.save()))); assert.strictEqual(back.wireLate, 1); assert.strictEqual(back.bodies[0].b.segs[0].circ, false);
+  w2.enable({ wireLate: 0 }); assert.strictEqual(y.b.segs[0].circ, true, 'rule switched off: the circuit is there');
+  // the gene: never without the rule (nor in the explorer's mutate-everything mode), appears with it, stays within 0..1, and is drawn in mixing only where the rule holds
+  const r = G.rng(5), base = G.primordial(1);
+  let n0 = 0; for (let i = 0; i < 400; i++) { if (G.mutate(base, r, 1, 'gn').parts.some(p => p.nAt != null)) n0++; if (G.mutate(base, r, 1, true).parts.some(p => p.nAt != null)) n0++; } assert.strictEqual(n0, 0);
+  let got = 0, after = 0; for (let i = 0; i < 2000; i++) { const m = G.mutate(base, r, 1, 'gnt'); for (const p of m.parts) if (p.nAt != null) { got++; assert.ok(p.nAt >= 0 && p.nAt <= 1); if (p.nAt > base.birth) after++; } } assert.ok(got > 20 && after > 10, 'the gene appears: ' + got + ', built after birth in ' + after);
+  const ra = G.rng(7), rb = G.rng(7), a = G.create({ parts: [P({})] }), b = G.create({ parts: [P({ nAt: 0.8 })] });
+  let mixed = 0; for (let i = 0; i < 200; i++) { const k = G.recombine(a, b, ra, 0, 0, 1); if (k.parts[0].nAt === 0.8) mixed++; } assert.ok(mixed > 60 && mixed < 140, 'with the rule, the gene comes from either parent: ' + mixed);
+  for (let i = 0; i < 50; i++) assert.strictEqual(G.recombine(a, b, rb, 0, 0, 0).parts[0].nAt, undefined, 'without the rule it is not mixed');
+  // a world without the rule draws the same random numbers whether or not genomes carry the gene
+  const run = g => { const z = new A.engine.World({ seed: 9, n: 0 }); for (let i = 0; i < 6; i++) z.spawn(JSON.parse(JSON.stringify(g)), 20 + i * 8, 20, 1); for (let i = 0; i < 600; i++) z.step(); return [z.bodies.length, z.rand.state(), z.bodies.map(o => o.E)]; };
+  assert.deepStrictEqual(run(late), run(plain));
+});
+
+test('wireEnds: a connection with nothing at its other end is not built and costs nothing; what the body does is unchanged; off by default', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, C = A.organs.C, P = o => G.part(Object.assign({ len: 0.5, r0: 0.5, r1: 0.5, muscle: 0, nerve: 1, skin: 0.2 }, o)), W = { scent: 0, vision: 1, contact: 0, sound: 0 };
+  assert.strictEqual(A.engine.DEFAULTS.wireEnds, 0, 'off by default');
+  const wiring = (g, ends) => A.development.develop(g, { ends }).segs.map(s => A.neural.wiring(s.p));
+  // one segment with cilia and a taste->cilia circuit, plus: an eye gene with no eye, a joint gene on the root, a voice gene in a world without sound, a child to listen to that is not there
+  const g = G.create({ parts: [P({ cilia: 1, nC: 1, mCil: 0.5, vE: 2, mJoint: 0.7, mVoice: 0.3, nK: 0.4, adapt: 0.5 })] });
+  assert.ok(Math.abs(wiring(g, null)[0] - (1 + 0.5 + 2 + 0.7 + 0.3 + 0.4 + 0.5)) < 1e-12, 'without the rule every strength is paid for');
+  assert.ok(Math.abs(wiring(g, W)[0] - (1 + 0.5 + 0.5)) < 1e-12, 'with it, only taste -> signal -> cilia and how the taste reports');
+  // with an eye the eye connection stays; in a world without sight it goes
+  const eyed = G.create({ parts: [P({ cilia: 1, eye: 0.8, vE: 2, mCil: 0.5 })] });
+  assert.ok(Math.abs(wiring(eyed, W)[0] - 2.5) < 1e-12); assert.ok(Math.abs(wiring(eyed, { vision: 0 })[0] - 0.5) < 1e-12);
+  // no nerve tissue: the senses are not read; a bias and what it drives stay
+  assert.ok(Math.abs(wiring(G.create({ parts: [P({ nerve: 0, cilia: 1, nC: 1, nB: 0.3, mCil: 0.5 })] }), W)[0] - 0.8) < 1e-12);
+  // a chain: the child has only connections that lead nowhere, so the parent listening to it hears nothing, and that connection goes too; where the child tastes, both stay
+  const link = [G.link({ from: 0, to: 1 })], kid = o => P(Object.assign({ len: 0.4, r0: 0.3, r1: 0.3 }, o));
+  assert.deepStrictEqual(wiring(G.create({ parts: [P({ cilia: 1, nK: 1, mCil: 1 }), kid({ vE: 1 })], links: link }), W).map(x => +x.toFixed(9)), [1, 0], 'the parent keeps only its cilia connection');
+  assert.deepStrictEqual(wiring(G.create({ parts: [P({ cilia: 1, nK: 1, mCil: 1 }), kid({ nC: 1 })], links: link }), W).map(x => +x.toFixed(9)), [2, 1]);
+  // parts with several neurons are left as they are
+  const nn = G.create({ parts: [P({ cilia: 1, vE: 2, adapt: 0.5, nn: [{ b: 0, k: 0.5, in: [['c', 1]], out: [['C', 1]] }] })] }), before = wiring(nn, null)[0], after = wiring(nn, W)[0];
+  assert.ok(Math.abs(before - after - 2) < 1e-12, 'only the eye connection goes; the neuron, and how the senses report, stay');
+  // in a world: the upkeep falls by exactly what the endless connections cost, and the body does the same thing, number for number (with the upkeep held equal:
+  // a body that pays less keeps more reserve, and hunger is one of the things a circuit reads)
+  const mk = on => { const w = new A.engine.World({ seed: 4, n: 0, vision: 1, wireEnds: on }), o = w.spawn(JSON.parse(JSON.stringify(g)), w.W / 2, w.H / 2, 1); return [w, o]; }, [wa, a] = mk(0), [wb, b] = mk(1);
+  assert.ok(Math.abs((a.prof.basal - b.prof.basal) - (2 + 0.7 + 0.3 + 0.4) * C.synapse) < 1e-12);
+  for (let i = 0; i < 240; i++) { b.prof.basal = a.prof.basal; wa.step(); wb.step(); assert.deepStrictEqual([Array.from(b.b.x), Array.from(b.b.vx), b.absorbed, b.E, b.b.segs[0].a, b.b.segs[0].cd], [Array.from(a.b.x), Array.from(a.b.vx), a.absorbed, a.E, a.b.segs[0].a, a.b.segs[0].cd], 'tick ' + i); }
+  assert.ok(a.b.segs[0].a !== 0, 'the circuit was running');
+  // switching the rule in a running world rebuilds the bodies; a saved world keeps the rule
+  const back = A.engine.World.restore(JSON.parse(JSON.stringify(wb.save()))); assert.strictEqual(back.wireEnds, 1); assert.ok(Math.abs(back.bodies[0].prof.wiring - 2) < 1e-12);
+  wb.enable({ wireEnds: 0 }); assert.ok(Math.abs(b.prof.wiring - 5.4) < 1e-12);
+});
+
+test('the wiring-sorting tool: designed bodies whose every connection has an obvious class', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const { sort } = require('../tools/alife2-wiring-use.js'), G = A.genome, P = o => G.part(Object.assign({ len: 0.5, r0: 0.5, r1: 0.5, muscle: 0, nerve: 1, skin: 0.2 }, o)), kid = o => P(Object.assign({ len: 0.4, r0: 0.3, r1: 0.3 }, o)), link = [G.link({ from: 0, to: 1 })];
+  const classes = (opt, parts, links) => { const w = new A.engine.World(Object.assign({ seed: 1, n: 0 }, opt)), o = w.spawn(G.create({ parts, links: links || [] }), w.W / 2, w.H / 2, 1); for (let i = 0; i < 30; i++) w.step(); const r = sort(w, o); assert.ok(Math.abs(r.check - r.wiring) < 1e-9, 'every strength is put in one class'); return Object.fromEntries(Object.entries(r.G).map(([k, m]) => [k, Object.keys(m).sort().join('+')])); };
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, nC: 1, mCil: 1 })]), { nC: 'through', mCil: 'through' }, 'taste -> cilia');
+  assert.deepStrictEqual(classes({ vision: 1 }, [P({ cilia: 1, nC: 1, mCil: 1, vE: 2 })]), { nC: 'through', mCil: 'through', vE: 'partner' }, 'an eye gene without an eye');
+  assert.deepStrictEqual(classes({ vision: 1 }, [P({ cilia: 1, eye: 0.8, mCil: 1, vE: 2 })]), { mCil: 'through', vE: 'through' }, 'with an eye');
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, eye: 0.8, mCil: 1, vE: 2 })]), { mCil: 'in', vE: 'partner' }, 'an eye in a world without sight');
+  assert.deepStrictEqual(classes({}, [P({ nC: 1, mCil: 1 })]), { nC: 'out', mCil: 'partner' }, 'a cilia gene without cilia');
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, nC: 1, mJoint: 1, mCil: 0.5 })]), { nC: 'through', mCil: 'through', mJoint: 'partner' }, 'a joint gene on the root');
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, nB: 1, mCil: 1 })]), { nB: 'steady', mCil: 'steady' }, 'a bias alone');
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, mCil: 1 })]), { mCil: 'in' }, 'nothing moves the signal');
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, nC: 1, nH: 1 })]), { nC: 'out', nH: 'out' }, 'a sense that leads nowhere');
+  assert.deepStrictEqual(classes({}, [P({ nerve: 0, cilia: 1, nC: 1, mCil: 1 })]), { nC: 'partner', mCil: 'in' }, 'no nerve tissue to read with');
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, sT: 1, mCil: 1 })]), { sT: 'partner', mCil: 'in' }, 'touch in a world without touch');
+  assert.deepStrictEqual(classes({ contact: 1 }, [P({ cilia: 1, sT: 1, mCil: 1 })]), { sT: 'through', mCil: 'through' }, 'touch in a world with it');
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, nK: 1, mCil: 1 }), kid({ nC: 1 })], link), { nK: 'through', mCil: 'through', nC: 'through' }, 'the child tastes, the parent listens and beats its cilia');
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, nK: 1, mCil: 1 })]), { nK: 'partner', mCil: 'in' }, 'listening to a child that is not there');
+  assert.deepStrictEqual(classes({ vision: 1 }, [P({ cilia: 1, nK: 1, mCil: 1 }), kid({ vE: 1 })], link), { nK: 'partner', mCil: 'in', vE: 'partner' }, 'a child with nothing to say: listening to it is partner-less too');
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, nC: 1, mCil: 1, adapt: 0.5 })]), { nC: 'through', mCil: 'through', adapt: 'through' }, 'how a sense reports, where a sense is read');
+  assert.deepStrictEqual(classes({}, [P({ cilia: 1, nB: 1, mCil: 1, adapt: 0.5 })]), { nB: 'steady', mCil: 'steady', adapt: 'partner' }, 'and where none is');
+});
+
+test('a world saved before a gene existed resumes: genomes get the starting value of the genes they lack, and genomes that have every gene are left as they are', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, LATER = Object.keys(G.PART_FIELDS).filter(k => G.PART_FIELDS[k][4]); // the genes that came with later rules (smell, sight, touch, sound)
+  assert.ok(LATER.includes('sT') && LATER.includes('mBite') && LATER.includes('vE') && LATER.includes('hE'));
+  // complete(): nothing happens to a genome that has every gene; one that lacks some gets exactly those, at their starting values
+  const g = G.primordial(3), text = JSON.stringify(g); assert.strictEqual(G.complete(g), 0); assert.strictEqual(JSON.stringify(g), text, 'a complete genome is not touched, not even in how it is written');
+  const old = JSON.parse(text); for (const p of old.parts) for (const k of LATER) delete p[k]; delete old.odor; old.parts[0].nC = 'x';
+  assert.strictEqual(G.complete(old), old.parts.length * LATER.length + 2); assert.deepStrictEqual(Object.assign(old, { odor: g.odor }), Object.assign(JSON.parse(text), { parts: JSON.parse(text).parts.map((p, i) => (i ? p : Object.assign(p, { nC: G.PART_FIELDS.nC[2] }))) }));
+  assert.strictEqual(old.parts[0].nAt, undefined, 'a gene that only some worlds have stays absent');
+  // a world with touch, sight, smell and sound is run and saved. From a copy of the save, every later gene that still has its starting value is taken out of
+  // every genome: that is how the same world would have been written by a version that did not know those genes
+  // (the bodies carry a circuit - taste to cilia - so that their segments' signals are computed: a body without any connection never reads these genes)
+  const wiredBody = G.create({ parts: [G.part({ len: 0.5, r0: 0.5, r1: 0.5, muscle: 0, skin: 0.2, nerve: 0.5, cilia: 0.6, mouth: 0.4, gut: 0.5, gonad: 0.3, eye: 0.3, nC: 1, nH: 0.5, mCil: 0.5 })] });
+  const w = new A.engine.World({ seed: 6, n: 0, contact: 1, vision: 1, scent: 1, sound: 1 }); for (let i = 0; i < 24; i++) w.spawn(JSON.parse(JSON.stringify(wiredBody)), 20 + (i % 8) * 15, 25 + Math.floor(i / 8) * 20, 1); for (let i = 0; i < 400; i++) w.step();
+  const save = JSON.parse(JSON.stringify(w.save())), stripped = JSON.parse(JSON.stringify(save)); let taken = 0;
+  const strip = q => { if (!q) return; for (const p of q.parts) for (const k of LATER) if (p[k] === G.PART_FIELDS[k][2]) { delete p[k]; taken++; } };
+  for (const n of stripped.tree) strip(n.g); for (const c of stripped.clades || []) strip(c.g); assert.ok(taken > 100, 'genes were taken out: ' + taken);
+  assert.ok(w.bodies.some(o => o.b.segs.some(q => q.circ && q.a !== 0)), 'the bodies\' circuits were running');
+  const a = A.engine.World.restore(save), b = A.engine.World.restore(stripped);
+  assert.ok(b.bodies.every(o => o.g.parts.every(p => LATER.every(k => Number.isFinite(p[k])))), 'every body has every gene again');
+  const said = z => z.events.some(e => /補った/.test(JSON.stringify(e))); assert.ok(said(b), 'the world says that it filled genes in'); assert.ok(!said(a), 'a save of this version says nothing');
+  // and it goes on exactly as the world that never lost them: touch, sight, smell and sound all read genes that had been missing
+  const state = z => [z.bodies.length, z.rand.state(), z.bodies.map(o => [o.id, o.cx, o.cy, o.E, o.b.segs.map(s => s.a)])];
+  for (let i = 0; i < 150; i++) { a.step(); b.step(); } assert.ok(b.bodies.length > 0); assert.ok(b.bodies.every(o => Number.isFinite(o.E) && o.b.segs.every(s => Number.isFinite(s.a))), 'no body lost its signal');
+  assert.deepStrictEqual(state(b), state(a));
+});
+
+test('solid: a limb that was cut off is counted once, however often the body is rebuilt or reloaded, and the body no longer pays for its nerves', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, C = A.organs.C, body = () => G.create({ parts: [G.part({ len: 2, r0: 0.5, r1: 0.5, gut: 0.4, store: 0.4, nerve: 0.5, nC: 1, nK: 0.5, nB: 0.2 }), G.part({ len: 1, r0: 0.25, r1: 0.2, muscle: 0.3, amp: 0.3, range: 0.8, nerve: 0.5, nC: 0.7, mJoint: 0.6, nP: 0.4 })],
+    links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.5, off: 0.9, angle: 1.3, scale: 1, repeat: 1 }), G.link({ from: 1, to: 1, sym: 'none', at: 1, off: 0, angle: 0.2, scale: 0.9, repeat: 2 })] });
+  const cut = solid => { const w = new A.engine.World({ seed: 3, n: 0, contact: 1, solid }), o = w.spawn(body(), 40, 30, 1, null); for (let i = 0; i < 30; i++) w.step(); assert.strictEqual(o.b.segs.length, 7);
+    const wiring0 = o.prof.wiring, first = o.b.segs.findIndex((q, i) => i > 0 && q.parent === 0); o.hp = new Array(7).fill(1); o.hp[first] = 0; w.wound(o); return { w, o, wiring0, first }; };
+  { const { w, o, wiring0 } = cut(1), gone = () => o.b.segs.filter(q => q.gone).length;
+    assert.strictEqual(gone(), 3, 'the limb and what is beyond it'); assert.strictEqual(w.counts.cut, 1);
+    assert.ok(Math.abs((wiring0 - o.prof.wiring) - 3 * (0.7 + 0.6 + 0.4)) < 1e-9, 'the nerves of the three lost segments are no longer paid for: ' + wiring0 + ' -> ' + o.prof.wiring);
+    const paid = o.prof.wiring, basal = o.prof.basal;
+    for (let k = 0; k < 3; k++) { w.form(o, o.cx, o.cy, 0); assert.strictEqual(gone(), 3, 'rebuilt: still cut'); assert.strictEqual(w.counts.cut, 1, 'rebuilt: not cut, or counted, again'); assert.ok(Math.abs(o.prof.wiring - paid) < 1e-12 && Math.abs(o.prof.basal - basal) < 1e-12); }
+    for (let i = 0; i < 60; i++) { w.step(); o.E = o.prof.Emax * 0.9; }
+    const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), o2 = c.bodies[0]; for (let i = 0; i < 60; i++) { w.step(); c.step(); o.E = o.prof.Emax * 0.9; o2.E = o2.prof.Emax * 0.9; }
+    assert.strictEqual(c.counts.cut, 1, 'reloaded: the count is what it was'); assert.strictEqual(o2.b.segs.filter(q => q.gone).length, 3); assert.ok(Math.abs(o2.prof.wiring - paid) < 1e-12);
+    assert.strictEqual(JSON.stringify([o2.cx, o2.cy]), JSON.stringify([o.cx, o.cy]), 'and it goes on as the world that was not reloaded'); }
+  // as bodies were first built (without the rule) a segment eaten away stays, works and is paid for: unchanged
+  { const { w, o, wiring0 } = cut(0); assert.strictEqual(o.b.segs.filter(q => q.gone).length, 0); assert.strictEqual(w.counts.cut || 0, 0); assert.ok(Math.abs(o.prof.wiring - wiring0) < 1e-12); }
+});

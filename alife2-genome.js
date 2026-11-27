@@ -121,6 +121,7 @@
       let v = Number.isFinite(p[k]) ? p[k] : d;
       p[k] = kind === 'a' ? wrapPi(v) : clamp(v, lo, hi);
     }
+    for (const p of g.parts) if (p.nAt != null) p.nAt = clamp(Number.isFinite(p.nAt) ? p.nAt : 0, 0, 1); // the stage of growth at which this part's circuit is built (only in worlds where that evolves; absent = from birth)
     // zones along an axis: after `span` segments of this part, a chain goes on as part `next` (-1 or absent: it does not change)
     for (const p of g.parts) sanitizeNN(p);
     g.parts.forEach((p, i) => { if (p.next == null) return; p.next = Math.round(p.next); if (!(p.next >= 0 && p.next < g.parts.length) || p.next === i) p.next = -1; p.span = clamp(Math.round(p.span || 1), 1, MAX_REPEAT + 1); });
@@ -311,6 +312,8 @@
     if ((extra === true || (extra && extra.includes('i'))) && r() < 0.2) g.yolk = (g.yolk == null ? 0.5 : g.yolk) * Math.exp(r.gauss() * 0.2 * s);
     if (extra && extra !== true && extra.includes('d') && r() < 0.2) g.cast = (g.cast == null ? 0 : g.cast) + r.gauss() * 2 * s; // (it starts at 0 and moves by steps: nothing favours a longer throw by itself)
     for (let i = 0; i < g.brain.length; i++) if (r() < 0.2) g.brain[i] += r.gauss() * 0.35 * s;
+    /* (wireLate) when a part's circuit is built: a shift in timing (as rare as a change of a rule's symmetry: the gene is drawn afresh, anywhere from birth to full growth), or, once the part has the gene, a small step (as any number of a part) */
+    if (extra && extra !== true && extra.includes('t')) for (const p of g.parts) { if (r() < 0.03 * t) p.nAt = r(); else if (p.nAt != null && r() < 0.12) p.nAt += r.gauss() * 0.07 * s; }
     g.mutations = (g.mutations || 0) + 1;
     if (g.origin === 'artificial') g.origin = 'artificial-mutated';
     return sanitize(g);
@@ -321,7 +324,7 @@
   // genes lie in a row and are cut at one place: one side comes from one parent, the rest from the other — neighbouring genes tend to stay
   // together, genes far apart are easily parted. A part's neurons go with the far end of the row. A shared rule is tuned as in one parent or
   // the other. The genes of the whole body are drawn one by one. A part or rule that the other genome lacks stays as it is.
-  function recombine(a, b, r, sound, cast) {
+  function recombine(a, b, r, sound, cast, late) {
     const g = copy(a), ids = g.parts.some(p => p.id != null) && b.parts.some(p => p.id != null), K = Object.keys(PART_FIELDS).filter(k => sound || PART_FIELDS[k][4] !== 's') /* (the genes of sound join the row only where sound exists: other worlds mix exactly as before) */, pb = new Map(), lb = new Map();
     b.parts.forEach((p, i) => { if (!ids || p.id != null) pb.set(ids ? p.id : i, p); }); b.links.forEach((l, i) => { if (!ids || l.id != null) lb.set(ids ? l.id : i, l); });
     g.parts.forEach((p, i) => {
@@ -329,6 +332,7 @@
       const cut = r.int(K.length + 1), head = r() < 0.5; // genes before the cut from the mother (head) or from the other
       for (let k = 0; k < K.length; k++) if ((k < cut) !== head && q[K[k]] !== undefined) p[K[k]] = q[K[k]];
       if (head && cut < K.length) { if (q.nn) p.nn = copy(q.nn); else delete p.nn; } // (the far end is the other's: its neurons come with it)
+      if (late && r() < 0.5) { if (q.nAt == null) delete p.nAt; else p.nAt = q.nAt; } // (drawn only in worlds where the time a circuit is built is a gene: other worlds draw the same numbers as before)
     });
     g.links.forEach((l, i) => {
       const m = lb.get(ids ? l.id : i); if (!m) return;
@@ -355,6 +359,16 @@
     return sanitize(g);
   }
 
-  A.genome = { BRAIN_IN, BRAIN_OUT, PART_FIELDS, LINK_FIELDS, MAX_PARTS, MAX_LINKS, STORE_PARTS, STORE_LINKS, part, link, create, primordial, sanitize, mutate, crossover, recombine, chainScale, rng, copy, clamp, wrapPi, ensureIds, reach, zones, axisOf, splitZone, dropPart, divergence, nextOf, NN_MAX, NN_SENSE, NN_REF, NN_EFF };
+  // Genes added after a genome was written down. A part or rule that lacks a gene (or holds something that is not a number there) gets that gene's starting
+  // value; nothing else is touched: no clamping, no reordering, no change to genes that are there. A genome that has every gene comes back exactly as it was.
+  // Returns how many genes were filled in. (Genes that only some worlds have - a part's `nAt`, a genome's `cast`, `mut`, `mutW`, `yolk` - stay absent: absent is their meaning.)
+  function complete(g) {
+    let n = 0; if (!g || !Array.isArray(g.parts)) return 0;
+    for (const p of g.parts) for (const k in PART_FIELDS) if (!Number.isFinite(p[k])) { p[k] = PART_FIELDS[k][2]; n++; }
+    for (const l of g.links || []) for (const k in LINK_FIELDS) if (!Number.isFinite(l[k])) { l[k] = LINK_FIELDS[k][2]; n++; }
+    if (!Number.isFinite(g.odor)) { g.odor = 0.5; n++; } if (!Number.isFinite(g.birth)) { g.birth = 0.3; n++; }
+    return n;
+  }
+  A.genome = { BRAIN_IN, BRAIN_OUT, PART_FIELDS, LINK_FIELDS, MAX_PARTS, MAX_LINKS, STORE_PARTS, STORE_LINKS, complete, part, link, create, primordial, sanitize, mutate, crossover, recombine, chainScale, rng, copy, clamp, wrapPi, ensureIds, reach, zones, axisOf, splitZone, dropPart, divergence, nextOf, NN_MAX, NN_SENSE, NN_REF, NN_EFF };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

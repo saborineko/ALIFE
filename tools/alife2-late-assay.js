@@ -1,0 +1,37 @@
+// Does a body that builds its circuits late spread? A competition in a saved evolved world: half of its bodies (drawn at random, by a draw of the tool's
+// own) are given, on every part, the gene "build this part's circuit when the body has grown to stage X"; the rest are given 0 (from birth), and the
+// share of the late-building side is followed.
+// With the rule (flag 1) the gene decides when circuits are built. Without it (flag 0) the same bodies carry the same mark, it is inherited, and it
+// changes nothing: that is the control for how far a share wanders by chance alone.
+// Usage: node tools/alife2-late-assay.js <seconds> <world.json.gz> <stage X> run <k> <flag>
+//        node tools/alife2-late-assay.js report <lines.txt>
+const fs = require('fs'), zlib = require('zlib'), A = require('../alife2-genome.js');
+for (const f of ['development', 'neural', 'physics', 'organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+if (process.argv[2] === 'report') {
+  const rows = fs.readFileSync(process.argv[3], 'utf8').split('\n').filter(l => l.startsWith('{')).map(l => JSON.parse(l)), mean = L => L.reduce((a, b) => a + b, 0) / L.length, rg = (L, d) => (L.length ? mean(L).toFixed(d) + ' [' + Math.min(...L).toFixed(d) + '〜' + Math.max(...L).toFixed(d) + ']' : '—');
+  for (const [flag, label] of [[1, '規則あり（遺伝子が回路を作る時期を決める）'], [0, '規則なし（同じ印を持つだけ：対照）']]) { const R = rows.filter(r => r.on === flag); if (!R.length) continue;
+    console.log(label + ' ' + R.length + ' 本：「遅く作る」側の割合 始まり ' + rg(R.map(r => r.share0), 3) + ' → 終わり ' + rg(R.map(r => r.shareEnd), 3) + ' ｜ 個体数（終わりの 1000 秒の平均）' + rg(R.map(r => r.popTail), 0) + ' ｜ 溶存栄養 ' + rg(R.map(r => r.nutrient), 3) + ' ｜ 成体の配線の強さ（平均）' + rg(R.map(r => r.wiringAdult), 2));
+    const bh = R.reduce((a, r) => a + r.bornHi, 0), bl = R.reduce((a, r) => a + r.bornLo, 0), uh = R.reduce((a, r) => a + r.upHi, 0), ul = R.reduce((a, r) => a + r.upLo, 0);
+    console.log('  生まれた子が育ち切った割合（合わせて。運命が決まった子だけ）：遅く作る側 ' + (uh / bh * 100).toFixed(1) + '%（' + bh + ' 匹）・反対側 ' + (ul / bl * 100).toFixed(1) + '%（' + bl + ' 匹） → ' + (uh / bh / (ul / bl)).toFixed(2) + ' 倍 ｜ 生まれたときの維持費（中央値）：遅く作る側 ' + rg(R.map(r => r.basalHi), 4) + '・反対側 ' + rg(R.map(r => r.basalLo), 4) + ' ｜ 生まれたとき回路を持っていた子：遅く作る側 ' + rg(R.map(r => r.circHi), 2) + '・反対側 ' + rg(R.map(r => r.circLo), 2));
+    console.log('  成体の暮らし（終わりの時点の成体。口と体表からの収入 ÷ 維持費、直前 60 秒）：遅く作る側 ' + rg(R.map(r => r.incHi).filter(Number.isFinite), 2) + '・反対側 ' + rg(R.map(r => r.incLo).filter(Number.isFinite), 2));
+    { const U = R.filter(r => r.use); if (U.length) console.log('  終わりの 60 秒を生き通した成体の配線（1 匹あたりの強さ。' + U.length + ' 本）：遅く作る側 合計 ' + rg(U.map(r => r.use.hi.total), 2) + '・うち何もできない ' + rg(U.map(r => r.use.hi.dead), 2) + '・通っている ' + rg(U.map(r => r.use.hi.through), 2) + '・回路が効果器への指示を動かした個体 ' + rg(U.map(r => r.use.hi.commanding), 3) + ' ｜ 反対側 合計 ' + rg(U.map(r => r.use.lo.total), 2) + '・何もできない ' + rg(U.map(r => r.use.lo.dead), 2) + '・通っている ' + rg(U.map(r => r.use.lo.through), 2) + '・動かした個体 ' + rg(U.map(r => r.use.lo.commanding), 3)); }
+    for (const r of R) console.log('  乱数 ' + r.k + '：150 秒ごとの割合 ' + r.series.map(x => x.toFixed(2)).join(' ')); }
+  process.exit(0); }
+const [secs, file, stageX, , k, flag] = process.argv.slice(2), T = Number(secs), X = Number(stageX);
+const w = A.engine.World.restore(JSON.parse(zlib.gunzipSync(fs.readFileSync(file)))); w.rand = A.genome.rng(7000 + Number(k));
+const mark = A.genome.rng(9100 + Number(k)); for (const o of w.bodies) { const v = mark() < 0.5 ? X : 0; for (const p of o.g.parts) p.nAt = v; } // (the same bodies are marked in both arms of one k)
+if (Number(flag)) w.enable({ wireLate: 1 });
+// which side a body is on: where most of its wiring (by strength) is built after birth
+const hi = g => { let all = 0, late = 0; for (const p of g.parts) { const v = A.neural.wiring(p); all += v; if (p.nAt > g.birth) late += v; } return all > 0 ? late / all > 0.5 : g.parts.some(p => p.nAt > g.birth); };
+const share = () => (w.bodies.length ? w.bodies.filter(o => hi(o.g)).length / w.bodies.length : 0), share0 = share(), series = [], open = [], cnt = { bornHi: 0, bornLo: 0, upHi: 0, upLo: 0 }, bas = { hi: [], lo: [] }, circ = { hi: [0, 0], lo: [0, 0] };
+const spawn0 = w.spawn.bind(w); w.spawn = function (g, x, y, stage, parent) { const o = spawn0(g, x, y, stage, parent); if (parent) { const h = hi(o.g), key = h ? 'hi' : 'lo'; open.push({ o, h }); bas[key].push(o.prof.basal); circ[key][0]++; if (o.b.segs.some(s => s.circ)) circ[key][1]++; } return o; };
+const tail = Math.min(1000, T); let nSum = 0; const inc0 = new Map(); let WU = null; const WUmod = require('./alife2-wiring-use.js');
+for (let i = 0; i < 30 * T && w.bodies.length; i++) { w.step(); if (i >= 30 * (T - tail)) nSum += w.bodies.length;
+  if (i % 30 === 0) { for (let j = open.length - 1; j >= 0; j--) { const r = open[j], o = r.o; if (o.dead || o.stage >= 1) { cnt[r.h ? 'bornHi' : 'bornLo']++; if (o.stage >= 1) cnt[r.h ? 'upHi' : 'upLo']++; open[j] = open[open.length - 1]; open.pop(); } } }
+  if (i === 30 * (T - 60)) for (const o of w.bodies) if (o.stage >= 1) inc0.set(o.id, o.absorbed + o.eaten * o.prof.eta);
+  if (i === 30 * (T - 60)) WU = WUmod.watch(w, w.bodies.filter(o => o.stage >= 1)); if (WU) WU.tick();
+  if ((i + 1) % 4500 === 0) series.push(share()); }
+const c = w.census(), med = L => { const s = L.slice().sort((a, b) => a - b); return s.length ? s[Math.floor(0.5 * (s.length - 1))] : 0; }, adults = w.bodies.filter(o => o.stage >= 1);
+const inc = side => { const L = adults.filter(o => inc0.has(o.id) && hi(o.g) === side).map(o => (o.absorbed + o.eaten * o.prof.eta - inc0.get(o.id)) / (60 * o.prof.basal)); return L.length ? L.reduce((a, b) => a + b, 0) / L.length : NaN; };
+console.log(JSON.stringify({ on: Number(flag), k: Number(k), X, share0, shareEnd: share(), series, n: c.n, popTail: nSum / (30 * tail), nutrient: c.nutrient, ...cnt, basalHi: med(bas.hi), basalLo: med(bas.lo), circHi: circ.hi[0] ? circ.hi[1] / circ.hi[0] : 0, circLo: circ.lo[0] ? circ.lo[1] / circ.lo[0] : 0,
+  wiringAdult: adults.length ? adults.reduce((a, o) => a + o.prof.wiring, 0) / adults.length : 0, use: (() => { const L = WU ? WU.result() : [], side = h => { const S = L.filter(r => hi(r.o.g) === h), n = Math.max(1, S.length), sum = k => S.reduce((a, r) => a + (r.T[k] || 0), 0) / n; return { n: S.length, total: S.reduce((a, r) => a + r.total, 0) / n, dead: sum('partner') + sum('out') + sum('in'), through: sum('through'), commanding: S.filter(r => r.commands).length / n }; }; return { hi: side(true), lo: side(false) }; })(), incHi: inc(true), incLo: inc(false), lateBodies: c.lateBodies, lateWiring: c.lateWiring, gen: c.gen }));

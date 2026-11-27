@@ -24,13 +24,13 @@
   function islandStop() { for (const x of ISL.ws) x.worker.terminate(); ISL.ws = []; ISL.next = Infinity; for (const f of ISL.wait.values()) f(null); ISL.wait.clear(); islandPanel(true); }
   function islandStart(k, texts) { // texts: saved worlds to carry on with (from a file); otherwise copies of the world on screen with other random numbers
     islandStop(); islandNote(''); if (!(k > 1)) return;
-    const base = texts ? null : JSON.stringify(w.save());
+    const base = texts ? null : JSON.stringify(A.observer.saveWorld(w));
     try {
       for (let i = 1; i < k; i++) {
         const x = { worker: new Worker('./alife2-island.js?v=' + A.version.build), s: null, i }; ISL.ws.push(x);
         x.worker.onmessage = e => islandMsg(x, e.data); x.worker.onerror = e => { islandNote('島 ' + (i + 1) + ' を動かせない：' + (e.message || '読み込みに失敗') + '（公開ページ https://… で開いたときに使える）'); };
         const src = texts ? texts[i - 1] : base;
-        x.worker.postMessage(Object.assign(typeof src === 'string' ? { text: src } : { blob: src }, { type: 'start', reseed: texts ? null : ((w.seed * 7919 + i * 104729 + Math.round(w.t)) >>> 0), every: ISL.every, count: ISL.count, phase: texts ? 1 : i / k, paused }));
+        x.worker.postMessage(Object.assign(typeof src === 'string' ? { text: src } : { blob: src }, { type: 'start', reseed: texts ? null : ((w.seed * 7919 + i * 104729 + Math.round(w.t)) >>> 0), every: ISL.every, count: ISL.count, phase: texts ? 1 : i / k, paused, observer: A.observer.get(w).enabled }));
       }
     } catch (e) { islandStop(); islandNote('島を始められない：' + (e && e.message || e) + '（公開ページ https://… で開いたときに使える）'); $('islands').value = '1'; return; }
     ISL.next = w.t + ISL.every; islandPanel(true);
@@ -46,24 +46,25 @@
   function islandSend(from, bodies) { const k = ISL.ws.length + 1, to = (from + 1) % k; if (to === 0) w.immigrate(bodies, from + 1); else ISL.ws[to - 1].worker.postMessage({ type: 'arrive', bodies, from: from + 1 }); }
   const islandAsk = (x, msg) => new Promise((ok, no) => { const id = ++ISL.seq; ISL.wait.set(id, t => t == null ? no(new Error('島が止められた')) : ok(t)); x.worker.postMessage(Object.assign({ id }, msg)); setTimeout(() => { if (ISL.wait.has(id)) { ISL.wait.delete(id); no(new Error('島 ' + (x.i + 1) + ' が応答しない')); } }, 90000); });
   const islandAll = msg => { for (const x of ISL.ws) x.worker.postMessage(msg); };
+  window.addEventListener('alife2-observer-toggle', e => islandAll({ type: 'observer', enabled: e.detail }));
   const enableAll = o => { w.enable(o); islandAll({ type: 'enable', o }); };
   function islandPanel(rebuild) {
     const el = $('islandInfo'); $('islandPanel').style.display = ISL.ws.length || $('islandNote').textContent ? '' : 'none';
     if (rebuild) { el.textContent = ''; const add = (i, btn) => { const d = document.createElement('div'), t = document.createElement('span'); t.id = 'isl' + i; d.appendChild(t); if (btn) { const b = document.createElement('button'); b.textContent = 'この島を見る'; b.style.marginLeft = '6px'; b.onclick = () => islandView(i); d.appendChild(b); } el.appendChild(d); }; if (ISL.ws.length) { add(0, false); for (const x of ISL.ws) add(x.i, true); } }
     if (!ISL.ws.length || !w) return;
     $('isl0').textContent = '表示中：' + Math.round(w.t) + ' 秒・' + w.bodies.length + ' 個体・来た ' + (w.counts.arrived || 0) + '／出た ' + (w.counts.left || 0);
-    for (const x of ISL.ws) { const s = x.s, t = $('isl' + x.i); if (t) t.textContent = '島 ' + (x.i + 1) + '：' + (s ? Math.round(s.t) + ' 秒・' + s.n + ' 個体・平均世代 ' + s.gen.toFixed(1) + '・体節 ' + s.seg.toFixed(2) + '（最大 ' + s.segMax + '）・多体節 ' + (s.multi * 100).toFixed(0) + '%・来た ' + s.arrived + '／出た ' + s.left + '・毎秒 ' + s.rate.toFixed(1) + ' 秒' : '準備中'); }
+    for (const x of ISL.ws) { const s = x.s, t = $('isl' + x.i); if (t) t.textContent = '島 ' + (x.i + 1) + '：' + (s ? Math.round(s.t) + ' 秒・' + s.n + ' 個体・平均世代 ' + s.gen.toFixed(1) + '・体節 ' + s.seg.toFixed(2) + '（最大 ' + s.segMax + '）・多体節 ' + (s.multi * 100).toFixed(0) + '%・来た ' + s.arrived + '／出た ' + s.left + '・毎秒 ' + s.rate.toFixed(1) + ' 秒' + (s.observer ? '／観測' + (s.observer.enabled ? 'ON' : 'OFF') + (s.observer.events.length ? '／' + Math.round(s.observer.events.at(-1).t) + '秒 ' + s.observer.events.at(-1).title : '') : '') : '準備中'); }
   }
   // Look at another island: the world on screen and that island's world change places (each carries on where it was).
   async function islandView(i) {
     const x = ISL.ws[i - 1]; if (!x || ISL.busy) return; ISL.busy = true;
-    try { const text = await islandAsk(x, { type: 'swap', text: JSON.stringify(w.save()) }); ISL.keep = true; start(A.engine.World.restore(JSON.parse(text))); ISL.next = w.t + ISL.every; $('saveNote').textContent = '島 ' + (i + 1) + ' の世界を表示した。いままで見ていた世界は、裏でその島として続いている。'; }
+    try { const text = await islandAsk(x, { type: 'swap', text: JSON.stringify(A.observer.saveWorld(w)) }); ISL.keep = true; start(A.observer.restoreWorld(JSON.parse(text))); ISL.next = w.t + ISL.every; $('saveNote').textContent = '島 ' + (i + 1) + ' の世界を表示した。いままで見ていた世界は、裏でその島として続いている。'; }
     catch (e) { islandNote('島を切り替えられない：' + (e && e.message || e)); }
     ISL.busy = false; lastPanels = 0;
   }
   // Every world as a saved file of its own (gzip where the browser can), the one on screen first. Each island packs its own world in its own thread,
   // so the page never holds more than one world's text.
-  const worldBlobs = async () => { const mine = JSON.stringify(w.save()); return [(await gz(mine)) || new Blob([mine], { type: 'application/json' }), ...await Promise.all(ISL.ws.map(x => islandAsk(x, { type: 'save' })))]; };
+  const worldBlobs = async () => { const mine = JSON.stringify(A.observer.saveWorld(w)); return [(await gz(mine)) || new Blob([mine], { type: 'application/json' }), ...await Promise.all(ISL.ws.map(x => islandAsk(x, { type: 'save' })))]; };
   const blobText = async blob => { const h = new Uint8Array(await blob.slice(0, 2).arrayBuffer()); return h[0] === 0x1f && h[1] === 0x8b ? gunzip(blob) : blob.text(); };
   // Several islands in one file: a line of text that says how long each world's file is, then those files one after another.
   const ISLANDS = '{"format":"alife2-islands-2"';
@@ -72,11 +73,11 @@
   const isPack = async file => (await file.slice(0, ISLANDS.length).text()) === ISLANDS;
   function pickIslands(k) { const pick = $('islands'); if (![...pick.options].some(o => Number(o.value) === k)) pick.add(new Option(String(k))); pick.value = String(k); }
   // open what was saved: one world (text), a set of islands as files, or the first form of an island file (one text for all)
-  async function openSet(blobs) { ISL.keep = true; start(A.engine.World.restore(JSON.parse(await blobText(blobs[0])))); pickIslands(blobs.length); islandStart(blobs.length, blobs.slice(1)); return blobs.length; }
+  async function openSet(blobs) { ISL.keep = true; start(A.observer.restoreWorld(JSON.parse(await blobText(blobs[0])))); pickIslands(blobs.length); islandStart(blobs.length, blobs.slice(1)); return blobs.length; }
   function openSaved(text) {
     const d = JSON.parse(text);
-    if (d && d.format === 'alife2-islands-1') { const k = d.worlds.length; ISL.keep = true; start(A.engine.World.restore(d.worlds[0])); pickIslands(k); islandStart(k, d.worlds.slice(1).map(x => JSON.stringify(x))); return k; }
-    start(A.engine.World.restore(d)); return 1;
+    if (d && d.format === 'alife2-islands-1') { const k = d.worlds.length; ISL.keep = true; start(A.observer.restoreWorld(d.worlds[0])); pickIslands(k); islandStart(k, d.worlds.slice(1).map(x => JSON.stringify(x))); return k; }
+    start(A.observer.restoreWorld(d)); return 1;
   }
   // one step of the world on screen, and its share of the exchange between islands
   function advance() { w.step(); if (w.t >= ISL.next) { ISL.next = w.t + ISL.every; if (ISL.ws.length && ISL.count > 0) { const out = w.emigrate(ISL.count); if (out.length) islandSend(0, out); } } }
@@ -182,6 +183,7 @@
     for (const r of A.rules.catalog) $(r.key).checked=!!w[r.key];
     if (world) $('map').value = w.map || ''; // a loaded world shows its own map
     $('deaf').checked=!!w.deaf; $('mute').checked=!!w.mute; // controls outside the evolution-rule registry
+    A.observerUI.bind(w, o => { select(o, false, true); follow = true; $('follow').textContent = '追跡中'; view.cx = o.cx; view.cy = o.cy; view.scale = Math.max(view.scale, 20); }, () => { follow = false; $('follow').textContent = '追跡'; });
     fit(); sel = null; shown = null; lastPanels = 0;
     if (ISL.keep) ISL.keep = false; else if (ISL.ws.length || Number($('islands').value) > 1) islandStart(Number($('islands').value)); // a new history on screen: the islands start again as copies of it
   }
@@ -204,12 +206,13 @@
   const CAUSE = { starved: '餓死', aged: '老衰', broken: '物理破綻', killed: '傷で死亡（他個体に組織を取られた）', left: '他の島へ移った' };
 
   function panels() {
+    A.observerUI.render();
     const c0 = w.census(); soundPanel(c0);
     const smellers = w.scent ? w.bodies.filter(o => o.g.parts.some(p => Math.abs(p.sA) > 0.2 || Math.abs(p.sB) > 0.2)).length : 0;
     const seers = w.vision ? w.bodies.filter(o => o.g.parts.some(p => p.eye > 0.1 && Math.abs(p.vE) > 0.2)).length : 0;
-    const birthLine = '出生：体積 ' + c0.birthV.toFixed(3) + '・発生段階 ' + c0.birthStage.toFixed(2) + '（遺伝子の狙い ' + c0.birthGene.toFixed(2) + '）・卵 1 個 ' + c0.eggCost.toFixed(2) + (w.budget ? '・死産 ' + (c0.stillborn || 0) : '') + (w.invest ? ' / 卵の蓄え（遺伝子の平均）' + c0.yolkGene.toFixed(2) : '') + (w.cast ? ' / 卵を産む距離（遺伝子の平均、親の脇からさらに）' + (c0.castGene || 0).toFixed(1) : '') + (w.mutsplit ? ' / 変異の頻度（遺伝子の平均）' + c0.mutGene.toFixed(2) + '・変異の幅 ' + (c0.mutWidth == null ? 1 : c0.mutWidth).toFixed(2) + '（どちらも 1.00 が世界の値。体のつくりが変わる確率は頻度に比例）' : w.metamut ? ' / 変異の強さ（遺伝子の平均）' + c0.mutGene.toFixed(2) + '（体のつくりが変わる確率は、この値の 2 乗に比例：いま初期の ' + (c0.mutGene * c0.mutGene * 100).toFixed(0) + '%' + (c0.mutGene < 0.6 ? '。下がっている。下限は 0.10' : '') + '）' : '') + (w.nerve2 ? ' / 神経を持つ個体 ' + (c0.neuronBodies * 100).toFixed(0) + '%（1 個体あたり ' + c0.neurons.toFixed(2) + ' 個。感覚を読んで何かを動かす神経を持つのは ' + ((c0.senseNeurons || 0) * 100).toFixed(0) + '%）' : '') + (w.learn ? ' / 経験で変わる結合を持つ個体 ' + (c0.plastic * 100).toFixed(0) + '%' : '') + '\n';
+    const birthLine = '出生：体積 ' + c0.birthV.toFixed(3) + '・発生段階 ' + c0.birthStage.toFixed(2) + '（遺伝子の狙い ' + c0.birthGene.toFixed(2) + '）・卵 1 個 ' + c0.eggCost.toFixed(2) + (w.budget ? '・死産 ' + (c0.stillborn || 0) : '') + (w.invest ? ' / 卵の蓄え（遺伝子の平均）' + c0.yolkGene.toFixed(2) : '') + (w.cast ? ' / 卵を産む距離（遺伝子の平均、親の脇からさらに）' + (c0.castGene || 0).toFixed(1) : '') + (w.wireLate ? ' / 回路を生まれたあとに作る部品を持つ個体 ' + ((c0.lateBodies || 0) * 100).toFixed(0) + '%（配線のうち、生まれたあとに作られる分 ' + ((c0.lateWiring || 0) * 100).toFixed(0) + '%）' : '') + (w.mutsplit ? ' / 変異の頻度（遺伝子の平均）' + c0.mutGene.toFixed(2) + '・変異の幅 ' + (c0.mutWidth == null ? 1 : c0.mutWidth).toFixed(2) + '（どちらも 1.00 が世界の値。体のつくりが変わる確率は頻度に比例）' : w.metamut ? ' / 変異の強さ（遺伝子の平均）' + c0.mutGene.toFixed(2) + '（体のつくりが変わる確率は、この値の 2 乗に比例：いま初期の ' + (c0.mutGene * c0.mutGene * 100).toFixed(0) + '%' + (c0.mutGene < 0.6 ? '。下がっている。下限は 0.10' : '') + '）' : '') + (w.nerve2 ? ' / 神経を持つ個体 ' + (c0.neuronBodies * 100).toFixed(0) + '%（1 個体あたり ' + c0.neurons.toFixed(2) + ' 個。感覚を読んで何かを動かす神経を持つのは ' + ((c0.senseNeurons || 0) * 100).toFixed(0) + '%）' : '') + (w.learn ? ' / 経験で変わる結合を持つ個体 ' + (c0.plastic * 100).toFixed(0) + '%' : '') + '\n';
     const geneLine = birthLine + '遺伝子の部品：持っている ' + c0.partsTotal.toFixed(1) + ' / 規則が届く ' + c0.partsReach.toFixed(1) + ' / 身体に現れる ' + c0.partsUsed.toFixed(2) + ' 種類（2 種類以上の身体 ' + (c0.multiPart * 100).toFixed(0) + '%、軸に区分 ' + (c0.zoned * 100).toFixed(0) + '%、区分が分化 ' + (c0.differed * 100).toFixed(0) + '%）\n';
-    $('stats').textContent = (w.budget ? '【出生の収支を合わせる】' : '') + (w.carry ? '【成長で神経を引き継ぐ】' : '') + (w.genome2 ? '【遺伝子の新しい規則】' : '') + geneLine + (w.contact ? '【接触あり】傷で死亡 ' + (c0.killed || 0) + ' / 傷を負っている ' + (c0.wounded * 100).toFixed(0) + '% / 口の収入のうち他個体の組織 ' + (c0.fleshShare * 100).toFixed(1) + '%（2 割以上の個体 ' + (c0.fleshEaters * 100).toFixed(0) + '%）' + (w.adhere ? ' / 他の身体を掴んでいる ' + (c0.holding * 100).toFixed(0) + '% / 収入のうち染み出しで得た分 ' + (c0.seepShare * 100).toFixed(1) + '%' : '') + (w.mix ? ' / 2 つの遺伝子から生まれた個体 ' + (c0.twoParents * 100).toFixed(0) + '%（相手の遺伝物質を持っている ' + (c0.carrying * 100).toFixed(0) + '%）' : '') + '\n' : '') + (w.blind ? '【近道なし】' : '') + (w.vision ? '【視覚あり】配線された眼を持つ個体 ' + seers + ' / ' : '') + (w.scent ? '【他個体の匂いあり】嗅覚の配線を持つ個体 ' + smellers + ' / ' : '') + '時刻 ' + c0.t + ' 秒 / 個体数 ' + c0.n + ' / 系統 ' + c0.lines + ' / 平均世代 ' + c0.gen.toFixed(1)
+    $('stats').textContent = (c0.unsound || c0.broken ? '【異常】数でない値（蓄え・位置・神経の信号）を持つ身体 ' + (c0.unsound || 0) + ' 匹 / 物理の計算の破綻で死んだ身体 ' + (c0.broken || 0) + ' 匹。これは世界の出来事ではなく、プログラムの不具合です。この世界を保存して知らせてください。\n' : '') + (w.budget ? '【出生の収支を合わせる】' : '') + (w.carry ? '【成長で神経を引き継ぐ】' : '') + (w.genome2 ? '【遺伝子の新しい規則】' : '') + geneLine + (w.contact ? '【接触あり】傷で死亡 ' + (c0.killed || 0) + ' / 傷を負っている ' + (c0.wounded * 100).toFixed(0) + '% / 口の収入のうち他個体の組織 ' + (c0.fleshShare * 100).toFixed(1) + '%（2 割以上の個体 ' + (c0.fleshEaters * 100).toFixed(0) + '%）' + (w.adhere ? ' / 他の身体を掴んでいる ' + (c0.holding * 100).toFixed(0) + '% / 収入のうち染み出しで得た分 ' + (c0.seepShare * 100).toFixed(1) + '%' : '') + (w.mix ? ' / 2 つの遺伝子から生まれた個体 ' + (c0.twoParents * 100).toFixed(0) + '%（相手の遺伝物質を持っている ' + (c0.carrying * 100).toFixed(0) + '%）' : '') + '\n' : '') + (w.blind ? '【近道なし】' : '') + (w.vision ? '【視覚あり】配線された眼を持つ個体 ' + seers + ' / ' : '') + (w.scent ? '【他個体の匂いあり】嗅覚の配線を持つ個体 ' + smellers + ' / ' : '') + '時刻 ' + c0.t + ' 秒 / 個体数 ' + c0.n + ' / 系統 ' + c0.lines + ' / 平均世代 ' + c0.gen.toFixed(1)
       + '\n成体の体節数：平均 ' + c0.segMean.toFixed(2) + '・最大 ' + c0.segMax + ' / 多体節 ' + (c0.multi * 100).toFixed(0) + '%'
       + '\n平均体積 ' + c0.volume.toFixed(2) + ' / 自力移動 ' + c0.speed.toFixed(3) + ' u/s / 口から ' + (c0.mouthShare * 100).toFixed(0) + '%（収入の 3 割以上を口から得ている個体 ' + ((c0.grainEaters || 0) * 100).toFixed(0) + '%）/ 眼 ' + (c0.eyes * 100).toFixed(0) + '% / 底面 ' + (c0.bottom * 100).toFixed(0) + '%'
       + '\n溶存栄養 ' + c0.nutrient.toFixed(2) + ' / 粒 ' + c0.food + ' / 出生 ' + c0.births + ' / 餓死 ' + c0.starved + ' / 老衰 ' + c0.aged + ' / 上限で不成立 ' + c0.blocked
@@ -227,7 +230,8 @@
     const key = $('rank').value, val = { kids: o => o.kids, age: o => o.age, V: o => o.prof.V, segs: o => o.b.segs.length, eaten: o => o.eaten, speed: speedOf }[key];
     $('top').textContent = w.bodies.slice().sort((a, b) => val(b) - val(a)).slice(0, 10).map((o, i) => (i + 1) + '. #' + o.id + '  ' + val(o).toFixed(key === 'kids' || key === 'segs' ? 0 : 2) + '  （系統 ' + o.line + '・世代 ' + o.gen + '・' + kindText(o.kind) + '）').join('\n');
     $('top').onclick = e => { const m = (window.getSelection().anchorNode || {}).textContent; };
-    $('events').textContent = w.events.length ? w.events.slice().reverse().map(e => e.t + ' 秒  ' + e.text + (e.id ? '（#' + e.id + '）' : '')).join('\n') : 'まだ何も起きていない';
+    const extLog = w.events.filter(e => e.text.startsWith('体制の絶滅：')), visibleLog = $('showExtinctionLog').checked ? w.events : w.events.filter(e => !e.text.startsWith('体制の絶滅：'));
+    $('events').textContent = (! $('showExtinctionLog').checked && extLog.length ? 'この記録内の体制絶滅 ' + extLog.length + ' 件を集約（詳細はチェックで表示）\n' : '') + (visibleLog.length ? visibleLog.slice().reverse().map(e => e.t + ' 秒  ' + e.text + (e.id ? '（#' + e.id + '）' : '')).join('\n') : 'そのほかの記録はまだない');
     ancestry();
     // extinct body plans
     const f = $('lostFilter').value, all = [...w.clades.values()].filter(c => c.ended != null);
@@ -252,7 +256,7 @@
   }
   // how the observed individual was chosen: by a rule (so the rule can pick again when it dies) or by hand
   let rule = null, ruleName = '', notice = '';
-  function select(o, keepRule) { sel = o; shown = null; follow = follow && !!o; lastPanels = 0; if (!keepRule) { rule = null; ruleName = ''; notice = ''; } }
+  function select(o, keepRule, observer) { if (!observer && !keepRule) A.observerUI.clearTrack(); sel = o; shown = null; follow = follow && !!o; lastPanels = 0; if (!keepRule) { rule = null; ruleName = ''; notice = ''; } }
 
   function draw() {
     if (follow && sel && !sel.dead) { view.cx += (sel.cx - view.cx) * 0.15; view.cy += (sel.cy - view.cy) * 0.15; }
@@ -403,7 +407,7 @@
     drag = null;
   });
   // auto = the observed body died and the same rule picks the next one: the view is left as the user had it (no zoom, tracking only if it was on)
-  const pick = (f, name, auto) => { if (!w.bodies.length) return; const was = follow; rule = f; ruleName = name || ruleName; select(w.bodies.reduce((a, b) => (f(b) > f(a) ? b : a)), true); if (auto) { follow = was; return; } follow = true; $('follow').textContent = '追跡中'; view.scale = Math.max(view.scale, 30); };
+  const pick = (f, name, auto) => { if (!w.bodies.length) return; if (!auto) A.observerUI.clearTrack(); const was = follow; rule = f; ruleName = name || ruleName; select(w.bodies.reduce((a, b) => (f(b) > f(a) ? b : a)), true); if (auto) { follow = was; return; } follow = true; $('follow').textContent = '追跡中'; view.scale = Math.max(view.scale, 30); };
   $('brainy').onclick = () => pick(o => o.b.segs.reduce((a, q) => a + (q.p.nn ? q.p.nn.length : 0), 0) * 1000 + o.prof.wiring, '神経が最も多い個体'); $('mosaic').onclick = () => pick(o => (o.gu ? o.gu.expr : 1) * 1000 + o.b.segs.length, '部品の種類が最も多い個体');
   $('biggest').onclick = () => pick(o => o.prof.V, '最大の身体'); $('mover').onclick = () => pick(speedOf, '最も動く個体');
   $('oldest').onclick = () => { const count = new Map(); for (const o of w.bodies) for (const n of w.ancestors(o.id)) count.set(n.id, (count.get(n.id) || 0) + 1); pick(o => count.get(o.id) || 0, '最多の子孫'); rule = o => w.ancestors(o.id).length ? w.bodies.filter(b => w.ancestors(b.id).some(n => n.id === o.id)).length : 0; };

@@ -85,6 +85,15 @@
                                           //     connection where it was (a connection to a neuron that is gone reads nothing), and a new connection is made to a neuron that exists.
                                           //     0 = connections count places in the part's list: removing a neuron makes the connections to later ones read their neighbours instead,
                                           //     and three in four of new connections to a neuron of the same segment point at no neuron.
+    wireLate: 0,                          // 1 = the stage of growth at which a part's circuit is built is inherited and mutates (part gene `nAt`, 0..1; absent or below the stage of birth =
+                                          //     from birth, as before). Until a part's circuit is built, its segments carry no connections: they pay no upkeep for them, read no sense
+                                          //     and drive nothing (cilia beat at their plain rate). From that stage on the circuit is whole and costs what it always cost. No new cost
+                                          //     and no reward. 0 = every circuit is there from birth, and a newborn pays for it what the adult pays, whatever its size.
+    wireEnds: 0,                          // 1 = a connection of a segment's circuit is made only where both of its ends are in that body and that world: none from a sense
+                                          //     the segment lacks (no eye, no ear, no nerve tissue, a sense the world does not have), none to an effector it lacks (no cilia, no
+                                          //     muscled joint, no mouth, no voice), none to a neighbour that is not there or carries no circuit. Such a connection could never
+                                          //     change what the body does; with this rule it is not built and costs no upkeep. What bodies do is exactly as before; only what they
+                                          //     pay changes. 0 = every connection the genes name is paid for, whether or not anything is at its other end.
     keep: 0,                              // 1 = a body keeps what its nerves hold through everything that rebuilds or moves it. When it is rebuilt for growth, every segment that was
                                           //     there before keeps its nerve signal, the activity of its neurons, the connections it has acquired, what each sense had adapted to
                                           //     (taste, smell, sight, hearing), the state of its mouth and its rhythm — and the body keeps its motion: its speed, its spin and the
@@ -274,7 +283,7 @@
       const was = o.hp && o.plan ? new Map(o.plan.segs.map((s, i) => [s.addr, o.hp[i]])) : null;
       const kept = this.keep && o.b && o.plan ? this.mindOf(o, true) : null;
       const mind = !kept && this.carry && o.b && o.plan ? { t: o.b.t, seg: new Map(o.plan.segs.map((s, i) => { const q = o.b.segs[i]; return [s.addr, [q.a, q.m, q.mA, q.mB, q.mV, q.v, q.na ? Float64Array.from(q.na) : null, q.nA, q.nB, q.nV, q.nw ? Float64Array.from(q.nw) : null]]; })) } : null;
-      o.plan = A.development.develop(o.g, { stage: o.stage, maxSegs: this.maxSegs, pair: this.pair }); o.prof = A.organs.profile(o.plan, this.wireGrow);
+      o.plan = A.development.develop(o.g, { stage: o.stage, maxSegs: this.maxSegs, pair: this.pair, late: this.wireLate, ends: this.wireEnds ? this : null }); o.prof = A.organs.profile(o.plan, this.wireGrow);
       if (was) { o.hp = o.plan.segs.map(s => (was.has(s.addr) ? was.get(s.addr) : 1)); if (this.solid) for (let i = 1; i < o.hp.length; i++) { const pa = o.plan.segs[i].parent; if (pa > 0 && o.hp[pa] <= 0) o.hp[i] = 0; } } // (solid) nothing grows beyond a cut
       o.b = A.physics.build(o.plan, { x, y, angle: ang, env: { fluid: 1, ground: false, gravity: 4, flowX: 0, flowY: 0 } });
       // lay the body's own centre on (x, y)
@@ -287,7 +296,7 @@
       if (!this.rigid) o.b.rigid = false; // control experiment: solve every body with the jointed solver
       if (o.b.rigid) o.self = null;
       o.passive = !o.b.hasCilia && o.b.rigid && !this.contact && !this.sound; o.cil0 = 0; // where bodies touch, every body is simulated: even one that cannot move can be pushed
-      o.cleanV = o.prof.V; o.cleanBuild = o.prof.buildCost; if (o.hp) { while (o.hp.length < o.b.segs.length) o.hp.push(1); o.hp.length = o.b.segs.length; this.wound(o); }
+      o.cleanV = o.prof.V; o.cleanBuild = o.prof.buildCost; if (o.hp) { while (o.hp.length < o.b.segs.length) o.hp.push(1); o.hp.length = o.b.segs.length; this.lost(o); this.wound(o); }
       if (this.sound) this.soundBody(o);
       o.cil0 = 0; o.nerve0 = 0; o.b.nerveUse = 0; if (o.sig) { for (let i = 0; i < o.b.segs.length && i < o.sig.length; i++) o.b.segs[i].a = o.sig[i]; o.sig = null; }
     }
@@ -312,9 +321,14 @@
     }
     // (solid) A segment torn through is cut off, with everything beyond it. What is left of the tissue beyond becomes food at the cut, with that tissue's share
     // of the body's reserve and gut contents — the same accounting as a bite.
+    // (solid) What has been cut off stays cut off, and carries no circuit. unwire: the plan's segment gets a copy of its part without connections, so the body's
+    // profile no longer charges it the upkeep of nerves it has lost. lost: on a body that has just been rebuilt (growth, a reloaded world, arrival from another
+    // island), the segments cut off earlier are marked as gone again without being cut - and counted - a second time.
+    unwire(q) { if (!q || q.cut) return; const p = Object.assign({}, q.p); for (const k of A.neural.CIRCUIT) p[k] = 0; delete p.nn; q.p = p; q.cut = true; }
+    lost(o) { if (!this.solid || !o.hp) return; const segs = o.b.segs, ps = o.plan.segs; for (let i = 1; i < segs.length && i < o.hp.length; i++) if (o.hp[i] <= 0) { segs[i].gone = true; this.unwire(ps[i]); } }
     sever(o, j) {
-      const C = A.organs.C, segs = o.b.segs, hp = o.hp, lg = this.ledger, at = segs[j]; let vol = 0; const stack = segs[j].kids.slice(); segs[j].gone = true;
-      while (stack.length) { const k = stack.pop(), q = segs[k]; if (hp[k] > 0) vol += Math.PI * (q.r0 + q.r1) / 2 * (q.z0 + q.z1) / 2 * q.len * hp[k]; hp[k] = 0; q.gone = true; for (const c of q.kids) stack.push(c); }
+      const C = A.organs.C, segs = o.b.segs, hp = o.hp, lg = this.ledger, at = segs[j]; let vol = 0; const stack = segs[j].kids.slice(); segs[j].gone = true; this.unwire(o.plan.segs[j]);
+      while (stack.length) { const k = stack.pop(), q = segs[k]; if (hp[k] > 0) vol += Math.PI * (q.r0 + q.r1) / 2 * (q.z0 + q.z1) / 2 * q.len * hp[k]; hp[k] = 0; q.gone = true; this.unwire(o.plan.segs[k]); for (const c of q.kids) stack.push(c); }
       this.counts.cut = (this.counts.cut || 0) + 1; if (vol <= 1e-9) return;
       const share = Math.min(1, vol / Math.max(1e-9, o.prof.V)), eE = Math.max(0, o.E) * share, eG = o.G * share; o.E -= eE; o.G -= eG; o.lost = (o.lost || 0) + C.flesh * C.build * vol + eE + eG;
       let e = C.flesh * C.build * vol + eE + eG; this.corpse = true;
@@ -373,6 +387,8 @@
       if (o.wireGrow != null && !!o.wireGrow !== !!this.wireGrow) { this.wireGrow = o.wireGrow ? 1 : 0; for (const q of this.bodies) { const pr = A.organs.profile(q.plan, this.wireGrow); q.prof.basal = pr.basal; q.prof.wireCost = pr.wireCost; } this.log('世界の設定を変更：神経の配線の維持費が、体節の育ち具合（成体の体積に対する今の体積）に比例する規則を' + (o.wireGrow ? '有効にした（成体が払う額は変わらない）' : '無効にした（新生個体も成体と同じ額を払う）')); }
       if (o.pair != null && !!o.pair !== !!this.pair) { this.pair = o.pair ? 1 : 0; for (const q of this.bodies) if (q.stage < 1) { q.nextCost = null; const root = q.b.segs[0]; this.form(q, q.cx, q.cy, Math.atan2(root.dy, root.dx)); } this.log('世界の設定を変更：左右の対が成長の同じ段階で一緒に現れる規則を' + (o.pair ? '有効にした' : '無効にした')); }
       if (o.solid != null && !!o.solid !== !!this.solid) { this.solid = o.solid ? 1 : 0; for (const q of this.bodies) { q.b.hard = !!this.solid; q.self = this.solid && !q.b.rigid ? this.selfPairs(q) : null; if (q.hp) this.wound(q); } this.log('世界の設定を変更：身体を全長にわたって固い物体として扱う規則（側面の接触・自分自身との接触・関節の止まり・失った組織の重さ・切断）を' + (o.solid ? '有効にした' : '無効にした')); }
+      if (o.wireEnds != null && !!o.wireEnds !== !!this.wireEnds) { this.wireEnds = o.wireEnds ? 1 : 0; for (const q of this.bodies) { q.nextCost = null; const root = q.b.segs[0]; this.form(q, q.cx, q.cy, Math.atan2(root.dy, root.dx)); } this.log('世界の設定を変更：相手（感覚・効果器・隣の体節）のある結合だけを作り、相手の無い結合には維持費がかからない規則を' + (o.wireEnds ? '有効にした（身体のすることは変わらない）' : '無効にした')); }
+      if (o.wireLate != null && !!o.wireLate !== !!this.wireLate) { this.wireLate = o.wireLate ? 1 : 0; for (const q of this.bodies) if (q.stage < 1 && q.g.parts.some(p => p.nAt > q.stage)) { q.nextCost = null; const root = q.b.segs[0]; this.form(q, q.cx, q.cy, Math.atan2(root.dy, root.dx)); } this.log('世界の設定を変更：部品ごとに、回路を作る成長の段階が遺伝し、変異する規則を' + (o.wireLate ? '有効にした（遺伝子の無い部品は、これまでどおり生まれたときから回路を持つ）' : '無効にした（どの回路も生まれたときからある）')); }
       if (o.wire != null && !!o.wire !== !!this.wire) { this.wire = o.wire ? 1 : 0; this.log('世界の設定を変更：神経に名前を付け、結合が相手を名前で指す規則を' + (o.wire ? '有効にした（神経が減っても増えても、ほかの結合はずれない）' : '無効にした')); }
       if (o.keep != null && !!o.keep !== !!this.keep) { this.keep = o.keep ? 1 : 0; this.log('世界の設定を変更：身体が作り直されても・移されても、神経の状態・身につけた結合・動きを保つ規則を' + (o.keep ? '有効にした' : '無効にした')); }
       if (o.carry != null && !!o.carry !== !!this.carry) { this.carry = o.carry ? 1 : 0; this.log('世界の設定を変更：成長の前後で神経の状態と律動を引き継ぐ規則を' + (o.carry ? '有効にした' : '無効にした')); }
@@ -989,7 +1005,7 @@
       }
       for (const o of born) {
         const split = this.mutsplit, mm = this.metamut || split ? (o.g.mut == null ? 1 : o.g.mut) : 1, mw = split ? (o.g.mutW == null ? mm : o.g.mutW) : 1; // (a lineage that comes from the one-gene rule starts with the width it had)
-        let src = o.g, two = 0, mate = null; if (this.mix && o.got) { src = A.genome.recombine(o.g, o.got.g, this.rand, this.sound, this.cast); two = o.got.id; mate = o.got.g.origin; o.got = null; } // an egg made from two genomes; the material taken up is used
+        let src = o.g, two = 0, mate = null; if (this.mix && o.got) { src = A.genome.recombine(o.g, o.got.g, this.rand, this.sound, this.cast, this.wireLate); two = o.got.id; mate = o.got.g.origin; o.got = null; } // an egg made from two genomes; the material taken up is used
         const g = this.rand() < this.mutation * mm ? A.genome.mutate(src, this.rand, split ? mw : this.metamut ? mm : undefined, A.rules.flags(this), split ? 1 : undefined) : two ? src : A.genome.copy(o.g);
         if (split) { if (this.rand() < this.mutation) g.mut = clamp(mm * Math.exp(this.rand.gauss() * 0.15), 0.1, 3); if (this.rand() < this.mutation) g.mutW = clamp(mw * Math.exp(this.rand.gauss() * 0.15), 0.1, 3); } // the two genes drift whether or not this birth mutates
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
@@ -1060,6 +1076,12 @@
       for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: d.exact ? f[5] : w.t + f[5] });
       if (d.exact) { w.grainDebt = d.grainDebt; w.bottomDebt = d.bottomDebt; if (d.liveLines) w.liveLines = new Set(d.liveLines); if (d.regionState && w.regions) d.regionState.forEach((q, i) => { w.regions[i].debt = q.debt; w.regions[i].patch = q.patch; }); }
       const nodes = new Map(d.tree.map(n => [n.id, n]));
+      // A world saved before a gene existed: its genomes lack that gene, and a rule that reads it would compute with nothing (bodies in a world with touch,
+      // saved before the genes of touch, lost their nerve signal at the first step and died). Every genome the save holds gets the starting value of the genes
+      // it lacks; genomes that have every gene are left exactly as they are, so a world saved by this version resumes as before.
+      { let filled = 0, of = 0; const fill = g => { const k = A.genome.complete(g); if (k) { filled += k; of++; } };
+        for (const n of d.tree) if (n.g) fill(n.g); for (const c of w.clades.values()) if (c.g) fill(c.g); for (const s of d.bodies) if (s.got && s.got[1]) fill(s.got[1]);
+        if (filled) w.log('保存のあとに足された遺伝子を、初期値で補った（' + of + ' 個の遺伝子型に、合わせて ' + filled + ' か所）。古い版で保存した世界を再開したため'); }
       for (const s of d.bodies) {
         const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade, sig: s.sig || null, home: s.home || 0, taxDot: 0, taxLen: 0, taxN: 0, V0: s.v0, stage0: s.s0, seepIn: s.si || 0, seepOut: s.so || 0, held: s.hd == null ? undefined : s.hd, p2: s.p2 || 0, got: s.got ? { id: s.got[0], g: s.got[1] } : null, voOn: s.vo ? !!s.vo[0] : false, voN: s.vo ? s.vo[1] : 0, voT: s.vo ? s.vo[2] : 0, voE: s.vo ? s.vo[3] : 0, hp: s.hp || null, flesh: s.flesh || 0, lost: s.lost || 0 };
         if (n.introduction) o.introduction = n.introduction;
@@ -1101,7 +1123,7 @@
       for (const s of list || []) {
         const o = this.spawn(A.genome.copy(s.g), ((s.x * this.W) % this.W + this.W) % this.W, clamp(s.y * this.H, 2, this.H - 2), s.stage, null);
         if (lg) lg.placed -= o.E + o.prof.buildCost; // (spawn booked it as a founder; it is booked below as an arrival, with what it really carries)
-        if (s.hp && s.hp.length === o.b.segs.length && s.hp.some(h => h < 1)) { o.hp = Array.from(s.hp); this.wound(o); }
+        if (s.hp && s.hp.length === o.b.segs.length && s.hp.some(h => h < 1)) { o.hp = Array.from(s.hp); this.lost(o); this.wound(o); }
         Object.assign(o, { age: s.age, life: s.life, gen: s.gen, E: s.E, G: s.G, egg: s.egg, grow: s.grow, eaten: s.eaten, absorbed: s.absorbed, path: s.path, kids: s.kids, flesh: s.flesh || 0, lost: s.lost || 0, V0: s.v0, stage0: s.s0, nextCost: s.nextCost == null ? undefined : s.nextCost, nextStage: s.nextStage == null ? undefined : s.nextStage });
         if (this.keep && s.mind) this.mindTo(o, s.mind, false); // (it arrives with what it knew)
         const node = this.tree.get(o.id); if (s.introduction) o.introduction = node.introduction = s.introduction; node.gen = s.gen; node.from = Object.assign({ island: island == null ? null : island }, s.from);
@@ -1134,7 +1156,7 @@
         bottom: mean(o => this.isGround(o.cx, o.cy) ? 1 : 0),
         seepShare: mean(o => { const inc = o.absorbed + o.eaten * o.prof.eta + (o.seepIn || 0); return inc > 0 ? (o.seepIn || 0) / inc : 0; }), holding: mean(o => (o.held != null && this.tick - o.held < 30 ? 1 : 0)), grainEaters: (() => { let n = 0, k = 0; for (const o of this.bodies) if (o.age > 60) { n++; const m = o.eaten * o.prof.eta; if (m >= 0.3 * (m + o.absorbed) && m > 0) k++; } return n ? k / n : 0; })(), /* of the bodies older than a minute: those that took 30% or more of their lifetime income through the mouth */ twoParents: mean(o => (o.p2 ? 1 : 0)), carrying: mean(o => (o.got ? 1 : 0)),
         ...(this.sound ? this.soundCensus() : null),
-        castGene: mean(o => (o.g.cast == null ? 0 : o.g.cast)), mutGene: mean(o => (o.g.mut == null ? 1 : o.g.mut)), mutWidth: mean(o => (o.g.mutW == null ? (o.g.mut == null ? 1 : o.g.mut) : o.g.mutW)), mutLow: mean(o => ((o.g.mut == null ? 1 : o.g.mut) < 0.3 ? 1 : 0)), plastic: mean(o => (o.g.parts.some(p => p.nn && p.nn.some(q => q.in.some(e => e[2]))) ? 1 : 0)), senseNeurons: mean(o => (o.b.segs.some(q => q.p.nn && q.p.nn.some(n => n.out.length && n.in.some(e => 'cABvtwhjg'.includes(e[0])))) ? 1 : 0)), /* a neuron that reads a sense of its segment and moves something: the least a neuron must do to be more than a constant */ yolkGene: mean(o => this.yolkOf(o.g)), neurons: mean(o => o.b.segs.reduce((a, q) => a + (q.p.nn ? q.p.nn.length : 0), 0)), neuronBodies: mean(o => o.b.segs.some(q => q.p.nn) ? 1 : 0),
+        castGene: mean(o => (o.g.cast == null ? 0 : o.g.cast)), lateBodies: mean(o => (o.g.parts.some((p, i) => p.nAt > o.g.birth && o.plan.segs.some(q => q.part === i)) ? 1 : 0)) /* (wireLate) bodies some part of which, as it stands in the body now, is born without its circuit */, lateWiring: (() => { let all = 0, late = 0; for (const o of this.bodies) o.g.parts.forEach((p, i) => { if (!o.plan.segs.some(q => q.part === i)) return; const v = A.neural.wiring(p); all += v; if (p.nAt > o.g.birth) late += v; }); return all ? late / all : 0; })() /* share of the wiring, by strength, that is built after birth */, mutGene: mean(o => (o.g.mut == null ? 1 : o.g.mut)), mutWidth: mean(o => (o.g.mutW == null ? (o.g.mut == null ? 1 : o.g.mut) : o.g.mutW)), mutLow: mean(o => ((o.g.mut == null ? 1 : o.g.mut) < 0.3 ? 1 : 0)), plastic: mean(o => (o.g.parts.some(p => p.nn && p.nn.some(q => q.in.some(e => e[2]))) ? 1 : 0)), senseNeurons: mean(o => (o.b.segs.some(q => q.p.nn && q.p.nn.some(n => n.out.length && n.in.some(e => 'cABvtwhjg'.includes(e[0])))) ? 1 : 0)), /* a neuron that reads a sense of its segment and moves something: the least a neuron must do to be more than a constant */ yolkGene: mean(o => this.yolkOf(o.g)), neurons: mean(o => o.b.segs.reduce((a, q) => a + (q.p.nn ? q.p.nn.length : 0), 0)), neuronBodies: mean(o => o.b.segs.some(q => q.p.nn) ? 1 : 0),
         birthV: (l => l.length ? l.reduce((a, o) => a + o.V0, 0) / l.length : 0)(this.bodies.filter(o => o.V0 != null && o.gen > 0)), birthStage: (l => l.length ? l.reduce((a, o) => a + o.stage0, 0) / l.length : 0)(this.bodies.filter(o => o.stage0 != null && o.gen > 0)), birthGene: mean(o => o.g.birth), eggCost: mean(o => o.eggCost), adultV: mean(o => o.full.V),
         partsTotal: mean(o => o.gu.parts), partsReach: mean(o => o.gu.reach), partsUsed: mean(o => o.gu.expr), multiPart: mean(o => o.gu.expr > 1 ? 1 : 0), zoned: mean(o => o.gu.zones > 0 ? 1 : 0), differed: mean(o => o.gu.zones > 0 && o.gu.div > 0.05 ? 1 : 0),
         fleshShare: mean(o => o.eaten > 0 ? (o.flesh || 0) / o.eaten : 0), fleshEaters: mean(o => (o.flesh || 0) > 0.2 * o.eaten && o.eaten > 0 ? 1 : 0), wounded: mean(o => o.hp ? 1 : 0), armor: mean(o => o.g.parts.reduce((a, p) => a + p.armor, 0) / o.g.parts.length),
@@ -1145,7 +1167,7 @@
         // taxis: of the distance bodies moved by themselves while perceiving food, the fraction that went towards it.
         // Weighted by distance, and only bodies that really travelled count: a body that merely trembles says nothing.
         taxis: (() => { const l = this.bodies.filter(o => this.traveller(o)); const len = l.reduce((a, o) => a + o.taxLen, 0); return len ? l.reduce((a, o) => a + o.taxDot, 0) / len : 0; })(), taxisN: this.bodies.filter(o => this.traveller(o)).length,
-        turnGain: mean(o => Math.abs(o.g.brain[7])), sessileMulti: mean(o => o.full.mouths.length >= 3 && (o.age > 5 ? o.path / o.age : 0) < 0.01 ? 1 : 0), food: this.food.length, nutrient: this.nut.reduce((a, b) => a + b, 0) / this.nut.length, ...this.counts
+        turnGain: mean(o => Math.abs(o.g.brain[7])), sessileMulti: mean(o => o.full.mouths.length >= 3 && (o.age > 5 ? o.path / o.age : 0) < 0.01 ? 1 : 0), food: this.food.length, unsound: this.bodies.reduce((k, o) => k + (Number.isFinite(o.E) && Number.isFinite(o.cx) && Number.isFinite(o.cy) && o.b.segs.every(q => Number.isFinite(q.a)) ? 0 : 1), 0) /* (a watch, not a rule) living bodies that hold something that is not a number - a reserve, a place, a nerve signal. The world's physics never makes one: any is a fault of the program */, nutrient: this.nut.reduce((a, b) => a + b, 0) / this.nut.length, ...this.counts
       };
     }
   }
