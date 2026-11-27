@@ -225,7 +225,7 @@
       }
       (this.introductions || (this.introductions = [])).push(group);
       this.counts.introduced = (this.counts.introduced || 0) + count;
-      this.log('人為的な外来個体の投入：系統 ' + group.root + '、' + count + ' 匹、' + place + '、' + age + '（自然進化による出現ではない）');
+      this.log('人為的な外来個体の投入：系統 ' + group.root + '、' + count + ' 匹、' + ({ random: 'ランダム', center: '画面中央', ocean: '外洋', bottom: '海底' }[place]) + '、' + (age === 'adult' ? '成体' : '幼体') + '（自然進化による出現ではない）');
       return got;
     }
 
