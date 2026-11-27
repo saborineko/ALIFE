@@ -15,6 +15,8 @@
   let grainSprites = null;
   let field = null, fimg = null, sand = null, motes = null, frameNo = 0; const trails = new WeakMap();
   let w, view, paused = false, sel = null, shown = null, follow = false, loaded = window.ALIFE2_LOAD || null, lastPanels = 0, lastSave = 0;
+  // (a mark kept for this tab only: there while the page is open, taken away when the page is left while it still answers. Found at the start, it means the page ended without answering.)
+  let unclean = false; try { unclean = sessionStorage.getItem('alife2_open') === '1'; sessionStorage.setItem('alife2_open', '1'); addEventListener('pagehide', () => { try { sessionStorage.removeItem('alife2_open'); } catch (e) {} }); } catch (e) {}
 
   // ---- islands: more worlds of the same kind, each in its own thread (alife2-island.js); now and then a body moves from each to the next ----
   // Slot 0 is the world on screen; the others run unseen at full speed. Bodies leave by each world's own clock, so a run with islands
@@ -484,7 +486,16 @@
     try {
       if (localStorage.getItem(AUTO) === '1' && !q.get('fresh') && !q.get('t') && !loaded) {
         $('auto').checked = true; const d = await dbGet('autosave');
-        if (d != null) { if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); resumed = true; $('saveNote').textContent = '自動保存から再開した（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。新しい世界を始めるには「最初から」。'; document.querySelector('details:has(#save)').open = true; }
+        // The last time this tab had the page open, did it end without answering (a hang, a crash)? Then the autosaved world is not started again by itself:
+        // if it is what stopped the page, every reload would stop it again. It is kept as it is (autosave is switched off for now, so that it is not written
+        // over), and can be written to a file for finding the cause, or started all the same.
+        if (d != null && unclean) { $('auto').checked = false; const bar = document.createElement('div'); bar.id = 'unclean'; bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:98;background:#5a4a10;color:#fff;padding:8px 10px;font-size:13px';
+          const say = t => { bar.firstChild.textContent = t; }, btn = (label, f) => { const x = document.createElement('button'); x.textContent = label; x.style.marginLeft = '8px'; x.onclick = f; bar.append(x); };
+          bar.append(document.createTextNode('前回、このタブのページは応答しないまま終わりました（固まった、または落ちた）。同じことを繰り返さないよう、自動保存の世界は再開せず、新しい世界を始めています。自動保存はそのまま残してあり、いまは上書きしません。'));
+          btn('自動保存をファイルに書き出す（原因を調べるため）', async () => { try { const blob = d.worlds ? pack(d.worlds) : typeof d === 'string' ? new Blob([d], { type: 'application/json' }) : d, a2 = document.createElement('a'); a2.href = URL.createObjectURL(blob); a2.download = d.worlds ? 'alife2-autosave-islands.alife2' : 'alife2-autosave.json.gz'; a2.click(); say('書き出しました。このファイルを知らせてください。'); } catch (e) { say('書き出せなかった：' + (e && e.message || e)); } });
+          btn('それでも自動保存から再開する', async () => { bar.remove(); try { if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); $('auto').checked = true; } catch (e) { fault('自動保存の再開', e); } });
+          btn('閉じる（新しい世界のまま）', () => bar.remove()); document.body.append(bar); }
+        else if (d != null) { if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); resumed = true; $('saveNote').textContent = '自動保存から再開した（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。新しい世界を始めるには「最初から」。'; document.querySelector('details:has(#save)').open = true; }
       }
     } catch (e) { $('saveNote').textContent = '自動保存を読めなかったので新しい世界を始めた：' + (e && e.message || e); }
     if (!resumed) start();
