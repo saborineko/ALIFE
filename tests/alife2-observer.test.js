@@ -79,3 +79,19 @@ test('island worker observes, saves, swaps and toggles without changing its worl
   assert.equal(vm.runInContext('A.observer.get(w).events.length',ctx),saved.ecosystemObserver.events.length);
   assert.ok(messages.some(m=>m.type==='status'&&m.s.observer)); assert.ok(messages.some(m=>m.type==='swapped'));
 });
+test('UI snapshots freeze event-time state; optional speech stays off and throttles without a queue', async () => {
+  const vm=require('node:vm'), fs=require('node:fs'), path=require('node:path'); let now=100000, said=0, downloaded=null;
+  const elements=new Map(), pen=new Proxy({}, {get:()=>()=>{}});
+  const el=()=>({checked:false,value:'60',textContent:'',style:{},children:[],width:420,height:130,append(...xs){this.children.push(...xs);},replaceChildren(){this.children=[];},getContext:()=>pen,click(){if(this.href)downloaded=this.href;}});
+  const document={getElementById:id=>{if(!elements.has(id))elements.set(id,el());return elements.get(id);},createElement:()=>el()};
+  const ctx=vm.createContext({ALIFE2:A,document,Blob,performance:{now:()=>now},URL:{createObjectURL:b=>b,revokeObjectURL(){}},setTimeout(){},speechSynthesis:{speaking:false,cancel(){},speak(){said++;}},SpeechSynthesisUtterance:class{constructor(text){this.text=text;}},CustomEvent:class{},dispatchEvent(){}});
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../alife2-observer-ui.js'),'utf8'),ctx);
+  const w=make({founders:2}); A.observerUI.bind(w,()=>{}); const o=A.observer.get(w);
+  assert.equal(elements.get('observerSpeech').checked,false); assert.equal(elements.get('observerSnapshot').checked,false);
+  elements.get('observerSnapshot').checked=true; const before=plain(w);
+  o.emit(w.t,'snapshot-test','検証','検証',{},null,'観測事実',true); advance(w,30); A.observerUI.render(); elements.get('observerSnapshotSave').onclick();
+  const data=JSON.parse(await downloaded.text()); delete data.ecosystemObserver; assert.deepEqual(data,before); assert.equal(said,0);
+  elements.get('observerSpeech').checked=true; o.emit(w.t,'speak-1','検証','検証',{},null,'観測事実',true); A.observerUI.render(); assert.equal(said,1);
+  now+=29999; o.emit(w.t,'speak-2','検証','検証',{},null,'観測事実',true); A.observerUI.render(); assert.equal(said,1);
+  now++; o.emit(w.t,'speak-3','検証','検証',{},null,'観測事実',true); A.observerUI.render(); assert.equal(said,2);
+});

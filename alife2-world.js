@@ -230,7 +230,8 @@
     const key = $('rank').value, val = { kids: o => o.kids, age: o => o.age, V: o => o.prof.V, segs: o => o.b.segs.length, eaten: o => o.eaten, speed: speedOf }[key];
     $('top').textContent = w.bodies.slice().sort((a, b) => val(b) - val(a)).slice(0, 10).map((o, i) => (i + 1) + '. #' + o.id + '  ' + val(o).toFixed(key === 'kids' || key === 'segs' ? 0 : 2) + '  （系統 ' + o.line + '・世代 ' + o.gen + '・' + kindText(o.kind) + '）').join('\n');
     $('top').onclick = e => { const m = (window.getSelection().anchorNode || {}).textContent; };
-    $('events').textContent = w.events.length ? w.events.slice().reverse().map(e => e.t + ' 秒  ' + e.text + (e.id ? '（#' + e.id + '）' : '')).join('\n') : 'まだ何も起きていない';
+    const extLog = w.events.filter(e => e.text.startsWith('体制の絶滅：')), visibleLog = $('showExtinctionLog').checked ? w.events : w.events.filter(e => !e.text.startsWith('体制の絶滅：'));
+    $('events').textContent = (! $('showExtinctionLog').checked && extLog.length ? 'この記録内の体制絶滅 ' + extLog.length + ' 件を集約（詳細はチェックで表示）\n' : '') + (visibleLog.length ? visibleLog.slice().reverse().map(e => e.t + ' 秒  ' + e.text + (e.id ? '（#' + e.id + '）' : '')).join('\n') : 'そのほかの記録はまだない');
     ancestry();
     // extinct body plans
     const f = $('lostFilter').value, all = [...w.clades.values()].filter(c => c.ended != null);
@@ -255,7 +256,7 @@
   }
   // how the observed individual was chosen: by a rule (so the rule can pick again when it dies) or by hand
   let rule = null, ruleName = '', notice = '';
-  function select(o, keepRule, observer) { if (!observer) A.observerUI.clearTrack(); sel = o; shown = null; follow = follow && !!o; lastPanels = 0; if (!keepRule) { rule = null; ruleName = ''; notice = ''; } }
+  function select(o, keepRule, observer) { if (!observer && !keepRule) A.observerUI.clearTrack(); sel = o; shown = null; follow = follow && !!o; lastPanels = 0; if (!keepRule) { rule = null; ruleName = ''; notice = ''; } }
 
   function draw() {
     if (follow && sel && !sel.dead) { view.cx += (sel.cx - view.cx) * 0.15; view.cy += (sel.cy - view.cy) * 0.15; }
@@ -406,7 +407,7 @@
     drag = null;
   });
   // auto = the observed body died and the same rule picks the next one: the view is left as the user had it (no zoom, tracking only if it was on)
-  const pick = (f, name, auto) => { if (!w.bodies.length) return; const was = follow; rule = f; ruleName = name || ruleName; select(w.bodies.reduce((a, b) => (f(b) > f(a) ? b : a)), true); if (auto) { follow = was; return; } follow = true; $('follow').textContent = '追跡中'; view.scale = Math.max(view.scale, 30); };
+  const pick = (f, name, auto) => { if (!w.bodies.length) return; if (!auto) A.observerUI.clearTrack(); const was = follow; rule = f; ruleName = name || ruleName; select(w.bodies.reduce((a, b) => (f(b) > f(a) ? b : a)), true); if (auto) { follow = was; return; } follow = true; $('follow').textContent = '追跡中'; view.scale = Math.max(view.scale, 30); };
   $('brainy').onclick = () => pick(o => o.b.segs.reduce((a, q) => a + (q.p.nn ? q.p.nn.length : 0), 0) * 1000 + o.prof.wiring, '神経が最も多い個体'); $('mosaic').onclick = () => pick(o => (o.gu ? o.gu.expr : 1) * 1000 + o.b.segs.length, '部品の種類が最も多い個体');
   $('biggest').onclick = () => pick(o => o.prof.V, '最大の身体'); $('mover').onclick = () => pick(speedOf, '最も動く個体');
   $('oldest').onclick = () => { const count = new Map(); for (const o of w.bodies) for (const n of w.ancestors(o.id)) count.set(n.id, (count.get(n.id) || 0) + 1); pick(o => count.get(o.id) || 0, '最多の子孫'); rule = o => w.ancestors(o.id).length ? w.bodies.filter(b => w.ancestors(b.id).some(n => n.id === o.id)).length : 0; };

@@ -99,12 +99,12 @@
           this.emit(w.t, 'population-' + seconds + '-' + Math.sign(z.delta), z.delta > 0 ? '個体数が増加' : '個体数が減少',
             `直近${z.elapsed.toFixed(0)}秒：${z.start}→${z.end}匹。出生${z.counts.births}、死亡${deaths.reduce((n, d) => n + d[1], 0)}、移入${z.counts.arrived}、移出${z.counts.left}、人為投入${z.counts.introduced}、その他始祖${z.counts.founders}。${deathText}死因の背景は未検証。`, { ...z.counts, delta: z.delta, elapsed: z.elapsed, residual: 0 }, null, '観測事実', true);
         }
-        if (seconds !== 60) continue;
         for (const [field, label] of [['lines', '系統'], ['kinds', '形態']]) for (const [id, g] of Object.entries(s[field])) {
           const old = z.a[field][id]; if (!old) continue;
-          if (Math.abs(g.n - old.n) >= 5 && (g.n >= old.n * 1.5 || g.n <= old.n * 0.5)) this.emit(w.t, field + id + (g.n > old.n ? '+' : '-'), `${label}が${g.n > old.n ? '増加' : '減少'}`,
+          if (Math.abs(g.n - old.n) >= 5 && (g.n >= old.n * 1.5 || g.n <= old.n * 0.5)) this.emit(w.t, field + id + '-' + seconds + (g.n > old.n ? '+' : '-'), `${label}が${g.n > old.n ? '増加' : '減少'}（${seconds}秒）`,
             `${field === 'kinds' ? kindText(id) : '#' + id}：${old.n}→${g.n}匹／${z.elapsed.toFixed(0)}秒。${g.introduced ? '投入・移入由来を含む。' : ''}増減と形態の因果関係は未検証。出生だけで適応の成功とは判定しない。`, { start: old.n, end: g.n, elapsed: z.elapsed }, g.target, '観測事実', true);
         }
+        if (seconds !== 60) continue;
         for (const [id, g] of Object.entries(s.clades)) {
           const old = z.a.clades[id], cl = w.clades.get(Number(id));
           if (old && cl && !cl.arrived && !g.introduced && g.n >= 3 && cl.genMax - cl.gen0 >= 2 && g.maxGen > old.maxGen) this.emit(w.t, 'established-' + id, '同じ体制が世代を越えて存続',
@@ -116,7 +116,7 @@
         const prev = this.records[key]; this.records[key] = Math.max(prev || 0, value);
         if (prev != null && value > prev) this.emit(w.t, 'record-' + key, '観測開始後の記録更新', `${label}：${prev}→${value}。複雑さや出生世代数だけでは成功とは判定できない。`, { previous: prev, value }, null, '観測事実', true, 60);
       }
-      const rare = Object.entries(s.kinds).filter(([k, g]) => g.n <= 2 && s.n >= 20 && k.split('/').slice(2, 4).includes('1'));
+      const rare = Object.entries(s.kinds).filter(([k, g]) => g.n <= 2 && s.n >= 20 && (Number(k.split('/')[0]) >= 4 || k.split('/').slice(2, 4).includes('1')));
       for (const [k, g] of rare.slice(0, 2)) this.emit(w.t, 'rare-' + k, '珍しい構造の候補', `${kindText(k)}：現存${g.n}/${s.n}匹。観測時点で少数。生存・繁殖・世代継承の成功は未判定。`, { n: g.n, population: s.n }, g.target, '観測事実', false, 1000);
       if (s.activity.active > 0) this.emit(w.t, 'activity', '実際の回路出力を観測', `累積回路出力の寄与が0.01を超えた現存個体${s.activity.active}/${s.n}匹。視覚入力と配線を同時観測${s.activity.vision}匹、発声中${s.activity.voiced}匹、結合重みの変化${s.activity.learned}匹。学習の有益性や感覚の因果的利用は未検証。`, s.activity, null, '相関', false, 300);
       if (s.behaviour?.length) { const b = s.behaviour[0]; this.emit(w.t, 'behaviour', '移動と摂食を同時観測', `#${b.target.id}：${b.elapsed.toFixed(1)}秒に自力移動距離${b.path.toFixed(2)}、口からの摂取量${b.eaten.toFixed(3)}。移動が摂食を助けたかは未検証。`, b, b.target, '相関', false, 300); }
