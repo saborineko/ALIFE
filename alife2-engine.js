@@ -151,6 +151,10 @@
     wave: 0, waveLength: 120, waveDepth: 0.8, // wave > 0 = richness travels: the regrowth of dissolved food and the supply of grains are multiplied by 1 + depth x sin, a wave of this
                                           // length that moves along the world once per `wave` seconds (so every place is rich and lean in turn, and the crest moves at length / wave).
                                           // The supply averaged over time is the same everywhere as without the wave; grains that would fall in lean water fall elsewhere instead.
+    still: 0,                             // > 0 = still water: what is dissolved in the water (food, and the two substances bodies leak) passes between neighbouring cells
+                                          // this many times more slowly. With the usual mixing dissolved food evens out over about 50 units in the time it takes to regrow, far
+                                          // more than a body travels in its life, so the water within a body's reach is all alike; in still water a body drains its own
+                                          // surroundings and the water a few cells away is richer. The viewer's box sets 25.
     vents: 0,                             // 1 = dissolved food wells up unevenly. The speed at which the water regains its dissolved food is multiplied by ventLean everywhere
                                           // and, inside a few small discs (vents), by as much more as keeps the mean over the water at 1: the same capacity to regrow, gathered
                                           // into places. There is one vent per ventArea of water, of radius ventRadius; each lasts about ventLife seconds, fades out over 30 s, and
@@ -406,6 +410,7 @@
       if (o.contact != null && !!o.contact !== !!this.contact) { this.contact = o.contact ? 1 : 0; this.log('世界の設定を変更：身体の接触と、口による組織の摂取を' + (o.contact ? '有効にした' : '無効にした')); for (const b of this.bodies) b.passive = !this.contact && !b.b.hasCilia && b.b.rigid && !b.b.hasGland; for (const k of ['killed', 'flesh', 'torn']) if (this.counts[k] == null) this.counts[k] = 0; }
       if ((this.vision || this.contact) && !this.bgrid) this.bgrid = Array.from({ length: n }, () => []);
       if (o.adhere != null && !!o.adhere !== !!this.adhere) { this.adhere = o.adhere ? 1 : 0; this.log('世界の設定を変更：パッドが他の身体を掴み、触れ合う身体のあいだで蓄えが染み出す規則を' + (o.adhere ? '有効にした' : '無効にした')); }
+      if (o.still != null && o.still !== this.still) { this.still = o.still > 0 ? o.still : 0; this.log('世界の設定を変更：混ざりにくい水（水に溶けたものが隣のマスへ移る速さを遅くする）を' + (this.still > 0 ? '有効にした（' + this.still + ' 分の 1）' : '無効にした')); }
       if (o.vents != null && !!o.vents !== !!this.vents) { this.vents = o.vents ? 1 : 0; if (this.vents) this.ventInit(); else { this.ventList = null; this.vf = null; } this.log('世界の設定を変更：溶存栄養の湧き場（回復の速さを狭い場所に集める。世界全体の回復の力は同じ）を' + (this.vents ? '有効にした（' + this.ventList.length + ' か所、半径 ' + this.ventRadius + '、約 ' + this.ventLife + ' 秒で場所が変わる）' : '無効にした')); }
       if (o.wave != null && o.wave !== this.wave) { this.wave = o.wave > 0 ? o.wave : 0; this.log('世界の設定を変更：豊かさの波（溶存栄養の回復と粒の供給が、波として世界を移動する）を' + (this.wave > 0 ? '有効にした（周期 ' + this.wave + ' 秒）' : '無効にした')); }
       if (o.soundWork != null && !!o.soundWork !== !!this.soundWork) { this.soundWork = o.soundWork ? 1 : 0; this.log('世界の設定を変更：繊毛の音を、水に対してした仕事（推力 × 水の中を進む速さ）から決める規則を' + (o.soundWork ? '有効にした（繊毛で泳ぐ音はごく小さくなる）' : '無効にした（打った量に比例する元の決め方）')); }
@@ -712,7 +717,7 @@
     // dissolved food at a point, interpolated between cell centres (so a body can, in principle, tell one side from the other)
     // What bodies leak spreads through the water and fades. Every living body leaks where it is, in proportion to its resting metabolism.
     stepScent(dt) {
-      const { cols, rows } = this, k = this.nutrientDiffuse, keep = 1 - this.scentDecay * dt;
+      const { cols, rows } = this, k = this.still > 0 ? this.nutrientDiffuse / this.still : this.nutrientDiffuse, keep = 1 - this.scentDecay * dt;
       for (const o of this.bodies) { const i = this.cellAt(o.cx, clamp(o.cy, 0, this.H - 0.01)), e = this.scentRate * o.prof.basal * dt; this.scA[i] += e * o.g.odor; this.scB[i] += e * (1 - o.g.odor); }
       for (const key of ['scA', 'scB']) {
         const a = this[key], b = this.sc2;
@@ -917,7 +922,7 @@
       }
       this.food.length = n;
       if (this.tick % 6 === 0) { // dissolved food regrows and spreads
-        const { nut, nut2, cols, rows } = this, k = this.nutrientDiffuse, g = this.nutrientRegrow * dt * 6, wf = this.wave > 0 ? this.waveCols() : null, vf = this.vents ? this.ventField() : null, cm = this.nest ? this.calm : null;
+        const { nut, nut2, cols, rows } = this, k = this.still > 0 ? this.nutrientDiffuse / this.still : this.nutrientDiffuse, g = this.nutrientRegrow * dt * 6, wf = this.wave > 0 ? this.waveCols() : null, vf = this.vents ? this.ventField() : null, cm = this.nest ? this.calm : null;
         for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
           const i = y * cols + x, l = y * cols + (x + cols - 1) % cols, rr = y * cols + (x + 1) % cols, u = y ? i - cols : i, d = y < rows - 1 ? i + cols : i, gw = wf ? g * wf[x] : g;
           // (nest) water with matter in it mixes less: dissolved food passes between two cells at the usual rate times the smaller of their two calm factors
@@ -960,7 +965,7 @@
       }
       this.food.length = n;
       if (this.tick % 6 === 0) {
-        const { nut, nut2, cols, rows } = this, k = this.nutrientDiffuse, g = this.nutrientRegrow * dt * 6, wf = this.wave > 0 ? this.waveCols() : null, vf = this.vents ? this.ventField() : null, cm = this.nest ? this.calm : null;
+        const { nut, nut2, cols, rows } = this, k = this.still > 0 ? this.nutrientDiffuse / this.still : this.nutrientDiffuse, g = this.nutrientRegrow * dt * 6, wf = this.wave > 0 ? this.waveCols() : null, vf = this.vents ? this.ventField() : null, cm = this.nest ? this.calm : null;
         for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
           const i = y * cols + x, l = y * cols + (x + cols - 1) % cols, rr = y * cols + (x + 1) % cols, u = y ? i - cols : i, d = y < rows - 1 ? i + cols : i, gw = wf ? g * wf[x] : g;
           const mix = cm ? k * (Math.min(cm[i], cm[l]) * (nut[l] - nut[i]) + Math.min(cm[i], cm[rr]) * (nut[rr] - nut[i]) + Math.min(cm[i], cm[u]) * (nut[u] - nut[i]) + Math.min(cm[i], cm[d]) * (nut[d] - nut[i])) : k * (nut[l] + nut[rr] + nut[u] + nut[d] - 4 * nut[i]); // (nest: see the tank's loop)

@@ -18,7 +18,7 @@ const catalog=[
  ['brain','神経系が身体と別に増え、遠くへつながる','b',['wire']],
  ['rewire','使われ方で結合が細る・できる','y',['nerve2']],
  ['nest','分泌した物質が水に残る','q'],
- ['shore','なだらかな境界','',[],24],['wave','豊かさの波','',[],1200],['vents','栄養の湧き場（供給が場所に偏る）']
+ ['shore','なだらかな境界','',[],24],['wave','豊かさの波','',[],1200],['vents','栄養の湧き場（供給が場所に偏る）'],['still','混ざりにくい水','',[],25]
 ].map(([key,label,flag='',requires=[],on=1])=>Object.freeze({key,label,flag,requires:Object.freeze(requires),on,default:0}));
 function normalize(input={}){
  input=input||{};const out={};for(const r of catalog){const v=Number(input[r.key]);out[r.key]=r.on===1?(v?1:0):(Number.isFinite(v)?Math.max(0,Math.min(v,10000)):0);}

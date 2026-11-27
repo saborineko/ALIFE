@@ -1214,3 +1214,20 @@ test('rewire, the single signal: a segment\'s own input connections wither while
   { const a = one({ nLife: 0.7, nUse: 0.5 }), b = one({}), kids = rew => { let moved = 0; for (let k = 0; k < 60; k++) { const c = G.recombine(a, b, G.rng(100 + k), false, false, false, false, rew); if (c.parts[0].nLife !== 0.7 || c.parts[0].nUse !== 0.5) moved++; } return moved; }; assert.strictEqual(kids(false), 0); assert.ok(kids(true) > 5);
     assert.strictEqual(Object.keys(G.PART_FIELDS).filter(k => !['s', 'q', 'y'].includes(G.PART_FIELDS[k][4])).length, 45, 'the row that other worlds cut has the length it had'); }
 });
+
+test('still water: what is dissolved passes between cells more slowly, so a body\'s own surroundings stay drained and the water a few cells away stays rich; off by default', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, mk = o => new A.engine.World(Object.assign({ seed: 2, founders: 0, cap: 0, audit: 1, nutrientRegrow: 0 }, o));
+  { const w = mk({}); assert.strictEqual(w.still, 0); const r = A.rules.catalog.find(q => q.key === 'still'); assert.ok(r && r.on === 25 && r.flag === ''); assert.strictEqual(A.rules.normalize({ still: 25 }).still, 25); }
+  // one rich cell in even water: after 5 s it has all but gone in ordinary water and is mostly still there in still water; mixing neither makes nor loses any
+  { const left = still => { const w = mk({ still }), ci = w.cellAt(60, 30); w.nut.fill(0.3); w.nut[ci] = 1; const total = w.nut.reduce((a, b) => a + b, 0); for (let i = 0; i < 150; i++) { w.food.length = 0; w.step(); } return { left: w.nut[ci] - 0.3, drift: Math.abs(w.nut.reduce((a, b) => a + b, 0) - total) }; };
+    const open = left(0), slow = left(25); assert.ok(open.left < 0.12, 'ordinary water: ' + open.left); assert.ok(slow.left > 0.4, 'still water: ' + slow.left); assert.ok(open.drift < 1e-3 && slow.drift < 1e-3); }
+  // the same holds for what bodies leak
+  { const smell = still => { const w = new A.engine.World({ seed: 2, founders: 0, cap: 0, scent: 1, still }), ci = w.cellAt(60, 30); for (let i = 0; i < 12; i++) w.step(); w.scA.fill(0); w.scA[ci] = 1; for (let i = 0; i < 60; i++) w.step(); return w.scA[ci]; }; assert.ok(smell(25) > 2 * smell(0), smell(25) + ' against ' + smell(0)); }
+  // a body in still water drains its own cell more, and the water two cells away stays richer than where it is
+  { const around = still => { const w = new A.engine.World({ seed: 2, founders: 0, cap: 0, still, nutrientRegrow: 0.01 }), g = G.primordial(1), o = w.spawn(g, 60, 30, 1, null); for (let i = 0; i < 3000; i++) w.step(); const cx = Math.floor(o.cx / w.cell), cy = Math.floor(o.cy / w.cell), at = (dx, dy) => w.nut[(cy + dy) * w.cols + ((cx + dx) % w.cols + w.cols) % w.cols]; return [at(0, 0), (at(3, 0) + at(-3, 0) + at(0, 3) + at(0, -3)) / 4]; };
+    const a = around(0), b = around(25); assert.ok(b[1] - b[0] > 2 * (a[1] - a[0]) && b[1] - b[0] > 0.02, 'still water: ' + b.map(v => v.toFixed(3)) + ', ordinary: ' + a.map(v => v.toFixed(3))); }
+  // saved and reloaded it goes on as it was going; it can be switched in a running world
+  { const w = new A.engine.World({ seed: 3, still: 25, scent: 1 }); w.seedWith(G.primordial(3)); for (let i = 0; i < 400; i++) w.step(); const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), sig = x => JSON.stringify([Array.from(x.nut), Array.from(x.scA), x.rand.state(), x.bodies.map(o => [o.cx, o.E])]); for (let i = 0; i < 300; i++) { w.step(); c.step(); } assert.strictEqual(sig(c), sig(w)); assert.strictEqual(c.still, 25);
+    w.enable({ still: 0 }); assert.strictEqual(w.still, 0); w.enable({ still: 25 }); assert.strictEqual(w.still, 25); for (let i = 0; i < 30; i++) w.step(); }
+});
