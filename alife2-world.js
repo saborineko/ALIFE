@@ -14,6 +14,11 @@
   const q = new URLSearchParams(location.search), KEY = 'alife2_world_v1';
   let grainSprites = null;
   let field = null, fimg = null, sand = null, motes = null, frameNo = 0; const trails = new WeakMap();
+  // The size on screen (pixels) from which a body gets its own detailed picture; smaller bodies are drawn as plain strokes. It starts at 9 and is raised while
+  // drawing a frame takes too long (hundreds of grown bodies, each with its own picture, can take seconds on a machine without a fast graphics card), and comes
+  // back down when drawing is quick again. The selected body always gets its picture. This changes what is drawn, never the world.
+  // A body larger than DETAIL_MAX pixels on screen always gets its picture: looking closely at a few bodies must never turn them into strokes.
+  const DETAIL_MAX = 72; let detailMin = 9, drawMs = 0, quickRun = 0, detailHold = 0;
   let w, view, paused = false, sel = null, shown = null, follow = false, loaded = window.ALIFE2_LOAD || null, lastPanels = 0, lastSave = 0;
   // (a mark kept for this tab only: there while the page is open, taken away when the page is left while it still answers. Found at the start, it means the page ended without answering.)
   let unclean = false; try { unclean = sessionStorage.getItem('alife2_open') === '1'; sessionStorage.setItem('alife2_open', '1'); addEventListener('pagehide', () => { try { sessionStorage.removeItem('alife2_open'); } catch (e) {} }); } catch (e) {}
@@ -200,9 +205,12 @@
     c.fillStyle = '#07121d'; c.fillRect(0, 0, canvas.width, canvas.height);
     (R || thumbR).draw(c, p.segs, { cx: (d.bbox[0] + d.bbox[2]) / 2, cy: (d.bbox[1] + d.bbox[3]) / 2, scale: sc, w: canvas.width, h: canvas.height }, { gpu: gpuOn, quality: 3, hue: g.hue, glow: false });
   }
+  // A genome's small picture is drawn once and kept: the panels are rebuilt every second with up to 40 of them, and drawing each one anew
+  // (growing the body from its genome, then a picture of it) took a third of the time of a slow frame.
+  let thumbs = new WeakMap();
   function card(parent, g, caption, onclick, on) {
     const f = document.createElement('figure'), c = document.createElement('canvas'), t = document.createElement('figcaption');
-    c.width = 96; c.height = 72; thumb(c, g); t.textContent = caption; f.append(c, t); f.onclick = onclick; if (on) f.classList.add('on'); parent.append(f);
+    c.width = 96; c.height = 72; let pic = thumbs.get(g); if (!pic) { pic = document.createElement('canvas'); pic.width = 96; pic.height = 72; thumb(pic, g); thumbs.set(g, pic); } c.getContext('2d').drawImage(pic, 0, 0); t.textContent = caption; f.append(c, t); f.onclick = onclick; if (on) f.classList.add('on'); parent.append(f);
   }
   const kindText = k => { const [s, m, e, v, c] = k.split('/'); return s + '体節 口' + m + (e === '1' ? ' 眼' : '') + (v === '1' ? ' 関節' : '') + (c === '1' ? ' 繊毛' : ''); };
   const CAUSE = { starved: '餓死', aged: '老衰', broken: '物理破綻', killed: '傷で死亡（他個体に組織を取られた）', left: '他の島へ移った' };
@@ -304,7 +312,7 @@
       if (d < 3.2) dots[f.fixed ? 1 : 0].push(x, y, Math.max(1, d * 0.5)); else ctx.drawImage(grainSprites[f.fixed ? 1 : 0][f._v], x - d / 2, y - d / 2, d, d);
     }
     for (const k of [0, 1]) { ctx.fillStyle = k ? 'rgba(205,190,125,.55)' : 'rgba(140,210,185,.5)'; ctx.beginPath(); const q = dots[k]; for (let i = 0; i < q.length; i += 3) ctx.rect(q[i] - q[i + 2] / 2, q[i + 1] - q[i + 2] / 2, q[i + 2], q[i + 2]); ctx.fill(); }
-    frameNo++;
+    frameNo++; const tBodies = performance.now();
     for (const o of w.bodies) {
       const b = o.b; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
       for (const s of b.segs) { const r = Math.max(s.r0, s.r1); x0 = Math.min(x0, s.ax - r, s.bx - r); x1 = Math.max(x1, s.ax + r, s.bx + r); y0 = Math.min(y0, s.ay - r, s.by - r); y1 = Math.max(y1, s.ay + r, s.by + r); }
@@ -318,7 +326,7 @@
         if (t.length > 2 && sc > 5) { ctx.lineWidth = Math.max(1, Math.min(px, py) * 0.25); for (let i = 1; i < t.length; i++) { let dx = t[i][0] - t[i - 1][0]; dx -= Math.round(dx / w.W) * w.W; const xa = X(t[i - 1][0]); /* second point is placed from the first, so a step never spans the seam */ ctx.strokeStyle = 'hsla(' + o.g.hue + ',60%,75%,' + 0.16 * i / t.length + ')'; ctx.beginPath(); ctx.moveTo(xa, Y(t[i - 1][1])); ctx.lineTo(xa + dx * sc, Y(t[i][1])); ctx.stroke(); } }
       }
       if (mx < -px || my < -py || mx > W + px || my > H + py) continue;
-      if (Math.max(px, py) < 9) { // far away: still a body with a shape and a heading, not a dot
+      if (Math.max(px, py) < (o === sel ? 9 : detailMin)) { // far away (or, while drawing is slow, not large enough for a picture of its own): still a body with a shape and a heading, not a dot
         ctx.lineCap = 'round';
         for (const [wd, col] of [[2.6, 'hsla(' + o.g.hue + ',40%,80%,.16)'], [1.5, 'hsla(' + o.g.hue + ',35%,82%,.5)'], [0.8, 'hsla(' + (o.g.hue + 25) + ',45%,60%,.9)']]) { ctx.strokeStyle = col; ctx.beginPath(); for (const s of b.segs) { ctx.lineWidth = Math.max(1.6, (s.r0 + s.r1) * sc * wd); const xa = mx + (s.ax - mxw) * sc; ctx.moveTo(xa, Y(s.ay)); ctx.lineTo(xa + (s.bx - s.ax) * sc + 0.01, Y(s.by)); } ctx.stroke(); }
       } else {
@@ -330,6 +338,10 @@
       }
       if (o === sel) { ctx.strokeStyle = '#eafff4'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(mx, my, Math.max(px, py) / 2 + 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
     }
+    { // drawing the bodies took too long: fewer of them get a picture of their own from the next frame on; it was quick for a while: more of them do again
+      const ms = performance.now() - tBodies; drawMs += (ms - drawMs) * 0.3;
+      if (ms > 40) { detailMin = Math.min(DETAIL_MAX, detailMin * Math.min(4, Math.max(1.25, ms / 40))); quickRun = 0; detailHold = tBodies + 4000; }
+      else if (drawMs < 15 && detailMin > 9 && tBodies > detailHold) { if (++quickRun >= 10) { detailMin = Math.max(9, detailMin * 0.8); quickRun = 0; } } else quickRun = 0; }
     if (w.regions) { // region names along the top, and the borders between regions
       ctx.font = '13px system-ui'; ctx.textAlign = 'center';
       for (const q of w.regions) { const xm = X((q.x0 + q.x1) / 2), xb = X(w.borderX(q) % w.W); ctx.fillStyle = 'rgba(235,245,240,.75)'; ctx.fillText(q.name, xm, Math.max(16, y0w + 16)); ctx.strokeStyle = 'rgba(200,225,235,.14)'; ctx.setLineDash([3, 6]); ctx.beginPath(); ctx.moveTo(xb, Math.max(0, y0w)); ctx.lineTo(xb, Math.min(H, Y(w.H))); ctx.stroke(); ctx.setLineDash([]); }
@@ -377,15 +389,25 @@
   // One frame. Each part is run on its own: a fault in one (the statistics, the commentary, the sound, a save) must not stop the others, and must never stop the
   // next frame from being asked for - a display that has stopped looks like a world that has died. What went wrong is shown in a bar at the top of the page.
   // If the world's own step fails, the world is paused (stepping it again would only fail again) and can still be saved.
+  const FRAME_MS = 100, pace = { steps: 0, frames: 0, cut: 0, since: 0, other: 0 };
   const faultsSeen = new Map();
   function fault(part, e) { const text = String(e && e.message || e), n = (faultsSeen.get(part) || 0) + 1; faultsSeen.set(part, n); if (n > 1 && n % 600) return; console.error('ALIFE2 ' + part, e);
     let bar = $('fatal'); if (!bar) { bar = document.createElement('div'); bar.id = 'fatal'; bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99;background:#7a1020;color:#fff;padding:6px 10px;font-size:13px;white-space:pre-wrap'; document.body.append(bar); }
     bar.textContent = '【異常】' + part + 'で例外が起きた（' + n + ' 回）：' + text + '\nこれはプログラムの不具合です。' + (part === '世界の計算' ? '世界を一時停止しました。' : '表示のほかの部分と世界は動き続けます。') + '「世界を保存」で保存して知らせてください。'; }
   const part = (name, f) => { try { f(); } catch (e) { fault(name, e); return false; } return true; };
   function loop(ms) {
-    if (!paused && !ISL.busy) { const n = Number($('speed').value); if (!part('世界の計算', () => { for (let i = 0; i < n; i++) advance(); })) { paused = true; const p = $('pause'); if (p) p.textContent = '再開'; } }
+    // One frame computes the world for at most FRAME_MS, or for as long as drawing the last frame took if that was longer; one step at the least.
+    // A world too heavy for the speed asked for then runs slower than asked, and the page keeps drawing and answering: without the limit a frame took
+    // (speed x the time of one step), which is seconds in a grown world at speed 64. Where drawing itself is slow, the world still gets half of the time.
+    // How many steps a frame holds changes nothing in the world itself.
+    const tA = performance.now();
+    if (!paused && !ISL.busy) { const n = Number($('speed').value), lim = Math.max(FRAME_MS, pace.other); if (!part('世界の計算', () => { for (let i = 0; i < n; i++) { advance(); pace.steps++; if (i + 1 < n && performance.now() - tA > lim) { pace.cut++; break; } } })) { paused = true; const p = $('pause'); if (p) p.textContent = '再開'; } }
+    const tB = performance.now();
+    pace.frames++;
     part('描画', draw);
     part('音', audioFrame);
+    pace.other = performance.now() - tB; // (drawing and sound, every frame; not the panels and the automatic save, which come once in a while)
+    if (ms - pace.since >= 1000) { const el = $('pace'), sec = (ms - pace.since) / 1000; if (el) el.textContent = (paused || !pace.steps ? '' : '実測：世界の ' + (pace.steps / 30 / sec).toFixed(1) + ' 秒／実時間 1 秒、' + (pace.frames / sec).toFixed(0) + ' コマ／秒') + (pace.cut > pace.frames / 2 ? '（計算が重く、指定の速度には届いていない）' : '') + (detailMin > 9 ? '／描画が重いので、画面上で ' + Math.round(detailMin) + ' ピクセルより小さい個体は簡略に描いている（拡大するか個体を選ぶと詳しい絵になる）' : ''); pace.steps = pace.frames = pace.cut = 0; pace.since = ms; }
     if (ms - lastPanels > 1000) { lastPanels = ms; part('統計・個体の表示', panels); part('島の表示', islandPanel); }
     if ($('auto').checked && ms - lastSave > (ISL.ws.length ? 120000 : 30000)) { lastSave = ms; part('自動保存', autosave); }
     requestAnimationFrame(loop);
