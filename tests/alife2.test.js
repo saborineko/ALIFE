@@ -1008,3 +1008,15 @@ test('the safety valve: a body whose numbers run away is taken out at once, and 
   // a healthy world never trips it, and writes no record
   const w = mk(); for (let i = 0; i < 600; i++) w.step(); assert.strictEqual(w.counts.broken, 0); assert.strictEqual(w.faults, undefined); assert.strictEqual(JSON.parse(JSON.stringify(w.save())).faults, undefined);
 });
+
+test('a reloaded world goes on exactly as the world that was not reloaded, also where neurons read the bend of a moving joint', () => {
+  // (a neuron reads the bend its joint had before the last move; a reload used to hand it the bend the body was built with)
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, body = () => G.create({ parts: [G.part({ len: 2, r0: 0.5, r1: 0.5, gut: 0.4, store: 0.4, nerve: 0.5 }), G.part({ len: 1.2, r0: 0.25, r1: 0.2, muscle: 0.5, amp: 0.5, range: 0.9, nerve: 0.5, cilia: 0.6, nn: [{ b: 0, k: 0.6, in: [['j', 3]], out: [['C', 1.5], ['J', 0.5]] }] })],
+    links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.5, off: 0.9, angle: 1.3, scale: 1, repeat: 1 }), G.link({ from: 1, to: 1, sym: 'none', at: 1, off: 0, angle: 0.2, scale: 0.9, repeat: 2 })] });
+  const w = new A.engine.World({ seed: 3, n: 0, nerve2: 1 }), o = w.spawn(body(), 40, 30, 1, null); for (let i = 0; i < 47; i++) w.step();
+  assert.ok(!o.b.rigid && o.b.segs.some(q => q.na && Math.abs(q.na[0]) > 0.01), 'the joints move and the neurons that read them are active');
+  const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), q = c.bodies[0], state = z => JSON.stringify([z.E, Array.from(z.b.x), Array.from(z.b.y), z.b.segs.map(s => [s.a, s.cd, s.theta, s.na ? Array.from(s.na) : 0])]);
+  assert.deepStrictEqual(q.b.segs.map(s => s.theta), o.b.segs.map(s => s.theta), 'the bend the neurons will read');
+  for (const n of [1, 30, 300]) { while (w.tick < 47 + n) { w.step(); c.step(); } assert.strictEqual(state(q), state(o), 'after ' + n + ' steps'); }
+});
