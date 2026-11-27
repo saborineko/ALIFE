@@ -9,6 +9,7 @@
 (function (G) {
   'use strict';
   const A = G.ALIFE2 = G.ALIFE2 || {};
+  if (typeof require !== 'undefined' && !A.rules) require('./alife2-rules.js');
   if (typeof require !== 'undefined' && !A.organs) { require('./alife2-genome.js'); require('./alife2-development.js'); require('./alife2-neural.js'); require('./alife2-physics.js'); require('./alife2-organs.js'); }
   const TAU = Math.PI * 2, clamp = (x, a, b) => Math.max(a, Math.min(b, x));
   const wrapPi = x => { x = (x + Math.PI) % TAU; if (x < 0) x += TAU; return x - Math.PI; };
@@ -133,6 +134,8 @@
                                           // the weight a body rests on the floor with (and so its friction and what its pads can hold) rises smoothly from one region's value to the next
   };
 
+  Object.assign(DEFAULTS, A.rules.defaults);
+
   // Maps: a world can be one continuous place whose regions differ in what they offer.
   // Regions are stretches of x (the world joins left to right). Nothing separates them: bodies and food cross freely.
   //   ground  : there is a bottom to touch and drag on        flow    : strength of the current
@@ -195,6 +198,8 @@
 
     // Human intervention adds founders to this world, never resets or advances it.
     introduce(data, opt = {}) {
+      const source = data && data.format === 'alife2-specimen-1' ? data : null;
+      if (source) data = source.genome;
       if (!data || data.format !== 'alife2-genome-1' || !Number.isFinite(data.hue) || !Array.isArray(data.parts) || !data.parts.length || !Array.isArray(data.links) || data.parts.some(p => !p || typeof p !== 'object') || data.links.some(l => !l || typeof l !== 'object')) throw new Error('探索で保存した遺伝子 JSON を選んでください');
       const count = Number(opt.count == null ? 1 : opt.count), place = opt.place || 'random', age = opt.age || 'adult';
       if (!Number.isSafeInteger(count) || count < 1 || count > 1000) throw new Error('投入数は 1〜1000 の整数で指定してください');
@@ -215,6 +220,7 @@
       const center = opt.center || { x: this.W / 2, y: this.H / 2 };
       if (place === 'center' && (!Number.isFinite(center.x) || !Number.isFinite(center.y))) throw new Error('画面中央の座標が不正です');
       const group = { seed: this.seed, root: this.nextId, t: this.t, count, place, age };
+      if (source) group.explorationRules = A.rules.normalize(source.rules);
       const got = [];
       for (let i = 0; i < count; i++) {
         const xy = sites ? sites[this.rand.int(sites.length)] : place === 'center' ? [((center.x % this.W) + this.W) % this.W, clamp(center.y, 2, this.H - 2)] : [this.rand() * this.W, 2 + this.rand() * (this.H - 4)];
@@ -975,7 +981,7 @@
       for (const o of born) {
         const split = this.mutsplit, mm = this.metamut || split ? (o.g.mut == null ? 1 : o.g.mut) : 1, mw = split ? (o.g.mutW == null ? mm : o.g.mutW) : 1; // (a lineage that comes from the one-gene rule starts with the width it had)
         let src = o.g, two = 0; if (this.mix && o.got) { src = A.genome.recombine(o.g, o.got.g, this.rand, this.sound); two = o.got.id; o.got = null; } // an egg made from two genomes; the material taken up is used
-        const g = this.rand() < this.mutation * mm ? A.genome.mutate(src, this.rand, split ? mw : this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut && !split ? 'm' : '') + (this.contact ? 'c' : '') + (this.nerve2 ? 'n' : '') + (this.invest ? 'i' : '') + (this.learn ? 'l' : '') + (this.sound ? 's' : '') + (this.wire ? 'w' : ''), split ? 1 : undefined) : two ? src : A.genome.copy(o.g);
+        const g = this.rand() < this.mutation * mm ? A.genome.mutate(src, this.rand, split ? mw : this.metamut ? mm : undefined, A.rules.flags(this), split ? 1 : undefined) : two ? src : A.genome.copy(o.g);
         if (split) { if (this.rand() < this.mutation) g.mut = clamp(mm * Math.exp(this.rand.gauss() * 0.15), 0.1, 3); if (this.rand() < this.mutation) g.mutW = clamp(mw * Math.exp(this.rand.gauss() * 0.15), 0.1, 3); } // the two genes drift whether or not this birth mutates
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';

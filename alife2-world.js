@@ -3,6 +3,12 @@
 (function () {
   'use strict';
   const A = ALIFE2, $ = id => document.getElementById(id), cv = $('world'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  // New registry entries appear here automatically if this page has no dedicated control yet.
+  for (const r of A.rules.catalog) if (!$(r.key)) {
+    const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.id=r.key;
+    label.append(input,document.createTextNode(r.label));$('additionalRules').append(label);
+  }
+  const readRules = () => A.rules.normalize(Object.fromEntries(A.rules.catalog.map(r=>[r.key,$(r.key).checked?r.on:0])));
   const zc = $('zoom'), zx = zc.getContext('2d'), zoomR = new A.render.Renderer(), thumbR = new A.render.Renderer(), bodyR = new A.render.Renderer();
   let gpuOn = new URLSearchParams(location.search).get('gfx') !== 'cpu';
   const q = new URLSearchParams(location.search), KEY = 'alife2_world_v1';
@@ -169,12 +175,13 @@
   function start(world) {
     if (world) w = world;
     else {
-      w = new A.engine.World({ seed: Number($('seed').value) || 1, map: $('map').value, scent: $('scent').checked ? 1 : 0, recycle: $('recycle').checked ? 1 : 0, nerve2: $('nerve2').checked || $('learn').checked || $('wire').checked ? 1 : 0, learn: $('learn').checked ? 1 : 0, sound: $('sound').checked || $('soundWork').checked ? 1 : 0, soundWork: $('soundWork').checked ? 1 : 0, deaf: $('deaf').checked ? 1 : 0, mute: $('mute').checked ? 1 : 0, metamut: $('metamut').checked ? 1 : 0, mutsplit: $('mutsplit').checked ? 1 : 0, nibble: $('nibble').checked ? 1 : 0, budget: $('budget').checked ? 1 : 0, carry: $('carry').checked ? 1 : 0, keep: $('keep').checked ? 1 : 0, wire: $('wire').checked ? 1 : 0, pair: $('pair').checked ? 1 : 0, solid: $('solid').checked ? 1 : 0, genome2: $('genome2').checked ? 1 : 0, contact: $('contact').checked || $('adhere').checked || $('mix').checked || $('solid').checked ? 1 : 0, adhere: $('adhere').checked ? 1 : 0, mix: $('mix').checked ? 1 : 0, invest: $('invest').checked ? 1 : 0, vision: $('vision').checked ? 1 : 0, blind: $('blind').checked ? 1 : 0, shore: $('shore').checked ? 24 : 0, wave: $('wave').checked ? 1200 : 0 });
+      w = new A.engine.World({ ...readRules(), seed: Number($('seed').value) || 1, map: $('map').value, deaf: $('deaf').checked ? 1 : 0, mute: $('mute').checked ? 1 : 0 });
       if (loaded) for (const k of loaded.top) for (let i = 0; i < Math.max(1, Math.round(k.count / 4)); i++) w.spawn(A.genome.sanitize(A.genome.copy(k.genome)), w.rand() * w.W, w.rand() * w.H, 1, null); // older result files lack newer genes
       else w.seedWith(A.genome.primordial(w.seed));
     }
+    for (const r of A.rules.catalog) $(r.key).checked=!!w[r.key];
     if (world) $('map').value = w.map || ''; // a loaded world shows its own map
-    $('recycle').checked = !!w.recycle; $('nerve2').checked = !!w.nerve2; $('metamut').checked = !!w.metamut; $('mutsplit').checked = !!w.mutsplit; $('nibble').checked = !!w.nibble; $('budget').checked = !!w.budget; $('carry').checked = !!w.carry; $('keep').checked = !!w.keep; $('wire').checked = !!w.wire; $('pair').checked = !!w.pair; $('solid').checked = !!w.solid; $('genome2').checked = !!w.genome2; $('contact').checked = !!w.contact; $('adhere').checked = !!w.adhere; $('mix').checked = !!w.mix; $('invest').checked = !!w.invest; $('learn').checked = !!w.learn; $('sound').checked = !!w.sound; $('soundWork').checked = !!w.soundWork; $('deaf').checked = !!w.deaf; $('mute').checked = !!w.mute; $('wave').checked = w.wave > 0; $('shore').checked = w.shore > 0; $('blind').checked = !!w.blind; $('vision').checked = !!w.vision; $('scent').checked = !!w.scent; // a loaded world shows what it was made with
+    $('deaf').checked=!!w.deaf; $('mute').checked=!!w.mute; // controls outside the evolution-rule registry
     fit(); sel = null; shown = null; lastPanels = 0;
     if (ISL.keep) ISL.keep = false; else if (ISL.ws.length || Number($('islands').value) > 1) islandStart(Number($('islands').value)); // a new history on screen: the islands start again as copies of it
   }
@@ -404,10 +411,19 @@
   const fresh = () => { start(); $('saveNote').textContent = $('auto').checked ? '新しい世界を始めた。次の自動保存で、前の自動保存は上書きされる。' : '新しい世界を始めた。'; if ($('auto').checked) lastSave = performance.now(); };
   $('restart').onclick = fresh;
   // every optional rule on, on the coast map, from primordial bodies
-  $('allOn').onclick = () => { $('metamut').checked = false; $('mutsplit').checked = false; /* (how readily lineages mutate stays as the world sets it: for long observation) */ for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'nibble', 'recycle', 'nerve2', 'adhere', 'mix', 'invest', 'learn', 'sound', 'soundWork', 'keep', 'wire', 'pair', 'solid', 'shore']) $(k).checked = true; $('map').value = 'coast'; fresh(); $('saveNote').textContent = '選択式の規則を有効にして、沿岸の世界を原始個体から始めた（変異の強さの進化だけは入れていない。変異の起きやすさは一定）。'; };
+  $('allOn').onclick = () => { $('metamut').checked = false; $('mutsplit').checked = false; /* (how readily lineages mutate stays as the world sets it: for long observation) */ for (const r of A.rules.catalog) if(!['metamut','mutsplit','wave'].includes(r.key)) $(r.key).checked = true; $('map').value = 'coast'; fresh(); $('saveNote').textContent = '選択式の規則を有効にして、沿岸の世界を原始個体から始めた（変異の強さの進化だけは入れていない。変異の起きやすさは一定）。'; };
   // Choosing another map moves the living population there (genomes, genealogy and records with it). 「最初から」 starts anew.
   $('map').onchange = () => { const n = w.bodies.length, map = $('map').value; if (!n) return fresh(); start(A.engine.World.transplant(w, map)); $('saveNote').textContent = 'いまの ' + n + ' 個体を、選んだ世界へ移した（遺伝子・系譜・記録ごと）。同じ相対位置に静止して降ろしたので、合わない場所に落ちた個体は死ぬ。原始個体からやり直すなら「最初から」。'; }; $('wave').onchange = () => { enableAll({ wave: $('wave').checked ? 1200 : 0 }); $('saveNote').textContent = 'いまの世界のまま、豊かさの波を' + ($('wave').checked ? '入れた。' : '止めた。') + 'ここから先は、変えなかった場合とは別の歴史になる。'; }; $('shore').onchange = () => { enableAll({ shore: $('shore').checked ? 24 : 0 }); $('saveNote').textContent = 'いまの世界のまま、海域の境界を' + ($('shore').checked ? 'なだらかにした。' : '段差に戻した。') + 'ここから先は、変えなかった場合とは別の歴史になる。'; };
-  for (const k of ['scent', 'vision', 'blind', 'contact', 'genome2', 'budget', 'carry', 'metamut', 'mutsplit', 'nibble', 'recycle', 'nerve2', 'adhere', 'mix', 'invest', 'learn', 'sound', 'soundWork', 'keep', 'wire', 'pair', 'solid', 'deaf', 'mute']) $(k).onchange = () => { if ((k === 'learn' || k === 'wire') && $(k).checked && !w.nerve2) { $('nerve2').checked = true; enableAll({ nerve2: 1 }); } if (k === 'solid' && $(k).checked && !w.contact) { $('contact').checked = true; enableAll({ contact: 1 }); } if (k === 'soundWork' && $(k).checked && !w.sound) { $('sound').checked = true; enableAll({ sound: 1 }); } if (k === 'nerve2' && !$(k).checked) for (const j of ['learn', 'wire']) if (w[j]) { $(j).checked = false; enableAll({ [j]: 0 }); } if ((k === 'adhere' || k === 'mix') && $(k).checked && !w.contact) { $('contact').checked = true; enableAll({ contact: 1 }); } if (k === 'contact' && !$(k).checked) for (const j of ['adhere', 'mix', 'solid']) if (w[j]) { $(j).checked = false; enableAll({ [j]: 0 }); } enableAll({ [k]: $(k).checked ? 1 : 0 }); lastPanels = 0; $('saveNote').textContent = 'いまの世界のまま設定を変えた（記録は「進化の記録」に残る）。ここから先は、変えなかった場合とは別の歴史になる。'; }; $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
+  for (const k of [...A.rules.catalog.filter(r=>r.on===1).map(r=>r.key), 'deaf', 'mute']) $(k).onchange = () => {
+    if (!$(k).checked) { // disabling a prerequisite disables its dependent rules, too
+      const off=new Set([k]);let changed;
+      do {changed=false;for(const r of A.rules.catalog)if(!off.has(r.key)&&r.requires.some(key=>off.has(key))){off.add(r.key);$(r.key).checked=false;changed=true;}}while(changed);
+    }
+    const rules=readRules();for(const r of A.rules.catalog)if(r.on===1){$(r.key).checked=!!rules[r.key];if(!!w[r.key]!==!!rules[r.key])enableAll({[r.key]:rules[r.key]});}
+    if(k==='deaf'||k==='mute')enableAll({[k]:$(k).checked?1:0});
+    lastPanels=0;$('saveNote').textContent='いまの世界のまま設定を変えた（記録は「進化の記録」に残る）。ここから先は、変えなかった場合とは別の歴史になる。';
+  };
+  $('fit').onclick = () => { fit(); follow = false; $('follow').textContent = '追跡'; };
   $('listen').onchange = async () => { if ($('listen').checked && !await audioStart()) $('listen').checked = false; }; $('vol').oninput = () => { if (AU.master) AU.master.gain.setTargetAtTime(Number($('vol').value), AU.ctx.currentTime, 0.02); }; $('audioTest').onclick = audioTest;
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '再開' : '一時停止'; islandAll({ type: paused ? 'pause' : 'resume' }); };
   $('islands').onchange = () => { islandStart(Number($('islands').value)); if (ISL.ws.length) $('saveNote').textContent = '島を ' + (ISL.ws.length + 1) + ' 個にした。増えた島は、いま見ている世界の複製を乱数だけ変えて始めた。'; };
@@ -416,7 +432,7 @@
   const download = (name, text, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); };
   $('save').onclick = async () => { try { const blobs = await worldBlobs(), k = blobs.length, out = k > 1 ? pack(blobs) : blobs[0], zipped = out.type === 'application/gzip', a = document.createElement('a'); a.href = URL.createObjectURL(out); a.download = (k > 1 ? 'alife2-islands' + k : 'alife2-world') + '-t' + Math.round(w.t) + (k > 1 ? '.alife2' : zipped ? '.json.gz' : '.json'); a.click(); $('saveNote').textContent = '保存した（' + (k > 1 ? '島 ' + k + ' 個を 1 つのファイルに、' : '') + mb(out.size) + (zipped || k > 1 ? '、圧縮済み' : '') + '）。'; } catch (err) { $('saveNote').textContent = '保存できない：' + (err && err.message || err); } };
   $('load').onclick = () => $('loadFile').click();
-  $('loadFile').onchange = async e => { try { const file = e.target.files[0], set = await isPack(file) ? await unpack(file) : null, text = set ? null : await blobText(file); const want = {}, names = { scent: '他個体の匂い', vision: '視覚', blind: '近道の切断', contact: '身体の接触と組織の摂取', genome2: '遺伝子の新しい規則', budget: '出生の収支を合わせる', carry: '成長で神経の状態を引き継ぐ', metamut: '変異の強さの進化', mutsplit: '変異の頻度と幅を別々に進化させる', nibble: '粒を削って食べる', recycle: '失った物質を水に戻す', nerve2: '体節あたり複数の神経', adhere: '他の身体を掴む・蓄えの染み出し', mix: '触れた相手と遺伝子が混ざる', invest: '卵に持たせる蓄えの進化', learn: '神経の結合が経験で変わる', sound: '音（身体の音・耳・声）', soundWork: '繊毛の音を仕事から決める', keep: '経験と動きを失わない', wire: '神経に名前を付ける', pair: '左右の対は一緒に生える', solid: '身体を固い物体として扱う' }; if ($('learn').checked) $('nerve2').checked = true; if ($('adhere').checked || $('mix').checked) $('contact').checked = true; if ($('soundWork').checked) $('sound').checked = true; if ($('wire').checked) $('nerve2').checked = true; if ($('solid').checked) $('contact').checked = true; for (const k in names) if ($(k).checked) want[k] = 1; // boxes ticked before loading are applied to the loaded world
+  $('loadFile').onchange = async e => { try { const file = e.target.files[0], set = await isPack(file) ? await unpack(file) : null, text = set ? null : await blobText(file); const want = {}, names = Object.fromEntries(A.rules.catalog.map(r=>[r.key,r.label])); for (const r of A.rules.catalog) if ($(r.key).checked) want[r.key] = r.on;for(const [k,v] of Object.entries(A.rules.normalize(want)))if(v)want[k]=v; // boxes ticked before loading are applied to the loaded world
       const kk = set ? await openSet(set) : openSaved(text), added = Object.keys(want).filter(k => !w[k]); enableAll(want); for (const k in names) $(k).checked = !!w[k];
       $('saveNote').textContent = '読み込んだ（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体' + (kk > 1 ? '、島 ' + kk + ' 個' : '') + '）。' + (added.length ? 'チェックしてあった設定をこの世界に足した：' + added.map(k => names[k]).join('、') + '。ここから先は元の世界とは別の歴史になる。' : '設定と地図はこの世界が保存されたときのもの。視覚や匂いはチェックを入れれば、沿岸などへは「世界」の欄で選べば、いまの個体のまま移せる。'); } catch (err) { $('saveNote').textContent = '読み込めない：' + err.message; } };
   $('resume').onclick = async () => { try { let d = await dbGet('autosave'); if (d == null) d = localStorage.getItem(KEY); if (d == null) { $('saveNote').textContent = '自動保存は無い。'; return; } if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); $('saveNote').textContent = '自動保存から再開（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '再開できない：' + (err && err.message || err); } };
@@ -429,7 +445,7 @@
       if (w !== target) throw new Error('表示中の島が変わりました。もう一度投入してください');
       const got = w.introduce(data, { count: Number($('introCount').value), place: $('introPlace').value, age: $('introAge').value, center: { x: view.cx, y: view.cy } });
       sel = got[0]; shown = null; lastPanels = 0;
-      $('introNote').textContent = got.length + ' 匹を人為的に投入した。投入系統 ' + sel.introduction.root + '（元の世界 seed ' + sel.introduction.seed + '、' + sel.introduction.t.toFixed(1) + ' 秒）。';
+      $('introNote').textContent = got.length + ' 匹を人為的に投入した。投入系統 ' + sel.introduction.root + '（元の世界 seed ' + sel.introduction.seed + '、' + sel.introduction.t.toFixed(1) + ' 秒）。' + (data.format==='alife2-specimen-1' ? ' 探索時の規則は記録し、生態系の現在の設定は維持した。' : '');
     } catch (e) { $('introNote').textContent = '投入できない：' + e.message; }
     finally { button.disabled = false; }
   };

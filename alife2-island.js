@@ -3,7 +3,7 @@
 // between islands, and can ask for its state. Nothing here differs from the world on screen except that nobody is watching.
 'use strict';
 const V = self.location.search || '';
-importScripts('./alife2-genome.js' + V, './alife2-development.js' + V, './alife2-neural.js' + V, './alife2-physics.js' + V, './alife2-organs.js' + V, './alife2-engine.js' + V);
+importScripts('./alife2-genome.js' + V, './alife2-development.js' + V, './alife2-neural.js' + V, './alife2-physics.js' + V, './alife2-organs.js' + V, './alife2-rules.js' + V, './alife2-engine.js' + V);
 const A = self.ALIFE2;
 let w = null, paused = false, every = 150, count = 1, next = Infinity, lastStatus = 0, queued = false, rate = 0;
 const ch = new MessageChannel(), again = () => { if (!queued) { queued = true; ch.port2.postMessage(0); } };
