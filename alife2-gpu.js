@@ -141,6 +141,10 @@ void main(){
       this.ok = false; this.w = 0; this.h = 0; this.region = [0, 0, 0, 0];
       try {
         this.canvas = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(16, 16) : document.createElement('canvas');
+        // A browser can take a WebGL context away at any time (a graphics driver restarting, the machine waking from sleep, too many pages using WebGL). Every call
+        // then does nothing, without an error, and the picture comes out empty: bodies were drawn without their skin. The loss is noted here and looked for at every
+        // picture; shared() then makes a new context, and until one works the caller draws the skin on the CPU.
+        if (this.canvas.addEventListener) this.canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); this.gone(); });
         const gl = this.gl = this.canvas.getContext('webgl2', { alpha: true, premultipliedAlpha: true, antialias: false });
         if (!gl || !gl.getExtension('EXT_color_buffer_float')) return;
         const sh = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
@@ -157,6 +161,7 @@ void main(){
         this.ok = true;
       } catch (e) { this.error = String(e.message || e); this.ok = false; }
     }
+    gone() { if (this.lost) return; this.lost = true; this.ok = false; this.lostAt = Date.now(); A.gpu.epoch++; A.gpu.losses++; }
     // the working surface only ever grows; each body uses its bottom-left corner
     reserve(w, h) {
       if (w <= this.w && h <= this.h) return;
@@ -173,7 +178,7 @@ void main(){
     // groups: arrays of pixel-space segments in draw order (from Renderer.layout).
     // Returns the canvas; the picture is in this.region = [sx, sy, w, h] of it.
     render(groups, w, h, colors, organs, q, gut, time, flex, plump) {
-      const gl = this.gl, d = this.data; this.reserve(w, h); if (!this.ok) return null;
+      const gl = this.gl, d = this.data; if (this.lost || !gl || gl.isContextLost()) { this.gone(); return null; } this.reserve(w, h); if (!this.ok) return null;
       let n = 0;
       for (const grp of groups) for (const p of grp) {
         if (n >= MAXS) break;
@@ -193,8 +198,10 @@ void main(){
       return this.canvas;
     }
   }
-  let one = null;
-  const shared = () => one || (one = new GpuSkin());
+  let one = null, tried = 0;
+  // the one context every picture shares. If it has been lost, or never worked, another is made, at most once in two seconds (the reason it was lost may still hold)
+  const shared = () => { if (one && one.ok && one.gl && one.gl.isContextLost()) one.gone(); if (!one || (!one.ok && Date.now() - tried > 2000)) { const had = !!one; tried = Date.now(); one = new GpuSkin(); if (had) { A.gpu.epoch++; if (one.ok) A.gpu.remade++; } } return one; };
 
-  A.gpu = { GpuSkin, shared, MAXS };
+  // epoch: goes up whenever pictures made before may be empty or stale (a context lost, a new one made): whoever keeps pictures drops them when it changes
+  A.gpu = { GpuSkin, shared, MAXS, epoch: 0, losses: 0, remade: 0 };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

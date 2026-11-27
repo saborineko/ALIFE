@@ -18,7 +18,7 @@
   // drawing a frame takes too long (hundreds of grown bodies, each with its own picture, can take seconds on a machine without a fast graphics card), and comes
   // back down when drawing is quick again. The selected body always gets its picture. This changes what is drawn, never the world.
   // A body larger than DETAIL_MAX pixels on screen always gets its picture: looking closely at a few bodies must never turn them into strokes.
-  const DETAIL_MAX = 72; let detailMin = 9, drawMs = 0, quickRun = 0, detailHold = 0;
+  const DETAIL_MAX = 72, SPRITE_MAX = 10, sprites = new WeakMap(); let detailMin = 9, drawMs = 0, quickRun = 0, detailHold = 0, spriteEvery = 1;
   let w, view, paused = false, sel = null, shown = null, follow = false, loaded = window.ALIFE2_LOAD || null, lastPanels = 0, lastSave = 0;
   // (a mark kept for this tab only: there while the page is open, taken away when the page is left while it still answers. Found at the start, it means the page ended without answering.)
   let unclean = false; try { unclean = sessionStorage.getItem('alife2_open') === '1'; sessionStorage.setItem('alife2_open', '1'); addEventListener('pagehide', () => { try { sessionStorage.removeItem('alife2_open'); } catch (e) {} }); } catch (e) {}
@@ -207,10 +207,10 @@
   }
   // A genome's small picture is drawn once and kept: the panels are rebuilt every second with up to 40 of them, and drawing each one anew
   // (growing the body from its genome, then a picture of it) took a third of the time of a slow frame.
-  let thumbs = new WeakMap();
+  let thumbs = new WeakMap(), thumbEpoch = 0;
   function card(parent, g, caption, onclick, on) {
     const f = document.createElement('figure'), c = document.createElement('canvas'), t = document.createElement('figcaption');
-    c.width = 96; c.height = 72; let pic = thumbs.get(g); if (!pic) { pic = document.createElement('canvas'); pic.width = 96; pic.height = 72; thumb(pic, g); thumbs.set(g, pic); } c.getContext('2d').drawImage(pic, 0, 0); t.textContent = caption; f.append(c, t); f.onclick = onclick; if (on) f.classList.add('on'); parent.append(f);
+    c.width = 96; c.height = 72; if (A.gpu && A.gpu.epoch !== thumbEpoch) { thumbEpoch = A.gpu.epoch; thumbs = new WeakMap(); } /* (pictures kept from before a lost graphics context may be empty) */ let pic = thumbs.get(g); if (!pic) { pic = document.createElement('canvas'); pic.width = 96; pic.height = 72; thumb(pic, g); thumbs.set(g, pic); } c.getContext('2d').drawImage(pic, 0, 0); t.textContent = caption; f.append(c, t); f.onclick = onclick; if (on) f.classList.add('on'); parent.append(f);
   }
   const kindText = k => { const [s, m, e, v, c] = k.split('/'); return s + '体節 口' + m + (e === '1' ? ' 眼' : '') + (v === '1' ? ' 関節' : '') + (c === '1' ? ' 繊毛' : ''); };
   const CAUSE = { starved: '餓死', aged: '老衰', broken: '物理破綻', killed: '傷で死亡（他個体に組織を取られた）', left: '他の島へ移った' };
@@ -332,20 +332,37 @@
       if (mx < -px || my < -py || mx > W + px || my > H + py) continue;
       if (Math.max(px, py) < (o === sel ? 9 : detailMin)) { // far away (or, while drawing is slow, not large enough for a picture of its own): still a body with a shape and a heading, not a dot
         ctx.lineCap = 'round';
-        for (const [wd, col] of [[2.6, 'hsla(' + o.g.hue + ',40%,80%,.16)'], [1.5, 'hsla(' + o.g.hue + ',35%,82%,.5)'], [0.8, 'hsla(' + (o.g.hue + 25) + ',45%,60%,.9)']]) { ctx.strokeStyle = col; ctx.beginPath(); for (const s of b.segs) { ctx.lineWidth = Math.max(1.6, (s.r0 + s.r1) * sc * wd); const xa = mx + (s.ax - mxw) * sc; ctx.moveTo(xa, Y(s.ay)); ctx.lineTo(xa + (s.bx - s.ax) * sc + 0.01, Y(s.by)); } ctx.stroke(); }
+        // (a body far away keeps the pale lines it always had; a body that is near but drawn simply because drawing is slow gets the colours of its picture: skin outside, the warm inside as its core)
+        for (const [wd, col] of Math.max(px, py) < 9 ? [[2.6, 'hsla(' + o.g.hue + ',40%,80%,.16)'], [1.5, 'hsla(' + o.g.hue + ',35%,82%,.5)'], [0.8, 'hsla(' + (o.g.hue + 25) + ',45%,60%,.9)']] : [[2.3, 'hsla(' + (o.g.hue + 25) + ',45%,88%,.13)'], [1.7, 'hsla(' + o.g.hue + ',30%,60%,.55)'], [0.75, 'hsla(' + (o.g.hue + 200) + ',50%,42%,.8)']]) { ctx.strokeStyle = col; ctx.beginPath(); for (const s of b.segs) { ctx.lineWidth = Math.max(1.6, (s.r0 + s.r1) * sc * wd); const xa = mx + (s.ax - mxw) * sc; ctx.moveTo(xa, Y(s.ay)); ctx.lineTo(xa + (s.bx - s.ax) * sc + 0.01, Y(s.by)); } ctx.stroke(); }
       } else {
-        // each body gets its own small picture, drawn larger than shown when the body is small
-        const size = Math.ceil(Math.max(px, py) + 18), ss = Math.max(1, Math.min(4, Math.floor(440 / size)));
-        ctx.save(); ctx.translate(Math.round(mx - size / 2), Math.round(my - size / 2));
-        bodyR.draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: gpuOn, quality: gpuOn ? ss : Math.min(2, ss), hue: o.g.hue, glow: sc > 18, shadow: w.isGround(o.cx, o.cy), time: b.t, clock: w.t, gut: o.G / Math.max(1e-6, o.prof.gutCap), speed: o._v || 0, fill: o.E / o.prof.Emax, drive: b.cmd.drive, bristles: sc > 20, internals: sc > 6, pads: w.isGround(o.cx, o.cy) });
-        ctx.restore();
+        // each body gets its own small picture, drawn larger than shown when the body is small. While drawing is slow (spriteEvery > 1) a body's picture is kept and
+        // shown again for a few frames, moved and turned with the body, and only drawn afresh every spriteEvery-th frame: the look stays, the work is divided.
+        const root = b.segs[0], ang = Math.atan2(root.dy, root.dx);
+        if (spriteEvery <= 1 || o === sel) {
+          const size = Math.ceil(Math.max(px, py) + 18), ss = Math.max(1, Math.min(4, Math.floor(440 / size)));
+          ctx.save(); ctx.translate(Math.round(mx - size / 2), Math.round(my - size / 2));
+          bodyR.draw(ctx, b.segs, { cx: mxw, cy: (y0 + y1) / 2, scale: sc, w: size, h: size }, { gpu: gpuOn, quality: gpuOn ? ss : Math.min(2, ss), hue: o.g.hue, glow: sc > 18, shadow: w.isGround(o.cx, o.cy), time: b.t, clock: w.t, gut: o.G / Math.max(1e-6, o.prof.gutCap), speed: o._v || 0, fill: o.E / o.prof.Emax, drive: b.cmd.drive, bristles: sc > 20, internals: sc > 6, pads: w.isGround(o.cx, o.cy) });
+          ctx.restore();
+        } else {
+          let ax = 0, ay = 0, rad = 0; for (const s of b.segs) { ax += s.ax + s.bx; ay += s.ay + s.by; } ax /= 2 * b.segs.length; ay /= 2 * b.segs.length; // (a point that stays put in the body, and how far the body reaches from it)
+          for (const s of b.segs) { const r = Math.max(s.r0, s.r1); rad = Math.max(rad, Math.hypot(s.ax - ax, s.ay - ay) + r, Math.hypot(s.bx - ax, s.by - ay) + r); }
+          const size = Math.ceil(2 * rad * sc + 18), ss = Math.max(1, Math.min(4, Math.floor(440 / size))), epoch = A.gpu ? A.gpu.epoch : 0; let sp = sprites.get(o);
+          if (!sp || sp.size !== size || sp.sc !== sc || sp.n !== b.segs.length || sp.epoch !== epoch || frameNo >= sp.next) {
+            const first = !sp || sp.size !== size; if (first) { sp = { c: document.createElement('canvas'), size }; sp.c.width = sp.c.height = size; sprites.set(o, sp); } const c2 = sp.c.getContext('2d'); c2.clearRect(0, 0, size, size);
+            bodyR.draw(c2, b.segs, { cx: ax, cy: ay, scale: sc, w: size, h: size }, { gpu: gpuOn, quality: gpuOn ? ss : Math.min(2, ss), hue: o.g.hue, glow: sc > 18, shadow: w.isGround(o.cx, o.cy), time: b.t, clock: w.t, gut: o.G / Math.max(1e-6, o.prof.gutCap), speed: o._v || 0, fill: o.E / o.prof.Emax, drive: b.cmd.drive, bristles: sc > 20, internals: sc > 6, pads: w.isGround(o.cx, o.cy) });
+            sp.sc = sc; sp.n = b.segs.length; sp.epoch = epoch; sp.ang = ang; sp.next = frameNo + (first ? 1 + o.id % spriteEvery : spriteEvery); // (bodies take their turns: not all in one frame)
+          }
+          ctx.save(); ctx.translate(mx + (ax - mxw) * sc, Y(ay)); ctx.rotate(ang - sp.ang); ctx.drawImage(sp.c, -size / 2, -size / 2); ctx.restore();
+        }
       }
       if (o === sel) { ctx.strokeStyle = '#eafff4'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.arc(mx, my, Math.max(px, py) / 2 + 8, 0, 6.3); ctx.stroke(); ctx.setLineDash([]); }
     }
     { // drawing the bodies took too long: fewer of them get a picture of their own from the next frame on; it was quick for a while: more of them do again
       const ms = performance.now() - tBodies; drawMs += (ms - drawMs) * 0.3;
-      if (ms > 40) { detailMin = Math.min(DETAIL_MAX, detailMin * Math.min(4, Math.max(1.25, ms / 40))); quickRun = 0; detailHold = tBodies + 4000; }
-      else if (drawMs < 15 && detailMin > 9 && tBodies > detailHold) { if (++quickRun >= 10) { detailMin = Math.max(9, detailMin * 0.8); quickRun = 0; } } else quickRun = 0; }
+      // first the pictures are reused for more frames; only if drawing is then still very slow (and the box "never as strokes" is not ticked) are small bodies drawn as strokes
+      const strokes = !($('keepDetail') && $('keepDetail').checked); if (!strokes) detailMin = 9;
+      if (ms > 40) { if (spriteEvery < SPRITE_MAX) spriteEvery = Math.min(SPRITE_MAX, spriteEvery + (ms > 120 ? 3 : 1)); else if (strokes && ms > 250) detailMin = Math.min(DETAIL_MAX, detailMin * Math.min(4, Math.max(1.25, ms / 250))); /* (strokes are the last resort: only when drawing the bodies still takes a quarter of a second with the pictures reused as long as they can be) */ quickRun = 0; detailHold = tBodies + 4000; }
+      else if (drawMs < 15 && (detailMin > 9 || spriteEvery > 1) && tBodies > detailHold) { if (++quickRun >= 10) { if (detailMin > 9) detailMin = Math.max(9, detailMin * 0.8); else spriteEvery--; quickRun = 0; } } else quickRun = 0; }
     if (w.regions) { // region names along the top, and the borders between regions
       ctx.font = '13px system-ui'; ctx.textAlign = 'center';
       for (const q of w.regions) { const xm = X((q.x0 + q.x1) / 2), xb = X(w.borderX(q) % w.W); ctx.fillStyle = 'rgba(235,245,240,.75)'; ctx.fillText(q.name, xm, Math.max(16, y0w + 16)); ctx.strokeStyle = 'rgba(200,225,235,.14)'; ctx.setLineDash([3, 6]); ctx.beginPath(); ctx.moveTo(xb, Math.max(0, y0w)); ctx.lineTo(xb, Math.min(H, Y(w.H))); ctx.stroke(); ctx.setLineDash([]); }
@@ -411,7 +428,7 @@
     part('描画', draw);
     part('音', audioFrame);
     pace.other = performance.now() - tB; // (drawing and sound, every frame; not the panels and the automatic save, which come once in a while)
-    if (ms - pace.since >= 1000) { const el = $('pace'), sec = (ms - pace.since) / 1000; if (el) el.textContent = (paused || !pace.steps ? '' : '実測：世界の ' + (pace.steps / 30 / sec).toFixed(1) + ' 秒／実時間 1 秒、' + (pace.frames / sec).toFixed(0) + ' コマ／秒') + (pace.cut > pace.frames / 2 ? '（計算が重く、指定の速度には届いていない）' : '') + (detailMin > 9 ? '／描画が重いので、画面上で ' + Math.round(detailMin) + ' ピクセルより小さい個体は簡略に描いている（拡大するか個体を選ぶと詳しい絵になる）' : ''); pace.steps = pace.frames = pace.cut = 0; pace.since = ms; }
+    if (ms - pace.since >= 1000) { const el = $('pace'), sec = (ms - pace.since) / 1000; if (el) el.textContent = (paused || !pace.steps ? '' : '実測：世界の ' + (pace.steps / 30 / sec).toFixed(1) + ' 秒／実時間 1 秒、' + (pace.frames / sec).toFixed(0) + ' コマ／秒') + (pace.cut > pace.frames / 2 ? '（計算が重く、指定の速度には届いていない）' : '') + (A.gpu && A.gpu.losses ? '／GPU の描画が ' + A.gpu.losses + ' 回失われ、' + (A.gpu.shared().ok ? '作り直した' : 'いまは CPU で皮膚を描いている（遅い）') : '') + (spriteEvery > 1 ? '／描画が重いので、個体の絵を ' + spriteEvery + ' コマに 1 回だけ描き直している（あいだは同じ絵を動かす）' : '') + (detailMin > 9 ? '／それでも重いので、画面上で ' + Math.round(detailMin) + ' ピクセルより小さい個体は線で描いている（右のチェックで止められる）' : ''); pace.steps = pace.frames = pace.cut = 0; pace.since = ms; }
     if (ms - lastPanels > 1000) { lastPanels = ms; part('統計・個体の表示', panels); part('島の表示', islandPanel); }
     if ($('auto').checked && ms - lastSave > (ISL.ws.length ? 120000 : 30000)) { lastSave = ms; part('自動保存', autosave); }
     requestAnimationFrame(loop);
@@ -499,6 +516,7 @@
 
   // A hidden tab gets no animation frames. A small thread then gives the beat, so the world goes on (more slowly) while nobody looks.
   const BG = 'alife2_background_on'; try { if (localStorage.getItem(BG) === '0') $('bg').checked = false; } catch (e) {}
+  const KD = 'alife2_keep_detail'; if ($('keepDetail')) { try { if (localStorage.getItem(KD) === '1') $('keepDetail').checked = true; } catch (e) {} $('keepDetail').onchange = () => { try { localStorage.setItem(KD, $('keepDetail').checked ? '1' : '0'); } catch (e) {} }; }
   $('bg').onchange = () => { try { localStorage.setItem(BG, $('bg').checked ? '1' : '0'); } catch (e) {} };
   try {
     const beat = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 100)'], { type: 'text/javascript' })));
