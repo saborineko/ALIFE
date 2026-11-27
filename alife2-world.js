@@ -24,13 +24,13 @@
   function islandStop() { for (const x of ISL.ws) x.worker.terminate(); ISL.ws = []; ISL.next = Infinity; for (const f of ISL.wait.values()) f(null); ISL.wait.clear(); islandPanel(true); }
   function islandStart(k, texts) { // texts: saved worlds to carry on with (from a file); otherwise copies of the world on screen with other random numbers
     islandStop(); islandNote(''); if (!(k > 1)) return;
-    const base = texts ? null : JSON.stringify(w.save());
+    const base = texts ? null : JSON.stringify(A.observer.saveWorld(w));
     try {
       for (let i = 1; i < k; i++) {
         const x = { worker: new Worker('./alife2-island.js?v=' + A.version.build), s: null, i }; ISL.ws.push(x);
         x.worker.onmessage = e => islandMsg(x, e.data); x.worker.onerror = e => { islandNote('島 ' + (i + 1) + ' を動かせない：' + (e.message || '読み込みに失敗') + '（公開ページ https://… で開いたときに使える）'); };
         const src = texts ? texts[i - 1] : base;
-        x.worker.postMessage(Object.assign(typeof src === 'string' ? { text: src } : { blob: src }, { type: 'start', reseed: texts ? null : ((w.seed * 7919 + i * 104729 + Math.round(w.t)) >>> 0), every: ISL.every, count: ISL.count, phase: texts ? 1 : i / k, paused }));
+        x.worker.postMessage(Object.assign(typeof src === 'string' ? { text: src } : { blob: src }, { type: 'start', reseed: texts ? null : ((w.seed * 7919 + i * 104729 + Math.round(w.t)) >>> 0), every: ISL.every, count: ISL.count, phase: texts ? 1 : i / k, paused, observer: A.observer.get(w).enabled }));
       }
     } catch (e) { islandStop(); islandNote('島を始められない：' + (e && e.message || e) + '（公開ページ https://… で開いたときに使える）'); $('islands').value = '1'; return; }
     ISL.next = w.t + ISL.every; islandPanel(true);
@@ -46,24 +46,25 @@
   function islandSend(from, bodies) { const k = ISL.ws.length + 1, to = (from + 1) % k; if (to === 0) w.immigrate(bodies, from + 1); else ISL.ws[to - 1].worker.postMessage({ type: 'arrive', bodies, from: from + 1 }); }
   const islandAsk = (x, msg) => new Promise((ok, no) => { const id = ++ISL.seq; ISL.wait.set(id, t => t == null ? no(new Error('島が止められた')) : ok(t)); x.worker.postMessage(Object.assign({ id }, msg)); setTimeout(() => { if (ISL.wait.has(id)) { ISL.wait.delete(id); no(new Error('島 ' + (x.i + 1) + ' が応答しない')); } }, 90000); });
   const islandAll = msg => { for (const x of ISL.ws) x.worker.postMessage(msg); };
+  window.addEventListener('alife2-observer-toggle', e => islandAll({ type: 'observer', enabled: e.detail }));
   const enableAll = o => { w.enable(o); islandAll({ type: 'enable', o }); };
   function islandPanel(rebuild) {
     const el = $('islandInfo'); $('islandPanel').style.display = ISL.ws.length || $('islandNote').textContent ? '' : 'none';
     if (rebuild) { el.textContent = ''; const add = (i, btn) => { const d = document.createElement('div'), t = document.createElement('span'); t.id = 'isl' + i; d.appendChild(t); if (btn) { const b = document.createElement('button'); b.textContent = 'この島を見る'; b.style.marginLeft = '6px'; b.onclick = () => islandView(i); d.appendChild(b); } el.appendChild(d); }; if (ISL.ws.length) { add(0, false); for (const x of ISL.ws) add(x.i, true); } }
     if (!ISL.ws.length || !w) return;
     $('isl0').textContent = '表示中：' + Math.round(w.t) + ' 秒・' + w.bodies.length + ' 個体・来た ' + (w.counts.arrived || 0) + '／出た ' + (w.counts.left || 0);
-    for (const x of ISL.ws) { const s = x.s, t = $('isl' + x.i); if (t) t.textContent = '島 ' + (x.i + 1) + '：' + (s ? Math.round(s.t) + ' 秒・' + s.n + ' 個体・平均世代 ' + s.gen.toFixed(1) + '・体節 ' + s.seg.toFixed(2) + '（最大 ' + s.segMax + '）・多体節 ' + (s.multi * 100).toFixed(0) + '%・来た ' + s.arrived + '／出た ' + s.left + '・毎秒 ' + s.rate.toFixed(1) + ' 秒' : '準備中'); }
+    for (const x of ISL.ws) { const s = x.s, t = $('isl' + x.i); if (t) t.textContent = '島 ' + (x.i + 1) + '：' + (s ? Math.round(s.t) + ' 秒・' + s.n + ' 個体・平均世代 ' + s.gen.toFixed(1) + '・体節 ' + s.seg.toFixed(2) + '（最大 ' + s.segMax + '）・多体節 ' + (s.multi * 100).toFixed(0) + '%・来た ' + s.arrived + '／出た ' + s.left + '・毎秒 ' + s.rate.toFixed(1) + ' 秒' + (s.observer ? '／観測' + (s.observer.enabled ? 'ON' : 'OFF') + (s.observer.events.length ? '／' + Math.round(s.observer.events.at(-1).t) + '秒 ' + s.observer.events.at(-1).title : '') : '') : '準備中'); }
   }
   // Look at another island: the world on screen and that island's world change places (each carries on where it was).
   async function islandView(i) {
     const x = ISL.ws[i - 1]; if (!x || ISL.busy) return; ISL.busy = true;
-    try { const text = await islandAsk(x, { type: 'swap', text: JSON.stringify(w.save()) }); ISL.keep = true; start(A.engine.World.restore(JSON.parse(text))); ISL.next = w.t + ISL.every; $('saveNote').textContent = '島 ' + (i + 1) + ' の世界を表示した。いままで見ていた世界は、裏でその島として続いている。'; }
+    try { const text = await islandAsk(x, { type: 'swap', text: JSON.stringify(A.observer.saveWorld(w)) }); ISL.keep = true; start(A.observer.restoreWorld(JSON.parse(text))); ISL.next = w.t + ISL.every; $('saveNote').textContent = '島 ' + (i + 1) + ' の世界を表示した。いままで見ていた世界は、裏でその島として続いている。'; }
     catch (e) { islandNote('島を切り替えられない：' + (e && e.message || e)); }
     ISL.busy = false; lastPanels = 0;
   }
   // Every world as a saved file of its own (gzip where the browser can), the one on screen first. Each island packs its own world in its own thread,
   // so the page never holds more than one world's text.
-  const worldBlobs = async () => { const mine = JSON.stringify(w.save()); return [(await gz(mine)) || new Blob([mine], { type: 'application/json' }), ...await Promise.all(ISL.ws.map(x => islandAsk(x, { type: 'save' })))]; };
+  const worldBlobs = async () => { const mine = JSON.stringify(A.observer.saveWorld(w)); return [(await gz(mine)) || new Blob([mine], { type: 'application/json' }), ...await Promise.all(ISL.ws.map(x => islandAsk(x, { type: 'save' })))]; };
   const blobText = async blob => { const h = new Uint8Array(await blob.slice(0, 2).arrayBuffer()); return h[0] === 0x1f && h[1] === 0x8b ? gunzip(blob) : blob.text(); };
   // Several islands in one file: a line of text that says how long each world's file is, then those files one after another.
   const ISLANDS = '{"format":"alife2-islands-2"';
@@ -72,11 +73,11 @@
   const isPack = async file => (await file.slice(0, ISLANDS.length).text()) === ISLANDS;
   function pickIslands(k) { const pick = $('islands'); if (![...pick.options].some(o => Number(o.value) === k)) pick.add(new Option(String(k))); pick.value = String(k); }
   // open what was saved: one world (text), a set of islands as files, or the first form of an island file (one text for all)
-  async function openSet(blobs) { ISL.keep = true; start(A.engine.World.restore(JSON.parse(await blobText(blobs[0])))); pickIslands(blobs.length); islandStart(blobs.length, blobs.slice(1)); return blobs.length; }
+  async function openSet(blobs) { ISL.keep = true; start(A.observer.restoreWorld(JSON.parse(await blobText(blobs[0])))); pickIslands(blobs.length); islandStart(blobs.length, blobs.slice(1)); return blobs.length; }
   function openSaved(text) {
     const d = JSON.parse(text);
-    if (d && d.format === 'alife2-islands-1') { const k = d.worlds.length; ISL.keep = true; start(A.engine.World.restore(d.worlds[0])); pickIslands(k); islandStart(k, d.worlds.slice(1).map(x => JSON.stringify(x))); return k; }
-    start(A.engine.World.restore(d)); return 1;
+    if (d && d.format === 'alife2-islands-1') { const k = d.worlds.length; ISL.keep = true; start(A.observer.restoreWorld(d.worlds[0])); pickIslands(k); islandStart(k, d.worlds.slice(1).map(x => JSON.stringify(x))); return k; }
+    start(A.observer.restoreWorld(d)); return 1;
   }
   // one step of the world on screen, and its share of the exchange between islands
   function advance() { w.step(); if (w.t >= ISL.next) { ISL.next = w.t + ISL.every; if (ISL.ws.length && ISL.count > 0) { const out = w.emigrate(ISL.count); if (out.length) islandSend(0, out); } } }
@@ -182,6 +183,7 @@
     for (const r of A.rules.catalog) $(r.key).checked=!!w[r.key];
     if (world) $('map').value = w.map || ''; // a loaded world shows its own map
     $('deaf').checked=!!w.deaf; $('mute').checked=!!w.mute; // controls outside the evolution-rule registry
+    A.observerUI.bind(w, o => { select(o, false, true); follow = true; $('follow').textContent = '追跡中'; view.cx = o.cx; view.cy = o.cy; view.scale = Math.max(view.scale, 20); }, () => { follow = false; $('follow').textContent = '追跡'; });
     fit(); sel = null; shown = null; lastPanels = 0;
     if (ISL.keep) ISL.keep = false; else if (ISL.ws.length || Number($('islands').value) > 1) islandStart(Number($('islands').value)); // a new history on screen: the islands start again as copies of it
   }
@@ -204,6 +206,7 @@
   const CAUSE = { starved: '餓死', aged: '老衰', broken: '物理破綻', killed: '傷で死亡（他個体に組織を取られた）', left: '他の島へ移った' };
 
   function panels() {
+    A.observerUI.render();
     const c0 = w.census(); soundPanel(c0);
     const smellers = w.scent ? w.bodies.filter(o => o.g.parts.some(p => Math.abs(p.sA) > 0.2 || Math.abs(p.sB) > 0.2)).length : 0;
     const seers = w.vision ? w.bodies.filter(o => o.g.parts.some(p => p.eye > 0.1 && Math.abs(p.vE) > 0.2)).length : 0;
@@ -252,7 +255,7 @@
   }
   // how the observed individual was chosen: by a rule (so the rule can pick again when it dies) or by hand
   let rule = null, ruleName = '', notice = '';
-  function select(o, keepRule) { sel = o; shown = null; follow = follow && !!o; lastPanels = 0; if (!keepRule) { rule = null; ruleName = ''; notice = ''; } }
+  function select(o, keepRule, observer) { if (!observer) A.observerUI.clearTrack(); sel = o; shown = null; follow = follow && !!o; lastPanels = 0; if (!keepRule) { rule = null; ruleName = ''; notice = ''; } }
 
   function draw() {
     if (follow && sel && !sel.dead) { view.cx += (sel.cx - view.cx) * 0.15; view.cy += (sel.cy - view.cy) * 0.15; }
