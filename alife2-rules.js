@@ -15,6 +15,7 @@ const catalog=[
  ['nibble','粒を削って食べる'],['recycle','物質を水に戻す'],
  ['adhere','掴む・蓄えの染み出し','',['contact']],['mix','触れた相手と遺伝子が混ざる','',['contact']],
  ['soundWork','繊毛の音を仕事から決める','',['sound']],
+ ['brain','神経系が身体と別に増え、遠くへつながる','b',['wire']],
  ['shore','なだらかな境界','',[],24],['wave','豊かさの波','',[],1200]
 ].map(([key,label,flag='',requires=[],on=1])=>Object.freeze({key,label,flag,requires:Object.freeze(requires),on,default:0}));
 function normalize(input={}){

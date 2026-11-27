@@ -81,6 +81,10 @@
                                           // 0 = the earlier rule: the young is born at the stage and size its own genes describe, whatever the parent paid
     carry: 0,                             // 1 = when a body is rebuilt for growth, each segment keeps its nerve signal, what its senses had adapted to, and the body keeps its rhythm
                                           // (a segment is known by its address). 0 = the earlier rule: these start from nothing at every growth step
+    brain: 0,                             // 1 (needs wire) = the nervous system can grow apart from the body. A part may carry up to 16 neurons instead of 4; a neuron can be wired
+                                          // to the neuron of a given name in the root segment (r) or to the mean of that name over all the other segments (d), so a centre can gather
+                                          // from the whole body and speak to all of it; mutation can copy a block of neurons from one part into another. Reach costs upkeep: a far
+                                          // connection costs half its strength more per segment of depth (see organs C.far). Nothing here makes a brain: it only stops forbidding one.
     wire: 0,                              // 1 = neurons have names. A connection between neurons names the neuron it means, so removing or adding a neuron leaves every other
                                           //     connection where it was (a connection to a neuron that is gone reads nothing), and a new connection is made to a neuron that exists.
                                           //     0 = connections count places in the part's list: removing a neuron makes the connections to later ones read their neighbours instead,
@@ -401,6 +405,7 @@
       if (o.solid != null && !!o.solid !== !!this.solid) { this.solid = o.solid ? 1 : 0; for (const q of this.bodies) { q.b.hard = !!this.solid; q.self = this.solid && !q.b.rigid ? this.selfPairs(q) : null; if (q.hp) this.wound(q); } this.log('世界の設定を変更：身体を全長にわたって固い物体として扱う規則（側面の接触・自分自身との接触・関節の止まり・失った組織の重さ・切断）を' + (o.solid ? '有効にした' : '無効にした')); }
       if (o.wireEnds != null && !!o.wireEnds !== !!this.wireEnds) { this.wireEnds = o.wireEnds ? 1 : 0; for (const q of this.bodies) { q.nextCost = null; const root = q.b.segs[0]; this.form(q, q.cx, q.cy, Math.atan2(root.dy, root.dx)); } this.log('世界の設定を変更：相手（感覚・効果器・隣の体節）のある結合だけを作り、相手の無い結合には維持費がかからない規則を' + (o.wireEnds ? '有効にした（身体のすることは変わらない）' : '無効にした')); }
       if (o.wireLate != null && !!o.wireLate !== !!this.wireLate) { this.wireLate = o.wireLate ? 1 : 0; for (const q of this.bodies) if (q.stage < 1 && q.g.parts.some(p => p.nAt > q.stage)) { q.nextCost = null; const root = q.b.segs[0]; this.form(q, q.cx, q.cy, Math.atan2(root.dy, root.dx)); } this.log('世界の設定を変更：部品ごとに、回路を作る成長の段階が遺伝し、変異する規則を' + (o.wireLate ? '有効にした（遺伝子の無い部品は、これまでどおり生まれたときから回路を持つ）' : '無効にした（どの回路も生まれたときからある）')); }
+      if (o.brain != null && !!o.brain !== !!this.brain) { this.brain = o.brain ? 1 : 0; this.log('世界の設定を変更：神経系が身体と別に増える・遠くへつながる規則を' + (o.brain ? '有効にした（部品あたり 16 神経まで、根の体節と全身への結合、神経のまとまりの複製）' : '無効にした（いまある神経と結合はそのまま働く）')); }
       if (o.wire != null && !!o.wire !== !!this.wire) { this.wire = o.wire ? 1 : 0; this.log('世界の設定を変更：神経に名前を付け、結合が相手を名前で指す規則を' + (o.wire ? '有効にした（神経が減っても増えても、ほかの結合はずれない）' : '無効にした')); }
       if (o.keep != null && !!o.keep !== !!this.keep) { this.keep = o.keep ? 1 : 0; this.log('世界の設定を変更：身体が作り直されても・移されても、神経の状態・身につけた結合・動きを保つ規則を' + (o.keep ? '有効にした' : '無効にした')); }
       if (o.carry != null && !!o.carry !== !!this.carry) { this.carry = o.carry ? 1 : 0; this.log('世界の設定を変更：成長の前後で神経の状態と律動を引き継ぐ規則を' + (o.carry ? '有効にした' : '無効にした')); }

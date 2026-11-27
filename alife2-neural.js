@@ -44,7 +44,7 @@
   // snd: sound exists in this world; each segment with an ear carries how loud the water is at its outer end, over the pitches it is tuned to, in s.e.
   // Then a segment's signal and neurons can also drive its voice: s.vo (0 silent .. 1 full) and s.vq (its pitch pushed down -1 .. up 1).
   function local(body, taste, hunger, smA, smB, vis, con, learn, snd) {
-    const segs = body.segs; let use = 0, hd = 0; // hd (record only): how hard what the ears report is pushing on this body's circuit right now
+    const segs = body.segs; let use = 0, hd = 0, bus = false; // hd (record only): how hard what the ears report is pushing on this body's circuit right now
     for (let i = 0; i < segs.length; i++) {
       const s = segs[i]; if (!s.circ) continue;
       const p = s.p, kids = s.kids; let kid = 0;
@@ -81,6 +81,8 @@
               case 14: v = other(twin, j); break;
               case 15: v = s.ate ? s.ate / (s.ate + 0.1) : 0; break; // (learn) this segment's mouth has just swallowed something
               case 16: v = snd && s.e != null ? smell(s, 'nE', s.e, p.adapt, 0.1) : 0; break; // (sound) what this segment's ear reports
+              case 17: v = named(segs[0], j); break; // (brain) the neuron of that name in the root segment
+              case 18: { if (!bus) bus = busOf(segs); const own = nn.pos ? nn.pos.get(j) : (j < n ? j : null), k2 = busN[j] - (own != null ? 1 : 0); v = k2 > 0 ? (busSum[j] - (own != null ? na[own] : 0)) / k2 : 0; } break; // (brain) the mean of the neurons of that name in all the other segments
             }
             if (lw) { pre[e] = v; y += (N.w[e] + lw[N.off + e]) * v; } else y += N.w[e] * v;
             if (snd && N.src[e] === 16 && s.e != null) { const ev = N.w[e] * (v + 1 - p.adapt); hd += ev < 0 ? -ev : ev; } } // (record; only where the segment has an ear: a neuron that reads an ear the segment lacks reads nothing)
@@ -106,15 +108,21 @@
   // what a part's wiring costs to keep: the strengths of the single signal's connections, and for each neuron its connections and a share for the cell itself
   const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) w += Math.abs(e[1]) + (e[2] ? 0.5 * Math.abs(e[2]) : 0); for (const e of q.out) w += Math.abs(e[1]); } return w; };
   // neurons, made ready to run: sources and targets as numbers. Done once per part.
-  const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14, g: 15, e: 16 }, EFF = { C: 0, T: 1, J: 2, M: 3, P: 4, V: 5, Q: 6 }, ready = new WeakMap();
-  function compile(nn) { let c = ready.get(nn); if (!c) { let off = 0; const named = nn.some(q => q.id != null), pos = named ? new Map(nn.map((q, i) => [q.id == null ? i : q.id, i])) : null, at = e => { const id = NAME.indexOf(e[0][1]); if (e[0][0] === 'p' || e[0][0] === 'k') return id; const i = pos.get(id); return i == null ? 255 : i; }; /* (wire) neurons with names: a reference means the neuron of that name. Those to this part (s, m) are settled here; those to another segment (p, k) when read; a name nobody has reads 0 */
-    c = nn.map(q => { const N = { b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? (named ? at(e) : +e[0][1]) : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]), eta: q.in.map(e => e[2] || 0), m: q.m == null ? -1 : q.m, off }; N.plastic = N.eta.some(x => x !== 0); off += q.in.length; return N; }); c.total = off; c.pos = pos; c.learns = c.some(N => N.plastic); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); ready.set(nn, c); } return c; }
+  const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14, g: 15, e: 16, r: 17, d: 18 }, EFF = { C: 0, T: 1, J: 2, M: 3, P: 4, V: 5, Q: 6 }, ready = new WeakMap();
+  function compile(nn) { let c = ready.get(nn); if (!c) { let off = 0; const named = nn.some(q => q.id != null), pos = named ? new Map(nn.map((q, i) => [q.id == null ? i : q.id, i])) : null, at = e => { const id = NAME.indexOf(e[0][1]); if (e[0][0] === 'p' || e[0][0] === 'k' || e[0][0] === 'r' || e[0][0] === 'd') return id; const i = pos.get(id); return i == null ? 255 : i; }; /* (wire) neurons with names: a reference means the neuron of that name. Those to this part (s, m) are settled here; those to another segment (p, k) when read; a name nobody has reads 0 */
+    c = nn.map(q => { const N = { b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? (named ? at(e) : +e[0][1]) : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]), eta: q.in.map(e => e[2] || 0), m: q.m == null ? -1 : q.m, off }; N.plastic = N.eta.some(x => x !== 0); off += q.in.length; return N; }); c.total = off; c.pos = pos; c.learns = c.some(N => N.plastic); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); c.ids = nn.map((q, i) => (q.id == null ? i : q.id)); /* (brain) the name of each neuron, for the body-wide reading */ ready.set(nn, c); } return c; }
   const pre = new Float64Array(8); // (the inputs of the neuron being worked on)
+  // (brain) every name's sum and count over the whole body, from the neurons' values of a moment ago. Made once per body per step, and only if some neuron asks.
+  const busSum = new Float64Array(36), busN = new Float64Array(36);
+  function busOf(segs) { busSum.fill(0); busN.fill(0); for (let i = 0; i < segs.length; i++) { const s = segs[i]; if (!s.circ || !s.na || !s.p.nn) continue; const ids = compile(s.p.nn).ids; for (let q = 0; q < ids.length && q < s.na.length; q++) { const id = ids[q]; if (id < 36) { busSum[id] += s.na[q]; busN[id]++; } } } return true; }
+  // (brain) how much of a part's wiring reaches far: the summed strength of its connections to the root (r) and to a name over the whole body (d). Null where there is none.
+  const farOf = new WeakMap();
+  function far(nn) { let f = farOf.get(nn); if (f === undefined) { let r = 0, d = 0; for (const q of nn) for (const e of q.in) if (e[0].length === 2) { if (e[0][0] === 'r') r += Math.abs(e[1]); else if (e[0][0] === 'd') d += Math.abs(e[1]); } f = r || d ? { r, d } : null; farOf.set(nn, f); } return f; }
   const other = (seg, i) => (seg && seg.na && i < seg.na.length ? seg.na[i] : 0);
   const NAME = '0123456789abcdefghijklmnopqrstuvwxyz';
   // (wire) the neuron called `id` in another segment: found by its name in that segment's own part (or by its place, if that part's neurons have no names)
   const named = (seg, id) => { if (!seg || !seg.na || !seg.p.nn) return 0; const c = compile(seg.p.nn), i = c.pos ? c.pos.get(id) : id; return i != null && i < seg.na.length ? seg.na[i] : 0; };
 
-  A.neural = { cpg, command, local, wiring, CIRCUIT, compile };
+  A.neural = { cpg, command, local, wiring, CIRCUIT, compile, far };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

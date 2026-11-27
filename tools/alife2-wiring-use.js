@@ -41,7 +41,10 @@ function sort(w, o) {
     put(p.nn && p.nn.length ? 'neurons' : ['nC', 'sA', 'sB', 'vE', 'hE'].some(k => q.src[k] && p[k]) ? (q.out ? 'through' : 'out') : 'partner', 'adapt', abs(p.adapt || 0)); // how a sense reports: of use only where a sense is read and the signal goes somewhere
     if (p.nn) for (const z of p.nn) { let v = 0.5 + abs(z.b); for (const e of z.in) v += abs(e[1]) + (e[2] ? 0.5 * abs(e[2]) : 0); for (const e of z.out) v += abs(e[1]); put('neurons', 'nn', v); }
     per.push(own); }
-  return { T, G, per, check: Object.values(T).reduce((a, b) => a + b, 0), wiring: info.reduce((a, q) => a + (q ? A.neural.wiring(q.p) : 0), 0) };
+  // (brain) what reaching far costs on top: half a connection's strength per segment of distance, as the body pays it (see organs). Counted with the neurons.
+  let far = 0; { const depth = new Float64Array(n); let sum = 0; for (let i = 1; i < n; i++) { depth[i] = segs[i].parent >= 0 ? depth[segs[i].parent] + 1 : 0; sum += depth[i]; } const mean = n ? sum / n : 0, C = A.organs.C;
+    info.forEach((q, i) => { if (!q || !q.p.nn || !A.neural.far) return; const f = A.neural.far(q.p.nn); if (!f) return; const v = C.far * (f.r * depth[i] + f.d * (depth[i] + mean)); add('neurons', 'far', v); if (per[i]) per[i].neurons = (per[i].neurons || 0) + v; far += v; }); }
+  return { T, G, per, check: Object.values(T).reduce((a, b) => a + b, 0), wiring: info.reduce((a, q) => a + (q ? A.neural.wiring(q.p) : 0), 0) + far };
 }
 // For other tools: watch the wired segments of these bodies while the world runs (call tick() after each step), then read, per body that lived through it
 // unchanged: the strength it pays for by class, and whether its circuit moved what any effector is told (weight x signal) by more than 0.02.

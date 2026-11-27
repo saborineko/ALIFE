@@ -1044,3 +1044,34 @@ test('the written past stays within limits: old extinct plans and old ancestors 
   // limits set very high keep everything
   const all = mk(); Object.assign(all, { recordPlans: 1e9, recordAge: 1e12, recordSteps: 1e9 }); for (let i = 0; i < 300; i++) all.clades.set(900000 + i, { id: 900000 + i, kind, g: G.copy(g0), born: 0, ended: 1, members: 5, alive: 0, causes: {} }); all.thin(); assert.strictEqual([...all.clades.values()].filter(c => c.g && c.id >= 900000).length, 300);
 });
+
+test('brain: neurons can be wired to the root segment and to a name over the whole body; reach costs upkeep by distance; a part can hold 16 neurons; off by default', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, N = A.neural;
+  // a chain of four segments: a trunk with cilia and neuron "0", two middle segments without neurons, a tip with neuron "1" that tastes
+  const chain = (ref, w) => G.create({ parts: [G.part({ len: 1.2, r0: 0.5, r1: 0.45, cilia: 0.5, beat: -1, nerve: 0.5, gut: 0.5, mouth: 0.3, nn: [{ id: 0, b: 0, k: 1, in: [[ref, w == null ? 3 : w]], out: [['C', 1]] }] }), G.part({ len: 0.8, r0: 0.3, r1: 0.3, nerve: 0 }), G.part({ len: 0.6, r0: 0.25, r1: 0.2, nerve: 0.5, nn: [{ id: 1, b: 0, k: 1, in: [['c', 3]], out: [] }] })],
+    links: [G.link({ from: 0, to: 1, at: 1, off: 0, angle: 0, scale: 1, repeat: 1 }), G.link({ from: 1, to: 1, at: 1, off: 0, angle: 0, scale: 1, repeat: 1 }), G.link({ from: 1, to: 2, at: 1, off: 0, angle: 0, scale: 1, repeat: 1, lo: 0.6, hi: 1 })] });
+  const corr = (x, y) => { const n = x.length, mx = x.reduce((a, b) => a + b, 0) / n, my = y.reduce((a, b) => a + b, 0) / n; let sxy = 0, sxx = 0, syy = 0; for (let i = 0; i < n; i++) { sxy += (x[i] - mx) * (y[i] - my); sxx += (x[i] - mx) ** 2; syy += (y[i] - my) ** 2; } return sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0; };
+  // up: the trunk's cilia follow what the tip tastes only through the body-wide reading (d); the neighbour readings (children, parent, own segment) find nothing three segments away
+  const up = ref => { const b = P.build(develop(chain(ref))), tip = b.segs.length - 1, taste = new Float64Array(b.segs.length).fill(0.5), xs = [], ys = []; assert.strictEqual(b.segs.length, 4);
+    for (let i = 0; i < 600; i++) { taste[tip] = 0.5 + 0.45 * Math.sin(i / 25); N.local(b, taste, 0, null, null, false, false); if (i > 60) { xs.push(taste[tip]); ys.push(b.segs[0].cd); } } return corr(xs, ys); };
+  assert.ok(up('d1') > 0.9, 'd reaches: ' + up('d1')); for (const ref of ['k1', 's1', 'p1']) assert.strictEqual(up(ref), 0, ref);
+  // down: the tip's cilia follow what the trunk tastes through the reading of the root (r), not through the reading of the parent
+  const down = ref => { const g = chain('c'); g.parts[2].cilia = 0.5; g.parts[2].nn = [{ id: 1, b: 0, k: 1, in: [[ref, 3]], out: [['C', 1]] }]; const b = P.build(develop(g)), tip = b.segs.length - 1, taste = new Float64Array(b.segs.length).fill(0.5), xs = [], ys = [];
+    for (let i = 0; i < 600; i++) { taste[0] = 0.5 + 0.45 * Math.sin(i / 25); N.local(b, taste, 0, null, null, false, false); if (i > 60) { xs.push(taste[0]); ys.push(b.segs[tip].cd); } } return corr(xs, ys); };
+  assert.ok(down('r0') > 0.9); assert.strictEqual(down('p0'), 0);
+  // a neuron does not hear itself through d: alone with its name, it reads nothing
+  { const g = chain('d0'); const b = P.build(develop(g)), taste = new Float64Array(4).fill(0.9); for (let i = 0; i < 50; i++) N.local(b, taste, 0, null, null, false, false); assert.strictEqual(b.segs[0].na[0], 0); }
+  // reach costs: half the connection's strength per segment of distance (to the root: the segment's depth; to a name over the body: its depth and the body's mean depth)
+  const pw = g => A.organs.profile(develop(g)).wiring, C = A.organs.C; assert.ok(Math.abs(pw(chain('d1')) - pw(chain('s1')) - C.far * 3 * 1.5) < 1e-12, 'trunk, d, strength 3, mean depth 1.5');
+  { const g1 = chain('c'), g2 = chain('c'); g1.parts[2].nn = [{ id: 1, b: 0, k: 1, in: [['r0', 2]], out: [] }]; g2.parts[2].nn = [{ id: 1, b: 0, k: 1, in: [['s0', 2]], out: [] }]; assert.ok(Math.abs(pw(g1) - pw(g2) - C.far * 2 * 3) < 1e-12, 'tip, r, strength 2, depth 3'); }
+  assert.strictEqual(pw(chain('s1')), pw(chain('k1')), 'neighbour connections cost what they did');
+  // mutation: more than four neurons, far connections and copied blocks only where the world has the rule (and names: without names the rule does nothing)
+  const count = flags => { let m = chain('s1'), big = 0, far = 0; const r = G.rng(11); for (let i = 0; i < 300; i++) { m = G.mutate(m, r, 1, flags); if (m.parts.some(p => p.nn && p.nn.length > G.NN_MAX)) big++; if (m.parts.some(p => (p.nn || []).some(q => q.in.some(e => e[0].length === 2 && G.NN_FAR.includes(e[0][0]))))) far++; assert.ok(m.parts.every(p => !p.nn || p.nn.length <= G.NN_BIG)); } return [big, far]; };
+  assert.deepStrictEqual(count('nw'), [0, 0]); assert.deepStrictEqual(count('nb'), [0, 0]); const on = count('nwb'); assert.ok(on[0] > 50 && on[1] > 50, on.join());
+  // a genome with far connections and many neurons survives sanitising, copying and a world's save and reload; the rule is off by default and asks for names
+  const big = chain('d1'); big.parts[0].nn = Array.from({ length: 12 }, (_, i) => ({ id: i === 1 ? 20 : i, b: 0, k: 1, in: [['d1', 1], ['r0', 0.5]], out: i ? [] : [['C', 1]] })); assert.strictEqual(G.sanitize(G.copy(big)).parts[0].nn.length, 12);
+  assert.strictEqual(new A.engine.World({ seed: 1 }).brain, 0); assert.deepStrictEqual([A.rules.normalize({ brain: 1 }).wire, A.rules.normalize({ brain: 1 }).nerve2], [1, 1]);
+  const w = new A.engine.World({ seed: 5, founders: 0, cap: 0, nerve2: 1, wire: 1, brain: 1 }); w.spawn(G.copy(big), 60, 40, 1, null); for (let i = 0; i < 200; i++) w.step();
+  const w2 = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); for (let i = 0; i < 200; i++) { w.step(); w2.step(); } const sig = x => JSON.stringify(x.bodies.map(q => [q.cx, q.cy, q.E, q.b.segs.map(s => (s.na ? Array.from(s.na) : null))])); assert.strictEqual(sig(w2), sig(w)); assert.ok(w.bodies[0].b.segs[0].na.length === 12);
+});
