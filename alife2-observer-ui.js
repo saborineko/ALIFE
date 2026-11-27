@@ -38,19 +38,27 @@
         const b = document.createElement('button'), old = z.a[field][id]; b.textContent = `${title}${field === 'kinds' ? A.observer.kindText(id) : '#' + id}：${old ? old.n : '?'}→${g.n}匹`; b.onclick = () => follow(g.target); groups.append(b);
       }
     }
-    const list = $('observerEvents'); list.replaceChildren();
-    for (const e of book.events.slice(-40).reverse()) {
-      const article = document.createElement('article'); article.style.cssText = 'border-top:1px solid #294254;padding:10px 0';
-      const title = document.createElement(e.target ? 'button' : 'strong'); title.textContent = `${e.t.toFixed(0)}秒【${e.level}】${e.title}`; if (e.target) title.onclick = () => follow(e.target);
-      const body = document.createElement('div'); body.textContent = e.text;
-      const details = document.createElement('details'), summary = document.createElement('summary'), pre = document.createElement('pre'); summary.textContent = '数値根拠'; pre.textContent = JSON.stringify(e.evidence, null, 2); pre.style.whiteSpace = 'pre-wrap'; details.append(summary, pre); article.append(title, body, details); list.append(article);
-    }
-    if (!book.events.length) list.textContent = '履歴を蓄積中。出生や珍しい構造だけでは繁栄・定着と判定しません。';
+    const stories = book.events.filter(e => e.key.startsWith('story-'));
+    const renderEvents = (list, events, narrative) => {
+      list.replaceChildren();
+      for (const e of events.slice(narrative ? -8 : -24).reverse()) {
+        const article = document.createElement('article'); article.style.cssText = 'border-top:1px solid #294254;padding:10px 0';
+        const title = document.createElement(e.target ? 'button' : 'strong');
+        title.textContent = `${e.t.toFixed(0)}秒 ${narrative ? '' : '【'+e.level+'】'}${e.title}`; if (e.target) title.onclick = () => follow(e.target);
+        const body = document.createElement('div'); body.textContent = e.text;
+        const details = document.createElement('details'), summary = document.createElement('summary'), pre = document.createElement('pre');
+        summary.textContent = '数値根拠・説明の限界'; pre.textContent = JSON.stringify(e.evidence, null, 2); pre.style.whiteSpace = 'pre-wrap';
+        details.append(summary, pre); article.append(title, body, details); list.append(article);
+      }
+    };
+    renderEvents($('observerEvents'), stories, true);
+    renderEvents($('observerSignals'), book.events.filter(e=>!e.key.startsWith('story-')), false);
+    if (!stories.length) $('observerEvents').textContent = '世界の流れを観測中。最初の1分が揃ったら、全体の増減と注目する系統を実況します。';
     const ex = book.extinctions; $('observerExtinct').textContent = `観測中の体制消失${ex.total}件（累計1〜2匹${ex.small}件）、移出のみ${ex.departures}件。実況履歴は直近300件、時系列は約1000秒、各時点の系統・形態は上位96件（欠測は?）。`;
-    const fresh = book.events.filter(e => e.id > seen && e.important); seen = book.seq;
+    const fresh = book.events.filter(e => e.id > seen && typeof e.spoken === 'string' && e.spoken.length > 0); seen = book.seq;
     if (fresh.length) {
       const e = fresh.at(-1), now = performance.now();
-      if ($('observerSpeech').checked && G.speechSynthesis && now-lastSpeech >= 30000 && !speechSynthesis.speaking) { const u = new SpeechSynthesisUtterance(`${e.title}。${e.text}`); u.lang = 'ja-JP'; speechSynthesis.speak(u); lastSpeech = now; }
+      if ($('observerSpeech').checked && G.speechSynthesis && now-lastSpeech >= 30000 && !speechSynthesis.speaking) { const u = new SpeechSynthesisUtterance(e.spoken); u.lang = 'ja-JP'; speechSynthesis.speak(u); lastSpeech = now; }
 
     }
     $('observerSnapshotSave').disabled = !snapshots.length;

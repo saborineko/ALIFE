@@ -91,7 +91,8 @@ test('UI snapshots freeze event-time state; optional speech stays off and thrott
   elements.get('observerSnapshot').checked=true; const before=plain(w);
   o.emit(w.t,'snapshot-test','検証','検証',{},null,'観測事実',true); advance(w,30); A.observerUI.render(); elements.get('observerSnapshotSave').onclick();
   const data=JSON.parse(await downloaded.text()); delete data.ecosystemObserver; assert.deepEqual(data,before); assert.equal(said,0);
-  elements.get('observerSpeech').checked=true; o.emit(w.t,'speak-1','検証','検証',{},null,'観測事実',true); A.observerUI.render(); assert.equal(said,1);
-  now+=29999; o.emit(w.t,'speak-2','検証','検証',{},null,'観測事実',true); A.observerUI.render(); assert.equal(said,1);
-  now++; o.emit(w.t,'speak-3','検証','検証',{},null,'観測事実',true); A.observerUI.render(); assert.equal(said,2);
+  elements.get('observerSpeech').checked=true; o.emit(w.t,'speak-1','検証','検証',{},null,'観測事実',true,300,'短い実況です。'); A.observerUI.render(); assert.equal(said,1);
+  now+=29999; o.emit(w.t,'speak-2','検証','検証',{},null,'観測事実',true,300,'短い実況です。'); A.observerUI.render(); assert.equal(said,1);
+  now++; o.emit(w.t,'speak-3','検証','検証',{},null,'観測事実',true,300,'短い実況です。'); A.observerUI.render(); assert.equal(said,2);
+  now+=30001; o.emit(w.t,'record-test','最大世代の更新','細かな観測です',{},null,'観測事実',true); A.observerUI.render(); assert.equal(said,2);
 });
