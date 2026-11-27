@@ -944,3 +944,30 @@ test('the wiring-sorting tool: designed bodies whose every connection has an obv
   assert.deepStrictEqual(classes({}, [P({ cilia: 1, nC: 1, mCil: 1, adapt: 0.5 })]), { nC: 'through', mCil: 'through', adapt: 'through' }, 'how a sense reports, where a sense is read');
   assert.deepStrictEqual(classes({}, [P({ cilia: 1, nB: 1, mCil: 1, adapt: 0.5 })]), { nB: 'steady', mCil: 'steady', adapt: 'partner' }, 'and where none is');
 });
+
+test('a world saved before a gene existed resumes: genomes get the starting value of the genes they lack, and genomes that have every gene are left as they are', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, LATER = Object.keys(G.PART_FIELDS).filter(k => G.PART_FIELDS[k][4]); // the genes that came with later rules (smell, sight, touch, sound)
+  assert.ok(LATER.includes('sT') && LATER.includes('mBite') && LATER.includes('vE') && LATER.includes('hE'));
+  // complete(): nothing happens to a genome that has every gene; one that lacks some gets exactly those, at their starting values
+  const g = G.primordial(3), text = JSON.stringify(g); assert.strictEqual(G.complete(g), 0); assert.strictEqual(JSON.stringify(g), text, 'a complete genome is not touched, not even in how it is written');
+  const old = JSON.parse(text); for (const p of old.parts) for (const k of LATER) delete p[k]; delete old.odor; old.parts[0].nC = 'x';
+  assert.strictEqual(G.complete(old), old.parts.length * LATER.length + 2); assert.deepStrictEqual(Object.assign(old, { odor: g.odor }), Object.assign(JSON.parse(text), { parts: JSON.parse(text).parts.map((p, i) => (i ? p : Object.assign(p, { nC: G.PART_FIELDS.nC[2] }))) }));
+  assert.strictEqual(old.parts[0].nAt, undefined, 'a gene that only some worlds have stays absent');
+  // a world with touch, sight, smell and sound is run and saved. From a copy of the save, every later gene that still has its starting value is taken out of
+  // every genome: that is how the same world would have been written by a version that did not know those genes
+  // (the bodies carry a circuit - taste to cilia - so that their segments' signals are computed: a body without any connection never reads these genes)
+  const wiredBody = G.create({ parts: [G.part({ len: 0.5, r0: 0.5, r1: 0.5, muscle: 0, skin: 0.2, nerve: 0.5, cilia: 0.6, mouth: 0.4, gut: 0.5, gonad: 0.3, eye: 0.3, nC: 1, nH: 0.5, mCil: 0.5 })] });
+  const w = new A.engine.World({ seed: 6, n: 0, contact: 1, vision: 1, scent: 1, sound: 1 }); for (let i = 0; i < 24; i++) w.spawn(JSON.parse(JSON.stringify(wiredBody)), 20 + (i % 8) * 15, 25 + Math.floor(i / 8) * 20, 1); for (let i = 0; i < 400; i++) w.step();
+  const save = JSON.parse(JSON.stringify(w.save())), stripped = JSON.parse(JSON.stringify(save)); let taken = 0;
+  const strip = q => { if (!q) return; for (const p of q.parts) for (const k of LATER) if (p[k] === G.PART_FIELDS[k][2]) { delete p[k]; taken++; } };
+  for (const n of stripped.tree) strip(n.g); for (const c of stripped.clades || []) strip(c.g); assert.ok(taken > 100, 'genes were taken out: ' + taken);
+  assert.ok(w.bodies.some(o => o.b.segs.some(q => q.circ && q.a !== 0)), 'the bodies\' circuits were running');
+  const a = A.engine.World.restore(save), b = A.engine.World.restore(stripped);
+  assert.ok(b.bodies.every(o => o.g.parts.every(p => LATER.every(k => Number.isFinite(p[k])))), 'every body has every gene again');
+  const said = z => z.events.some(e => /補った/.test(JSON.stringify(e))); assert.ok(said(b), 'the world says that it filled genes in'); assert.ok(!said(a), 'a save of this version says nothing');
+  // and it goes on exactly as the world that never lost them: touch, sight, smell and sound all read genes that had been missing
+  const state = z => [z.bodies.length, z.rand.state(), z.bodies.map(o => [o.id, o.cx, o.cy, o.E, o.b.segs.map(s => s.a)])];
+  for (let i = 0; i < 150; i++) { a.step(); b.step(); } assert.ok(b.bodies.length > 0); assert.ok(b.bodies.every(o => Number.isFinite(o.E) && o.b.segs.every(s => Number.isFinite(s.a))), 'no body lost its signal');
+  assert.deepStrictEqual(state(b), state(a));
+});

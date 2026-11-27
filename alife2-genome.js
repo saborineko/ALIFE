@@ -359,6 +359,16 @@
     return sanitize(g);
   }
 
-  A.genome = { BRAIN_IN, BRAIN_OUT, PART_FIELDS, LINK_FIELDS, MAX_PARTS, MAX_LINKS, STORE_PARTS, STORE_LINKS, part, link, create, primordial, sanitize, mutate, crossover, recombine, chainScale, rng, copy, clamp, wrapPi, ensureIds, reach, zones, axisOf, splitZone, dropPart, divergence, nextOf, NN_MAX, NN_SENSE, NN_REF, NN_EFF };
+  // Genes added after a genome was written down. A part or rule that lacks a gene (or holds something that is not a number there) gets that gene's starting
+  // value; nothing else is touched: no clamping, no reordering, no change to genes that are there. A genome that has every gene comes back exactly as it was.
+  // Returns how many genes were filled in. (Genes that only some worlds have - a part's `nAt`, a genome's `cast`, `mut`, `mutW`, `yolk` - stay absent: absent is their meaning.)
+  function complete(g) {
+    let n = 0; if (!g || !Array.isArray(g.parts)) return 0;
+    for (const p of g.parts) for (const k in PART_FIELDS) if (!Number.isFinite(p[k])) { p[k] = PART_FIELDS[k][2]; n++; }
+    for (const l of g.links || []) for (const k in LINK_FIELDS) if (!Number.isFinite(l[k])) { l[k] = LINK_FIELDS[k][2]; n++; }
+    if (!Number.isFinite(g.odor)) { g.odor = 0.5; n++; } if (!Number.isFinite(g.birth)) { g.birth = 0.3; n++; }
+    return n;
+  }
+  A.genome = { BRAIN_IN, BRAIN_OUT, PART_FIELDS, LINK_FIELDS, MAX_PARTS, MAX_LINKS, STORE_PARTS, STORE_LINKS, complete, part, link, create, primordial, sanitize, mutate, crossover, recombine, chainScale, rng, copy, clamp, wrapPi, ensureIds, reach, zones, axisOf, splitZone, dropPart, divergence, nextOf, NN_MAX, NN_SENSE, NN_REF, NN_EFF };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

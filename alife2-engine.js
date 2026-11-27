@@ -1066,6 +1066,12 @@
       for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: d.exact ? f[5] : w.t + f[5] });
       if (d.exact) { w.grainDebt = d.grainDebt; w.bottomDebt = d.bottomDebt; if (d.liveLines) w.liveLines = new Set(d.liveLines); if (d.regionState && w.regions) d.regionState.forEach((q, i) => { w.regions[i].debt = q.debt; w.regions[i].patch = q.patch; }); }
       const nodes = new Map(d.tree.map(n => [n.id, n]));
+      // A world saved before a gene existed: its genomes lack that gene, and a rule that reads it would compute with nothing (bodies in a world with touch,
+      // saved before the genes of touch, lost their nerve signal at the first step and died). Every genome the save holds gets the starting value of the genes
+      // it lacks; genomes that have every gene are left exactly as they are, so a world saved by this version resumes as before.
+      { let filled = 0, of = 0; const fill = g => { const k = A.genome.complete(g); if (k) { filled += k; of++; } };
+        for (const n of d.tree) if (n.g) fill(n.g); for (const c of w.clades.values()) if (c.g) fill(c.g); for (const s of d.bodies) if (s.got && s.got[1]) fill(s.got[1]);
+        if (filled) w.log('保存のあとに足された遺伝子を、初期値で補った（' + of + ' 個の遺伝子型に、合わせて ' + filled + ' か所）。古い版で保存した世界を再開したため'); }
       for (const s of d.bodies) {
         const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade, sig: s.sig || null, home: s.home || 0, taxDot: 0, taxLen: 0, taxN: 0, V0: s.v0, stage0: s.s0, seepIn: s.si || 0, seepOut: s.so || 0, held: s.hd == null ? undefined : s.hd, p2: s.p2 || 0, got: s.got ? { id: s.got[0], g: s.got[1] } : null, voOn: s.vo ? !!s.vo[0] : false, voN: s.vo ? s.vo[1] : 0, voT: s.vo ? s.vo[2] : 0, voE: s.vo ? s.vo[3] : 0, hp: s.hp || null, flesh: s.flesh || 0, lost: s.lost || 0 };
         if (n.introduction) o.introduction = n.introduction;
