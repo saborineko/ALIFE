@@ -24,7 +24,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 <div style="font-size:11px;letter-spacing:.18em;color:#90bcb9">ALIFE 2.0 / ECOSYSTEM / EXPERIMENTAL</div>
 <div data-alife2-version style="font-size:12px;color:#f4e3a6;margin:2px 0">v?</div>
 <h1>ALIFE 2.0 生態系（実験版）</h1>
-<p><a href="./alife2-lab.html">形態実験室 2.0</a>　｜　<a href="./alife2-explorer.html">形態可能性探索</a>　｜　<a href="./index.html">ALIFE 23</a>　｜　ALIFE 23 とは別の保存領域を使い、ALIFE 23 のデータには触れない。</p>
+<p><a href="./alife2-lab.html">形態実験室 2.0</a>　｜　<a href="./alife2-explorer.html">生命体の可能性探索</a>　｜　<a href="./index.html">ALIFE 23</a>　｜　ALIFE 23 とは別の保存領域を使い、ALIFE 23 のデータには触れない。</p>
 <div class="layout">
 <div>
   <canvas id="world" width="1280" height="800"></canvas>
@@ -59,7 +59,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="溶存栄養の回復と粒の供給が、長さ 120 の波になって世界を一周し続ける（1200 秒で 1 波長ぶん進む＝毎秒 0.1）。どの場所も、豊かな時期と乏しい時期を交互に迎える。時間で平均した供給はどこでも波の無い世界と同じで、乏しい水に降るはずだった粒は別の場所に降る。じっとしていれば飢える時期が来て、波について行けば豊かな水に居続けられる。いまの世界のまま切り替えられる。「全部入り」には含めていない。"><input id="wave" type="checkbox">豊かさの波（餌場が移る）</label>
     <label>始祖 <select id="founder"><option value="primordial">原始個体（1体節）から自然進化</option><option value="file">進化試験の結果を読み込む（JSON）</option></select></label>
     <input id="file" type="file" accept=".json" style="display:none">
-    <button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・音・繊毛の音を仕事から決める・経験と動きを失わない・神経に名前を付ける・左右の対は一緒に生える・身体を固い物体として扱う・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。変異の強さの進化（2 種類）は長期観察のために含めていない：変異の起きやすさは世界の値のまま一定。入れたいときは個別に印を付ける。">全部入りで最初から</button><button id="pause">一時停止</button>
+    <span id="additionalRules"></span><button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・音・繊毛の音を仕事から決める・経験と動きを失わない・神経に名前を付ける・左右の対は一緒に生える・身体を固い物体として扱う・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。変異の強さの進化（2 種類）は長期観察のために含めていない：変異の起きやすさは世界の値のまま一定。入れたいときは個別に印を付ける。">全部入りで最初から</button><button id="pause">一時停止</button>
     <label>速度 <select id="speed"><option>1</option><option selected>4</option><option>16</option><option>64</option></select>×</label>
     <label title="同じ種類の世界を、別々のスレッドで同時に回す。増やした島は、いま見ている世界の複製を乱数だけ変えて始める。150 秒ごとに各島から 1 個体が隣の島へ移る（遺伝子・齢・蓄えごと。出入りはエネルギーの収支に記帳される）。裏の島は描画しないので全速で進む。島の数だけ CPU のコアを使う。島を使う世界は、同じ seed でも毎回同じ歴史にはならない。">並列の島 <select id="islands"><option>1</option><option>2</option><option>4</option><option>8</option></select></label>
     <label title="タブを裏に回したり最小化したりしても、世界を止めずに進める（表示中より遅い）。ブラウザがタブを休止させた場合は止まる。"><input id="bg" type="checkbox" checked>裏でも進める</label>
@@ -88,20 +88,23 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
   <details class="panel" open><summary><b>絶滅した体制の記録</b></summary><div class="note">一度現れて絶えた体制。代表遺伝子・個体数・世代数・生存期間・死因を残す。クリックで身体と記録を表示。</div><div class="controls"><label>表示 <select id="lostFilter"><option value="all">すべて（個体数順）</option><option value="moved">動いたもの（関節・繊毛）</option><option value="eye">眼があったもの</option><option value="recent">最近絶えた順</option></select></label></div><div id="lost" class="cards"></div><div id="lostNote" class="note"></div></details>
   <details class="panel"><summary><b>生存個体 TOP 10</b></summary><div class="controls"><label>順位 <select id="rank"><option value="kids">子の数</option><option value="age">齢</option><option value="V">体積</option><option value="segs">体節数</option><option value="eaten">口から得た量</option><option value="speed">自力移動の速度</option></select></label></div><div id="top" class="note"></div></details>
   <details class="panel" open><summary><b>進化の記録</b></summary><div id="events" class="note" style="max-height:180px;overflow:auto"></div></details>
+  <details class="panel"><summary><b>外来個体を投入</b></summary>
+  <div class="note">形態可能性探索の「遺伝子を保存」で保存した JSON を、表示中の島に投入する。既存の世界は維持する。人為的な投入として記録し、子孫にも投入系統を表示する。投入は物質とエネルギーを外から加える操作で、自然出生ではない。個体数上限を超えた場合は通常の出生が抑制される。</div>
+  <div class="controls"><label>遺伝子 JSON <input id="introFile" type="file" accept=".json,application/json"></label><label>投入数 <input id="introCount" type="number" min="1" max="1000" step="1" value="1"></label><label>場所 <select id="introPlace"><option value="random">ランダム</option><option value="center">画面中央</option><option value="ocean">外洋</option><option value="bottom">海底</option></select></label><label>成長段階 <select id="introAge"><option value="adult">成体</option><option value="juvenile">幼体</option></select></label><button id="introduce">現在の島に投入</button></div><div id="introNote" class="note" role="status" aria-live="polite">1 回に 1〜1000 匹。投入後の生存・繁殖は環境による。</div></details>
   <details class="panel"><summary><b>保存・読み込み</b></summary><div class="controls"><button id="save">世界を保存（圧縮ファイル）</button><button id="load">世界を読み込む</button><input id="loadFile" type="file" accept=".json,.gz,.alife2" style="display:none"><label><input id="auto" type="checkbox">この端末に自動保存</label><button id="resume">自動保存から再開</button></div><div id="saveNote" class="note">自動保存にチェックを入れておくと、次に開いたとき（再読み込みを含む）に、最後の自動保存から自動で再開する。30 秒ごとと、タブを離れたときに保存する。保存先はこのブラウザの IndexedDB「alife2-worlds」（ALIFE 23 の保存とは別）。v2.0.16 以降の保存は、姿勢・速度・神経の状態まで含み、復元すると保存しなかった場合と同じ続きをたどる。</div></details>
-  <section class="panel note warning">ここに居るのは原始個体から変異と淘汰だけで生じた系統（origin: evolved）。複雑さ・大きさ・運動への報酬は無い。複雑さ・大きさ・運動・捕食への報酬は無い。「身体の接触と組織の摂取」を入れた世界では、口が他個体の組織を削り取れるが、捕食者という種類や本能は定義していない。島・巣・社会は ALIFE 2.0 には無い（ALIFE 23 にはある）。</section>
+  <section class="panel note warning">原始個体から自然進化した系統は origin: evolved と記録する。外来個体を投入した場合、その個体と子孫は人工個体由来として区別する。複雑さ・大きさ・運動への報酬は無い。複雑さ・大きさ・運動・捕食への報酬は無い。「身体の接触と組織の摂取」を入れた世界では、口が他個体の組織を削り取れるが、捕食者という種類や本能は定義していない。島・巣・社会は ALIFE 2.0 には無い（ALIFE 23 にはある）。</section>
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=46"></script>
-<script src="./alife2-genome.js?v=46"></script>
-<script src="./alife2-development.js?v=46"></script>
-<script src="./alife2-neural.js?v=46"></script>
-<script src="./alife2-physics.js?v=46"></script>
-<script src="./alife2-organs.js?v=46"></script>
-<script src="./alife2-engine.js?v=46"></script>
-<script src="./alife2-render.js?v=46"></script>
-<script src="./alife2-gpu.js?v=46"></script>
-<script src="./alife2-world.js?v=46"></script>
+<script src="./alife2-version.js?v=47"></script>
+<script src="./alife2-genome.js?v=47"></script>
+<script src="./alife2-development.js?v=47"></script>
+<script src="./alife2-neural.js?v=47"></script>
+<script src="./alife2-physics.js?v=47"></script>
+<script src="./alife2-organs.js?v=47"></script>
+<script src="./alife2-rules.js?v=47"></script><script src="./alife2-engine.js?v=47"></script>
+<script src="./alife2-render.js?v=47"></script>
+<script src="./alife2-gpu.js?v=47"></script>
+<script src="./alife2-world.js?v=47"></script>
 </body>
 </html>
