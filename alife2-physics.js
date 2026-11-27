@@ -55,7 +55,7 @@
         formArea: Math.abs(PI * q.r0 * q.z0 - PI * q.r1 * q.z1) + (q.leaf ? PI * q.r1 * q.z1 : 0) + (i === 0 ? PI * q.r0 * q.z0 : 0),
         tauMax: K.muscleStress * q.p.muscle * q.r0 * q.r0 * q.z0 * (q.supply == null ? 1 : q.supply),
         cil: (q.p.cilia || 0) * PI * (rm + zm) * q.len * (q.p.beat == null ? 1 : q.p.beat),
-        pad: q.leaf && q.p.grip > 0.05, ax: 0, ay: 0, bx: 0, by: 0, dx: 1, dy: 0
+        pad: q.leaf && q.p.grip > 0.05, ax: 0, ay: 0, bx: 0, by: 0, dx: 1, dy: 0, vk: 1
       };
       if (i === 0) { seg.aw = [[0, 1, 0]]; place(0, q.ax, q.ay); }
       else {
@@ -163,7 +163,7 @@
     for (let i = 1; i < segs.length; i++) { const s = segs[i], P = segs[s.parent]; s.theta = Math.atan2(P.dx * s.dy - P.dy * s.dx, P.dx * s.dx + P.dy * s.dy); }
     // water: resists sideways motion of a segment far more than sliding along it
     if (env.fluid > 0) for (const s of segs) {
-      const kn = 0.25 * env.fluid * K.cn * s.sideArea, kt = 0.25 * env.fluid * (K.cf * s.wetArea + K.cform * s.formArea), kv = K.visc * s.len * env.fluid;
+      const kn = 0.25 * env.fluid * K.cn * s.sideArea, kt = 0.25 * env.fluid * (K.cf * s.wetArea + K.cform * s.formArea), kv = K.visc * s.len * env.fluid * s.vk;
       for (let e = 0; e < 2; e++) {
         const vx = (e ? s.vbx : s.vax) - env.flowX, vy = (e ? s.vby : s.vay) - env.flowY;
         const vt = vx * s.dx + vy * s.dy, vn = -vx * s.dy + vy * s.dx;
@@ -212,7 +212,7 @@
       s.act = s.tauMax > 0 ? lam / (s.tauMax * dt2) : 0;
       b.work += (Math.abs(lam / dt2 * w) + K.hold * Math.abs(lam / dt2)) * dt;
       joint(b, s, P, s.rest, 1 / (s.kPassive * dt2), K.damping, Infinity, 0, dt);
-      joint(b, s, P, s.rest, 1 / (s.kLimit * dt2), K.damping, Infinity, s.p.range * 1.1 + 0.03, dt);
+      joint(b, s, P, s.rest, b.hard ? 0 : 1 / (s.kLimit * dt2), K.damping, Infinity, s.p.range * 1.1 + 0.03, dt); // (b.hard: the end of a joint's range is a stop, not a stiffer spring)
     }
     { const X = b.x, Y = b.y, IM = b.im;
       for (let it = 0; it < K.iters; it++) for (let q = 0; q < segs.length; q++) {
@@ -222,6 +222,7 @@
         const lam = -(l - s.len) / wsum;
         X[sb] += lam * IM[sb] * nx; Y[sb] += lam * IM[sb] * ny;
         for (let j = 0; j < aw.length; j++) { const w = aw[j], k = w[0], g = lam * IM[k]; X[k] -= g * (w[1] * nx + w[2] * ny); Y[k] -= g * (w[1] * ny - w[2] * nx); }
+        if (b.hard && q === segs.length - 1) for (let i = 1; i < segs.length; i++) { const s2 = segs[i]; joint(b, s2, segs[s2.parent], s2.rest, 0, 0, Infinity, s2.p.range * 1.1 + 0.03, dt); } // (b.hard) the stops hold while the lengths are put right
       }
     }
     for (let k = 0; k < np; k++) { b.vx[k] = (b.x[k] - b.ox[k]) / dt; b.vy[k] = (b.y[k] - b.oy[k]) / dt; }
@@ -246,7 +247,7 @@
       for (let q = 0; q < segs.length; q++) {
         const s = segs[q], dx = s.dx, dy = s.dy;
         if (fluid > 0) {
-          const kn = 0.25 * fluid * K.cn * s.sideArea, kt = 0.25 * fluid * (K.cf * s.wetArea + K.cform * s.formArea), kv = K.visc * s.len * fluid, me = 0.6 * s.mass / h;
+          const kn = 0.25 * fluid * K.cn * s.sideArea, kt = 0.25 * fluid * (K.cf * s.wetArea + K.cform * s.formArea), kv = K.visc * s.len * fluid * s.vk, me = 0.6 * s.mass / h;
           for (let e = 0; e < 2; e++) {
             const px = e ? s.bx : s.ax, py = e ? s.by : s.ay, rx = vx - om * (py - cy) - fwx, ry = vy + om * (px - cx) - fwy, vt = rx * dx + ry * dy, vn = -rx * dy + ry * dx;
             const at = kt * (vt < 0 ? -vt : vt) + kv, an = kn * (vn < 0 ? -vn : vn) + 2 * kv, ft = -(at < me ? at : me) * vt, fn = -(an < me ? an : me) * vn;
@@ -283,6 +284,44 @@
       for (let i = 0; i < b.np; i++) { b.vx[i] += jx / M - dw * (b.y[i] - cy); b.vy[i] += jy / M + dw * (b.x[i] - cx); }
     } else { b.vx[k] += jx / b.m[k]; b.vy[k] += jy / b.m[k]; }
   }
+  // (solid) A push at a place along a segment: t = 0 its near end, 1 its far end. A rigid body takes it as a whole. In a jointed one the far end's share goes
+  // to the segment's particle and the near end's share to whatever carries the near end (the same weights that fix the near end in the parent's frame).
+  function impulseAt(b, s, t, jx, jy) {
+    if (b.rigid) {
+      const M = b.mass; let cx = 0, cy = 0; for (let i = 0; i < b.np; i++) { cx += b.x[i] * b.m[i]; cy += b.y[i] * b.m[i]; } cx /= M; cy /= M;
+      const x = s.ax + (s.bx - s.ax) * t, y = s.ay + (s.by - s.ay) * t, dw = ((x - cx) * jy - (y - cy) * jx) / b.inertia; b.om += dw;
+      for (let i = 0; i < b.np; i++) { b.vx[i] += jx / M - dw * (b.y[i] - cy); b.vy[i] += jy / M + dw * (b.x[i] - cx); }
+    } else { const k = s.b, u = 1 - t; b.vx[k] += t * jx / b.m[k]; b.vy[k] += t * jy / b.m[k];
+      if (u > 0) for (const [k2, r, i] of s.aw) { b.vx[k2] += u * (r * jx + i * jy) / b.m[k2]; b.vy[k2] += u * (r * jy - i * jx) / b.m[k2]; } }
+  }
+  // (solid) Move a point of a jointed body by (dx, dy) times the share its carriers can take: returns how readily that point moves (the sum of the weights
+  // squared over the masses), and with `go` does the moving. Used to part two segments of one body that have run into each other.
+  function ease(b, s, t) { const u = 1 - t; let w = t * t * b.im[s.b]; if (u > 0) for (const [k, r, i] of s.aw) w += u * u * (r * r + i * i) * b.im[k]; return w; }
+  function shiftAt(b, s, t, lx, ly) { const u = 1 - t, k = s.b; b.x[k] += t * b.im[k] * lx; b.y[k] += t * b.im[k] * ly; if (u > 0) for (const [k2, r, i] of s.aw) { b.x[k2] += u * b.im[k2] * (r * lx + i * ly); b.y[k2] += u * b.im[k2] * (r * ly - i * lx); } }
+  // (solid) Tissue that is gone weighs nothing and catches no water: each segment's mass and the areas the water acts on follow the share of it that is left.
+  function remass(b, left) {
+    const np = b.np; b.m.fill(0);
+    for (const s of b.segs) { const h = left[s.id] == null ? 1 : left[s.id], m = Math.max(1e-5, s.mass * h); b.m[s.b] += m / 2; let tot = 0; for (const [, r, i] of s.aw) tot += Math.sqrt(r * r + i * i); for (const [k, r, i] of s.aw) b.m[k] += m / 2 * Math.sqrt(r * r + i * i) / tot;
+      if (s.area0 == null) s.area0 = [s.sideArea, s.wetArea, s.formArea]; s.sideArea = s.area0[0] * h; s.wetArea = s.area0[1] * h; s.formArea = s.area0[2] * h; }
+    b.mass = 0; for (let k = 0; k < np; k++) { b.im[k] = 1 / b.m[k]; b.mass += b.m[k]; }
+    if (b.rigid) { let cx = 0, cy = 0; for (let k = 0; k < np; k++) { cx += b.loc[2 * k] * b.m[k]; cy += b.loc[2 * k + 1] * b.m[k]; } cx /= b.mass; cy /= b.mass; b.inertia = 1e-9;
+      for (let k = 0; k < np; k++) { b.loc[2 * k] -= cx; b.loc[2 * k + 1] -= cy; b.inertia += b.m[k] * (b.loc[2 * k] ** 2 + b.loc[2 * k + 1] ** 2); } }
+  }
+  // (solid) Where two segments are nearest each other. Each is a line from its near end to its far end; (ox, oy) is added to the second (for a world that wraps).
+  // Returns the distance and sets near.s, near.t (how far along each, 0..1) and near.x, near.y (from the point on the first to the point on the second).
+  const near = { s: 0, t: 0, x: 0, y: 0 };
+  function nearest(p, q, ox, oy) {
+    const d1x = p.bx - p.ax, d1y = p.by - p.ay, d2x = q.bx - q.ax, d2y = q.by - q.ay, rx = p.ax - (q.ax + ox), ry = p.ay - (q.ay + oy);
+    const a = d1x * d1x + d1y * d1y, e = d2x * d2x + d2y * d2y, f = d2x * rx + d2y * ry; let s2, t2;
+    if (a <= 1e-12 && e <= 1e-12) { s2 = 0; t2 = 0; }
+    else if (a <= 1e-12) { s2 = 0; t2 = clamp(f / e, 0, 1); }
+    else { const c = d1x * rx + d1y * ry;
+      if (e <= 1e-12) { t2 = 0; s2 = clamp(-c / a, 0, 1); }
+      else { const bb = d1x * d2x + d1y * d2y, den = a * e - bb * bb; s2 = den > 1e-12 ? clamp((bb * f - c * e) / den, 0, 1) : 0; t2 = (bb * s2 + f) / e;
+        if (t2 < 0) { t2 = 0; s2 = clamp(-c / a, 0, 1); } else if (t2 > 1) { t2 = 1; s2 = clamp((bb - c) / a, 0, 1); } } }
+    near.s = s2; near.t = t2; near.x = (q.ax + ox + d2x * t2) - (p.ax + d1x * s2); near.y = (q.ay + oy + d2y * t2) - (p.ay + d1y * s2);
+    return Math.sqrt(near.x * near.x + near.y * near.y);
+  }
   function com(b) { let x = 0, y = 0; for (let k = 0; k < b.np; k++) { x += b.x[k] * b.m[k]; y += b.y[k] * b.m[k]; } return [x / b.mass, y / b.mass]; }
   function momentum(b) { let x = 0, y = 0, L = 0; for (let k = 0; k < b.np; k++) { x += b.vx[k] * b.m[k]; y += b.vy[k] * b.m[k]; L += b.m[k] * (b.x[k] * b.vy[k] - b.y[k] * b.vx[k]); } return [x, y, L]; }
   function finite(b) { for (let k = 0; k < b.np; k++) if (!Number.isFinite(b.x[k]) || !Number.isFinite(b.y[k])) return false; return true; }
@@ -301,6 +340,6 @@
     return { ok: finite(b), distance: dist, path, speed: dist / T, work, power: work / T, mass: b.mass, costOfTransport: dist > 1e-6 ? work / (b.mass * dist) : Infinity, maxBend, body: b };
   }
 
-  A.physics = { K, build, step, pose, com, momentum, finite, trial, environment, impulse };
+  A.physics = { K, build, step, pose, com, momentum, finite, trial, environment, impulse, impulseAt, remass, nearest, near, ease, shiftAt };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

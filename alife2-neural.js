@@ -76,8 +76,8 @@
               case 3: v = vis && s.v != null ? smell(s, 'nV', s.v, p.adapt, 0.3) : 0; break; case 4: v = con ? s.tch / (s.tch + 0.05) : 0; break;
               case 5: if (con) { const w = 5 * s.torn + 1 - (s.hp == null ? 1 : s.hp); v = w > 1 ? 1 : w; } break; case 6: v = hunger; break;
               case 7: v = i > 0 ? (s.theta - s.rest) / (p.range || 1) : 0; break; case 8: v = Math.sin(s.osc); break; case 9: v = 1; break; case 10: v = s.a; break;
-              case 11: v = j < n ? na[j] : 0; break; case 12: v = other(parentSeg, j); break;
-              case 13: if (kids.length) { for (let c2 = 0; c2 < kids.length; c2++) v += other(segs[kids[c2]], j); v /= kids.length; } break;
+              case 11: v = j < n ? na[j] : 0; break; case 12: v = nn.pos ? named(parentSeg, j) : other(parentSeg, j); break;
+              case 13: if (kids.length) { for (let c2 = 0; c2 < kids.length; c2++) v += nn.pos ? named(segs[kids[c2]], j) : other(segs[kids[c2]], j); v /= kids.length; } break;
               case 14: v = other(twin, j); break;
               case 15: v = s.ate ? s.ate / (s.ate + 0.1) : 0; break; // (learn) this segment's mouth has just swallowed something
               case 16: v = snd && s.e != null ? smell(s, 'nE', s.e, p.adapt, 0.1) : 0; break; // (sound) what this segment's ear reports
@@ -107,9 +107,13 @@
   const wiring = p => { let w = 0; for (const k of CIRCUIT) w += Math.abs(p[k] || 0); if (p.nn) for (const q of p.nn) { w += 0.5 + Math.abs(q.b); for (const e of q.in) w += Math.abs(e[1]) + (e[2] ? 0.5 * Math.abs(e[2]) : 0); for (const e of q.out) w += Math.abs(e[1]); } return w; };
   // neurons, made ready to run: sources and targets as numbers. Done once per part.
   const SRC = { c: 0, A: 1, B: 2, v: 3, t: 4, w: 5, h: 6, j: 7, o: 8, 1: 9, a: 10, s: 11, p: 12, k: 13, m: 14, g: 15, e: 16 }, EFF = { C: 0, T: 1, J: 2, M: 3, P: 4, V: 5, Q: 6 }, ready = new WeakMap();
-  function compile(nn) { let c = ready.get(nn); if (!c) { let off = 0; c = nn.map(q => { const N = { b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? +e[0][1] : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]), eta: q.in.map(e => e[2] || 0), m: q.m == null ? -1 : q.m, off }; N.plastic = N.eta.some(x => x !== 0); off += q.in.length; return N; }); c.total = off; c.learns = c.some(N => N.plastic); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); ready.set(nn, c); } return c; }
+  function compile(nn) { let c = ready.get(nn); if (!c) { let off = 0; const named = nn.some(q => q.id != null), pos = named ? new Map(nn.map((q, i) => [q.id == null ? i : q.id, i])) : null, at = e => { const id = NAME.indexOf(e[0][1]); if (e[0][0] === 'p' || e[0][0] === 'k') return id; const i = pos.get(id); return i == null ? 255 : i; }; /* (wire) neurons with names: a reference means the neuron of that name. Those to this part (s, m) are settled here; those to another segment (p, k) when read; a name nobody has reads 0 */
+    c = nn.map(q => { const N = { b: q.b, k: q.k, src: q.in.map(e => SRC[e[0][0]]), idx: q.in.map(e => (e[0].length > 1 ? (named ? at(e) : +e[0][1]) : 0)), w: q.in.map(e => e[1]), eff: q.out.map(e => EFF[e[0]]), ew: q.out.map(e => e[1]), eta: q.in.map(e => e[2] || 0), m: q.m == null ? -1 : q.m, off }; N.plastic = N.eta.some(x => x !== 0); off += q.in.length; return N; }); c.total = off; c.pos = pos; c.learns = c.some(N => N.plastic); c.sees = nn.some(q => q.in.some(e => e[0] === 'v')); ready.set(nn, c); } return c; }
   const pre = new Float64Array(8); // (the inputs of the neuron being worked on)
   const other = (seg, i) => (seg && seg.na && i < seg.na.length ? seg.na[i] : 0);
+  const NAME = '0123456789abcdefghijklmnopqrstuvwxyz';
+  // (wire) the neuron called `id` in another segment: found by its name in that segment's own part (or by its place, if that part's neurons have no names)
+  const named = (seg, id) => { if (!seg || !seg.na || !seg.p.nn) return 0; const c = compile(seg.p.nn), i = c.pos ? c.pos.get(id) : id; return i != null && i < seg.na.length ? seg.na[i] : 0; };
 
   A.neural = { cpg, command, local, wiring, CIRCUIT, compile };
   if (typeof module !== 'undefined') module.exports = A;

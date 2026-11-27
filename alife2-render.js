@@ -34,7 +34,7 @@
     layout(segs, view, q) {
       const w = Math.max(8, Math.round(view.w * q)), h = Math.max(8, Math.round(view.h * q)), sc = view.scale * q;
       // a segment that has lost tissue (hp < 1) is drawn thinner and flatter. The physics keeps its outline; this only shows the loss
-      const ps = segs.map(s => { const hp = s.hp == null ? 1 : s.hp, kr = 0.55 + 0.45 * hp, kz = 0.3 + 0.7 * hp; return {
+      const ps = segs.map(s => { const hp = s.hp == null ? 1 : s.hp, kr = s.gone ? 0 : 0.55 + 0.45 * hp, kz = s.gone ? 0 : 0.3 + 0.7 * hp; /* (a segment that has been cut off is not there) */ return {
         ax: (s.ax - view.cx) * sc + w / 2, ay: (s.ay - view.cy) * sc + h / 2, bx: (s.bx - view.cx) * sc + w / 2, by: (s.by - view.cy) * sc + h / 2,
         r0: Math.max(0.35, s.r0 * sc * kr), r1: Math.max(0.35, s.r1 * sc * kr), z0: Math.max(0.35, s.z0 * sc * kz), z1: Math.max(0.35, s.z1 * sc * kz), armor: s.p.armor, skin: s.p.skin, group: s.group,
         gut: s.p.gut, muscle: s.parent >= 0 ? s.p.muscle : 0, nerve: s.p.nerve, gonad: s.p.gonad, store: s.p.store, act: s.act || 0,

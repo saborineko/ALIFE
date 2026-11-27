@@ -204,34 +204,45 @@
   // and two more targets there: V how loudly the segment's voice sounds, Q how far its pitch is pushed up or down.
   const NN_POOL = [NN_SENSE, NN_SENSE.concat('g'), NN_SENSE.concat('e'), NN_SENSE.concat('g', 'e')], NN_SENSE_L = NN_POOL[3], NN_EFF_S = NN_EFF.concat('V', 'Q');
   const nnSource = (r, L, S) => { const pool = NN_POOL[(L ? 1 : 0) + (S ? 2 : 0)]; return r() < 0.6 ? pool[r.int(pool.length)] : NN_REF[r.int(NN_REF.length)] + r.int(NN_MAX); };
-  const nnValid = c => typeof c === 'string' && (NN_SENSE_L.includes(c) || (c.length === 2 && NN_REF.includes(c[0]) && c[1] >= '0' && c[1] < String(NN_MAX)));
+  const nnValid = c => typeof c === 'string' && (NN_SENSE_L.includes(c) || (c.length === 2 && NN_REF.includes(c[0]) && ((c[1] >= '0' && c[1] <= '9') || (c[1] >= 'a' && c[1] <= 'z'))));
+  // (wire) In worlds where neurons have names, a neuron carries `id` (0..35, written 0-9 a-z) and a reference names the neuron it means, wherever that neuron stands
+  // in its part's list. Without names a reference counts places (s1 = the second neuron of this segment), and removing a neuron makes every reference to a later
+  // one read its neighbour instead. A neuron without a name is known by its place, so genomes from before the rule keep their wiring when names are given out.
+  const NAME = '0123456789abcdefghijklmnopqrstuvwxyz';
+  function nameNeurons(p) { if (!p.nn) return; const used = new Set(); p.nn.forEach(q => { if (Number.isInteger(q.id)) used.add(q.id); }); p.nn.forEach((q, i) => { if (Number.isInteger(q.id)) return; let id = used.has(i) ? 0 : i; while (used.has(id)) id++; q.id = id; used.add(id); }); }
+  function freshName(g, p, r) { const here = new Set((p.nn || []).map(q => q.id)), meant = new Set(); for (const p2 of g.parts) for (const q of p2.nn || []) for (const e of q.in) if (e[0].length === 2) meant.add(NAME.indexOf(e[0][1]));
+    for (let k = 0; k < 12; k++) { const id = r.int(36); if (!here.has(id) && !meant.has(id)) return id; } for (let id = 0; id < 36; id++) if (!here.has(id)) return id; return 0; }
   function sanitizeNN(p) {
     if (p.nn == null) return; if (!Array.isArray(p.nn)) { delete p.nn; return; }
     p.nn = p.nn.slice(0, NN_MAX).filter(q => q && typeof q === 'object').map(q => ({
       b: clamp(Number.isFinite(q.b) ? q.b : 0, -2, 2), k: clamp(Number.isFinite(q.k) ? q.k : 1, 0.02, 1),
       in: (Array.isArray(q.in) ? q.in : []).filter(e => Array.isArray(e) && nnValid(e[0]) && Number.isFinite(e[1])).slice(0, NN_IN).map(e => (Number.isFinite(e[2]) && e[2] !== 0 ? [e[0], clamp(e[1], -4, 4), clamp(e[2], -1, 1)] : [e[0], clamp(e[1], -4, 4)])), // (a third number: how fast this connection changes with use, in worlds where connections can)
       m: q.m,
-      out: (Array.isArray(q.out) ? q.out : []).filter(e => Array.isArray(e) && NN_EFF_S.includes(e[0]) && Number.isFinite(e[1])).slice(0, NN_OUT).map(e => [e[0], clamp(e[1], -2, 2)])
+      out: (Array.isArray(q.out) ? q.out : []).filter(e => Array.isArray(e) && NN_EFF_S.includes(e[0]) && Number.isFinite(e[1])).slice(0, NN_OUT).map(e => [e[0], clamp(e[1], -2, 2)]),
+      id: q.id
     }));
+    { const seen = new Set(); let named = false; for (const q of p.nn) { if (Number.isInteger(q.id) && q.id >= 0 && q.id < 36 && !seen.has(q.id)) { seen.add(q.id); named = true; } else delete q.id; } if (named) nameNeurons(p); }
     for (const q of p.nn) if (!(Number.isInteger(q.m) && q.m >= 0 && q.m < q.in.length)) delete q.m; // (which of its own inputs gates the changing of its connections; none: they change with use alone)
     if (!p.nn.length) delete p.nn;
   }
-  function mutateNN(p, r, s, L, S, t) {
+  function mutateNN(p, r, s, L, S, t, W) {
     if (t == null) t = s; // t: how often the wiring changes; s: how wide the steps are (the same number, unless the world keeps them as two genes)
     const nn = p.nn || [], EFF = S ? NN_EFF_S : NN_EFF;
+    // (wire: W = { g, all }) a new reference is made to a neuron that exists: one of this part for `s` and `m`, one of any part for `p` and `k`
+    const src = W ? () => { if (r() < 0.6) { const pool = NN_POOL[(L ? 1 : 0) + (S ? 2 : 0)]; return pool[r.int(pool.length)]; } const kind = NN_REF[r.int(NN_REF.length)], from = kind === 's' || kind === 'm' ? nn.map(q => q.id) : W.all; if (!from.length) { const pool = NN_POOL[(L ? 1 : 0) + (S ? 2 : 0)]; return pool[r.int(pool.length)]; } return kind + NAME[from[r.int(from.length)]]; } : () => nnSource(r, L, S);
     for (const q of nn) {
       if (L) { for (const e of q.in) if (r() < 0.08) { const v = clamp((e[2] || 0) + r.gauss() * 0.15 * s, -1, 1); if (v !== 0) e[2] = v; else e.length = 2; } if (r() < 0.03 * t) { if (q.m == null && q.in.length) q.m = r.int(q.in.length); else delete q.m; } }
       if (r() < 0.12) q.b += r.gauss() * 0.3 * s; if (r() < 0.12) q.k += r.gauss() * 0.07 * s;
       for (const e of q.in) if (r() < 0.12) e[1] += r.gauss() * 0.5 * s; for (const e of q.out) if (r() < 0.12) e[1] += r.gauss() * 0.3 * s;
-      if (r() < 0.05 * t && q.in.length < NN_IN) q.in.push([nnSource(r, L, S), r.gauss()]);
+      if (r() < 0.05 * t && q.in.length < NN_IN) q.in.push([src(), r.gauss()]);
       if (r() < 0.03 * t && q.in.length > 1) { const i = r.int(q.in.length); q.in.splice(i, 1); if (q.m != null) { if (q.m === i) delete q.m; else if (q.m > i) q.m--; } }
-      if (r() < 0.03 * t && q.in.length) q.in[r.int(q.in.length)][0] = nnSource(r, L, S);
+      if (r() < 0.03 * t && q.in.length) q.in[r.int(q.in.length)][0] = src();
       if (r() < 0.03 * t && q.out.length < NN_OUT) q.out.push([EFF[r.int(EFF.length)], r.gauss() * 0.5]);
       if (r() < 0.02 * t && q.out.length) q.out.splice(r.int(q.out.length), 1);
     }
     if (r() < 0.04 * t && nn.length < NN_MAX) {
       // a new neuron: half the time a copy of one that is there, with all its connections (it can then drift apart); otherwise a fresh one with a sense and an effect
-      if (nn.length && r() < 0.5) nn.push(copy(nn[r.int(nn.length)])); else nn.push({ b: 0, k: 1, in: [[nnSource(r, L, S), r.gauss()]], out: [[EFF[r.int(EFF.length)], r.gauss() * 0.5]] });
+      if (nn.length && r() < 0.5) { nn.push(copy(nn[r.int(nn.length)])); if (W) nn[nn.length - 1].id = freshName(W.g, { nn }, r); } else if (W) { const q = { b: 0, k: 1, in: [], out: [], id: freshName(W.g, { nn }, r) }; nn.push(q); q.in.push([src(), r.gauss()]); q.out.push([EFF[r.int(EFF.length)], r.gauss() * 0.5]); W.all.push(q.id); } else nn.push({ b: 0, k: 1, in: [[nnSource(r, L, S), r.gauss()]], out: [[EFF[r.int(EFF.length)], r.gauss() * 0.5]] });
     }
     if (r() < 0.02 * t && nn.length) nn.splice(r.int(nn.length), 1);
     if (nn.length) p.nn = nn; else delete p.nn;
@@ -259,7 +270,8 @@
       }
     };
     for (const p of g.parts) num(p, PART_FIELDS);
-    if (extra === true || (extra && extra.includes('n'))) for (const p of g.parts) mutateNN(p, r, s, !!(extra && extra !== true && extra.includes('l')), !!(extra && extra !== true && extra.includes('s')), t);
+    if (extra === true || (extra && extra.includes('n'))) { let W = null; if (extra && extra !== true && extra.includes('w')) { for (const p of g.parts) nameNeurons(p); W = { g, all: g.parts.flatMap(p => (p.nn || []).map(q => q.id)) }; }
+      for (const p of g.parts) mutateNN(p, r, s, !!(extra && extra !== true && extra.includes('l')), !!(extra && extra !== true && extra.includes('s')), t, W); }
     for (const l of g.links) {
       num(l, LINK_FIELDS);
       if (r() < 0.14 * t) l.repeat += r() < 0.5 ? -1 : 1;

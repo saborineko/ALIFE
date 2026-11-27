@@ -660,6 +660,102 @@ test('mutation frequency and width as two genes (mutsplit): changes of plan foll
   const c = w.census(); assert.ok(Number.isFinite(c.mutGene) && Number.isFinite(c.mutWidth));
 });
 
+test('keep: a body rebuilt for growth, moved to another island or to another map keeps what its nerves hold; growth keeps its motion; off by default', () => {
+  const G = A.genome, W = o => new A.engine.World(Object.assign({ seed: 7, founders: 0, cap: 0, sound: 1, soundWork: 1, nerve2: 1, blind: 1, learn: 1 }, o || {}));
+  assert.strictEqual(W().keep, 0);
+  const body = () => { const g = G.create({ parts: [G.part({ len: 1, r0: 0.5, r1: 0.4, cilia: 0.3, beat: 1, nerve: 0.5, mouth: 0.6, gut: 0.5, gonad: 0.3 }), G.part({ len: 0.5, r0: 0.25, r1: 0.2, nerve: 0.5, ear: 0.6, hTune: 0.36, hWide: 0.15, adapt: 1 })], links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.3, off: 0.8, angle: 1.0, scale: 1, repeat: 1 })] });
+    g.parts[0].nn = [{ b: 0, k: 1, in: [['g', 4]], out: [] }]; g.parts[1].nn = [{ b: 0.3, k: 1, in: [['e', 0, 0.8], ['p0', 0]], out: [], m: 1 }, { b: 0.2, k: 0.3, in: [['s0', 1]], out: [] }]; g.birth = 0.3; return g; };
+  // growth: bring a young body to the stage where it has its ears, give it something to remember, and let it grow once more
+  const grow = opt => { const w = W(opt), o = w.spawn(body(), 80, 30, 0.3, null); let steps = 0; for (let i = 0; i < 30 * 600 && steps < 1; i++) { const st = o.stage; o.E = o.prof.Emax * 0.95; w.step(); if (o.stage !== st && o.b.segs.some(q => q.earW)) steps++; }
+    for (let i = 0; i < 90; i++) { w.step(); o.E = o.prof.Emax * 0.5; } const ears = o.b.segs.filter(q => q.earW); for (const q of ears) { q.nw[0] = -0.8; q.na[1] = 0.33; }
+    let before = null; for (let i = 0; i < 30 * 600; i++) { const st = o.stage, snap = { nw: ears.map(q => q.nw[0]), nE: ears.map(q => q.nE), v: Math.hypot(o.b.vx[0], o.b.vy[0]), t: o.b.t }; o.E = o.prof.Emax * 0.95; w.step(); if (o.stage !== st) { before = snap; break; } }
+    const now = o.b.segs.filter(q => q.earW); return { before, nw: now.map(q => (q.nw ? q.nw[0] : null)), nE: now.map(q => q.nE), v: Math.hypot(o.b.vx[0], o.b.vy[0]), na: now.map(q => (q.na ? q.na[1] : null)) }; };
+  const lost = grow({}), carried = grow({ carry: 1 }), kept = grow({ keep: 1 });
+  assert.ok(lost.before && lost.before.nw.every(v => v < -0.3) && lost.nw.every(v => v == null), 'as first built: what was acquired is gone after growth: ' + JSON.stringify(lost.nw)); assert.ok(lost.v === 0 && lost.before.v > 0.05, 'and the body stands still: ' + lost.before.v + ' -> ' + lost.v);
+  assert.ok(carried.nw.every(v => v < -0.3) && carried.nE.every(v => v == null) && carried.v === 0, 'carry: connections stay, but what the ears had adapted to is gone and the body stands still: ' + JSON.stringify([carried.nw, carried.nE, carried.v]));
+  assert.ok(kept.nw.every((v, i) => Math.abs(v - kept.before.nw[i]) < 0.02) && kept.nE.every((v, i) => v != null && Math.abs(v - kept.before.nE[i]) < 0.5 * kept.before.nE[i] + 1e-4), 'keep: connections and what the ears had adapted to stay: ' + JSON.stringify([kept.before.nw, kept.nw, kept.before.nE, kept.nE]));
+  assert.ok(kept.v > 0.5 * kept.before.v && kept.before.v > 0.05, 'and it keeps moving: ' + kept.before.v + ' -> ' + kept.v);
+  // another island, another map
+  const mk = opt => { const w = W(Object.assign({ map: 'coast' }, opt)); const L = [0, 1, 2].map(i => w.spawn(body(), 80 + i * 6, 30, 1, null)); for (let i = 0; i < 60; i++) { w.step(); for (const o of L) o.E = o.prof.Emax * 0.5; } for (const o of L) for (const q of o.b.segs) if (q.nw) q.nw[0] = -0.8; return { w, L }; };
+  for (const keep of [0, 1]) { const a = mk({ keep }), b = W({ map: 'coast', keep }), out = a.w.emigrate(1), got = b.immigrate(out, 0)[0], nw = got.b.segs.filter(q => q.earW).map(q => (q.nw ? q.nw[0] : 0));
+    assert.ok(keep ? nw.every(v => v === -0.8) : nw.every(v => v === 0), (keep ? 'keep: it arrives with what it knew: ' : 'as first built it arrives knowing nothing: ') + JSON.stringify(nw));
+    const c = mk({ keep }), id = c.L[0].id, moved = A.engine.World.transplant(c.w, ''), o2 = moved.bodies.find(q => q.id === id), nw2 = o2.b.segs.filter(q => q.earW).map(q => (q.nw ? q.nw[0] : 0));
+    assert.ok(keep ? nw2.every(v => v === -0.8) : nw2.every(v => v === 0), 'another map, keep=' + keep + ': ' + JSON.stringify(nw2)); assert.strictEqual(moved.keep, keep); }
+  // a world with keep saves and continues exactly
+  { const w = W({ keep: 1, carry: 1 }); w.seedWith(G.primordial(5)); for (let i = 0; i < 600; i++) w.step(); const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); for (let i = 0; i < 300; i++) { w.step(); c.step(); }
+    assert.strictEqual(JSON.stringify(c.bodies.map(o => [o.cx, o.cy, o.E])), JSON.stringify(w.bodies.map(o => [o.cx, o.cy, o.E]))); }
+});
+
+test('wire: neurons with names. Removing a neuron leaves every other connection reading what it read; a new connection is made to a neuron that exists; old genomes keep their wiring', () => {
+  const G = A.genome, NAME = '0123456789abcdefghijklmnopqrstuvwxyz';
+  const designed = () => { const g = G.create({ parts: [G.part({ len: 1, r0: 0.5, r1: 0.4, cilia: 0.3, beat: -1, nerve: 0.5, mouth: 0.6, gut: 0.5 }), G.part({ len: 0.5, r0: 0.25, r1: 0.2, cilia: 0.6, beat: -1, nerve: 0.5, eye: 0.5 })], links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.3, off: 0.8, angle: 1.0, scale: 1, repeat: 1 })] }); g.parts[0].nn = [{ b: 0, k: 1, in: [['g', 4]], out: [] }];
+    g.parts[1].nn = [{ b: -2, k: 1, in: [['v', 1], ['p0', 0.5]], out: [] }, { b: 0, k: 1, in: [['s0', 3], ['m1', -2]], out: [['C', -1]] }, { b: 2, k: 1, in: [['s1', 1], ['s0', 1]], out: [['T', 0.5]] }]; return g; };
+  const who = q => (q.b < -1 ? 0 : q.b > 1 ? 2 : 1); // the three neurons are told apart by their resting levels
+  const audit = flags => { const r = G.rng(5); let moved = 0, lost = 0, fresh = 0, dead = 0, del = 0; for (let rep = 0; rep < 6000; rep++) { const g = designed(), m = G.mutate(g, r, 1, flags), a = g.parts[1].nn, b = m.parts[1].nn || []; if (b.length < a.length) del++;
+      const named = b.some(q => q.id != null), at = c => { const id = NAME.indexOf(c); return named ? b.find(q => q.id === id) || null : id < b.length ? b[id] : null; };
+      for (const q of b) { const was = a[who(q)]; for (const e of q.in) { if (e[0].length !== 2 || !(e[0][0] === 's' || e[0][0] === 'm')) continue; const old = was.in.find(x => x[0] === e[0] && x[1] === e[1]);
+        if (!old) { if (!was.in.some(x => x[0] === e[0])) { fresh++; if (!at(e[0][1])) dead++; } continue; } const t = at(e[0][1]); if (!t) lost++; else if (who(t) !== +old[0][1]) moved++; } } } return { moved, lost, fresh, dead, del }; };
+  const places = audit('vnl'), names = audit('vnlw');
+  assert.ok(places.del > 50 && names.del > 50, 'neurons are removed in both: ' + places.del + ', ' + names.del);
+  assert.ok(places.moved > 50, 'counting places: untouched connections come to read another neuron: ' + places.moved); assert.strictEqual(names.moved, 0, 'with names none does');
+  assert.ok(names.lost > 20 && places.lost === 0, 'with names a connection whose neuron is gone reads nothing: ' + names.lost);
+  assert.ok(places.dead > 0.15 * places.fresh && names.dead < 0.02 * names.fresh, 'new connections born reading nothing: ' + places.dead + '/' + places.fresh + ' counting places, ' + names.dead + '/' + names.fresh + ' with names');
+  // the same circuit runs the same before and after names are given out; and a connection finds its neuron wherever it stands in the list
+  const run = g => { const b = A.physics.build(A.development.develop(g, { stage: 1 }), { x: 0, y: 0 }); for (const q of b.segs) q.v = 0.4; let out = []; for (let i = 0; i < 40; i++) { A.neural.local(b, b.segs.map(() => 0.2), 0.3, null, null, true, false, false, false); A.physics.step(b, 1 / 30); out = b.segs.map(q => (q.na ? Array.from(q.na) : [])); } return JSON.stringify(out); };
+  const g0 = designed(), g1 = G.copy(g0); g1.parts.forEach(p => (p.nn || []).forEach((q, i) => { q.id = i; })); assert.strictEqual(run(G.copy(g1)), run(g0), 'names given by place: the same circuit');
+  const g2 = G.copy(g1), nn = g2.parts[1].nn; g2.parts[1].nn = [nn[2], nn[0], nn[1]]; const order = r => JSON.parse(r).map(a => (a.length === 3 ? [a[1], a[2], a[0]] : a)); assert.strictEqual(JSON.stringify(order(run(G.copy(g2)))), run(g0), 'the list in another order: still the same circuit');
+  // in a world: off by default; with it, genomes get names when they mutate and the world saves and continues exactly
+  assert.strictEqual(new A.engine.World({ seed: 3, founders: 0, cap: 0 }).wire, 0);
+  { const w = new A.engine.World({ seed: 5, nerve2: 1, wire: 1 }); w.seedWith(G.primordial(5)); for (let i = 0; i < 3000; i++) w.step(); const withN = w.bodies.filter(o => o.g.parts.some(p => p.nn)); assert.ok(withN.length > 0 && withN.every(o => o.g.parts.every(p => (p.nn || []).every(q => Number.isInteger(q.id)))), 'neurons that arise have names: ' + withN.length);
+    const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); for (let i = 0; i < 300; i++) { w.step(); c.step(); } assert.strictEqual(JSON.stringify(c.bodies.map(o => [o.cx, o.E])), JSON.stringify(w.bodies.map(o => [o.cx, o.E]))); }
+});
+
+test('pair: the two segments of a left-right pair appear at the same stage of growth; the grown body is the same; off by default; switched in a running world', () => {
+  const G = A.genome, g = G.create({ parts: [G.part({ len: 1, r0: 0.5, r1: 0.4, cilia: 0.3 }), G.part({ len: 0.5, r0: 0.25, r1: 0.2, eye: 0.5, cilia: 0.4 })], links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.3, off: 0.8, angle: 1.0, scale: 1, repeat: 1 })] });
+  const eyes = (st, pair) => A.development.develop(g, { stage: st, pair }).segs.filter(q => q.p.eye > 0.1).length;
+  assert.deepStrictEqual([0.3, 0.44, 0.58, 0.72, 1].map(st => eyes(st, 0)), [0, 1, 1, 2, 2], 'each in its turn: one eye for two stages');
+  assert.deepStrictEqual([0.3, 0.44, 0.58, 0.72, 1].map(st => eyes(st, 1)), [0, 2, 2, 2, 2], 'together');
+  const plain = p => JSON.stringify(p.segs.map(q => [q.len, q.r0, q.r1, q.angle, q.addr])); assert.strictEqual(plain(A.development.develop(g, { stage: 1, pair: 1 })), plain(A.development.develop(g, { stage: 1 })), 'the grown body is the same');
+  assert.strictEqual(new A.engine.World({ seed: 3, founders: 0, cap: 0 }).pair, 0);
+  const w = new A.engine.World({ seed: 3, founders: 0, cap: 0 }), o = w.spawn(g, 40, 30, 0.44, null); assert.strictEqual(o.b.segs.length, 2); w.enable({ pair: 1 }); assert.strictEqual(o.b.segs.length, 3, 'a growing body is rebuilt when the rule is switched on'); assert.ok(/左右の対/.test(w.events[w.events.length - 1].text));
+  { const w2 = new A.engine.World({ seed: 5, pair: 1 }); w2.seedWith(G.primordial(5)); for (let i = 0; i < 900; i++) w2.step(); const c = A.engine.World.restore(JSON.parse(JSON.stringify(w2.save()))); assert.strictEqual(c.pair, 1); for (let i = 0; i < 300; i++) { w2.step(); c.step(); } assert.strictEqual(JSON.stringify(c.bodies.map(q => [q.cx, q.E])), JSON.stringify(w2.bodies.map(q => [q.cx, q.E]))); }
+});
+
+test('solid: bodies meet along their whole length; a body does not pass through itself; joints stop at the end of their range; torn tissue weighs nothing; a segment torn through is cut off and becomes food; off by default', () => {
+  const G = A.genome, P = A.physics, W = o => new A.engine.World(Object.assign({ seed: 3, founders: 0, cap: 0, contact: 1, flow: 0, grainRate: 0, bottomRate: 0, jitter: 0, audit: 1 }, o || {}));
+  assert.strictEqual(W().solid, 0);
+  // a swimmer heading at the middle of a long rod
+  const rod = () => G.create({ parts: [G.part({ len: 8, r0: 0.3, r1: 0.3 })], links: [] }), swim = () => G.create({ parts: [G.part({ len: 0.8, r0: 0.3, r1: 0.3, cilia: 0.6, beat: 1 })], links: [] });
+  const cross = solid => { const w = W({ solid, noBite: 1 }), r = w.spawn(rod(), 40, 30, 1, null); w.form(r, 40, 30, Math.PI / 2); const s = w.spawn(swim(), 46, 30.4, 1, null); w.form(s, 46, 30.4, 0); let felt = false; for (let i = 0; i < 900; i++) { w.step(); r.E = r.prof.Emax; s.E = s.prof.Emax; if (r.b.segs[0].tch > 0) felt = true; } return { x: s.cx, rod: r.cx, felt }; };
+  const thru = cross(0), stop = cross(1);
+  assert.ok(thru.x < 36 && !thru.felt && Math.abs(thru.rod - 40) < 0.01, 'a disc at the far end only: the swimmer goes through the middle of the rod, which feels nothing: ' + JSON.stringify(thru));
+  assert.ok(stop.x > 38.5 && stop.felt && stop.rod < 39.8, 'solid: it is stopped, and pushes the rod along: ' + JSON.stringify(stop));
+  // a push at a point: momentum is conserved, spin changes by what the two points of action give
+  { const mk = (g, x, ang) => P.build(A.development.develop(g, { stage: 1 }), { x, y: 0, angle: ang }), limb = () => G.create({ parts: [G.part({ len: 1.2, r0: 0.4, r1: 0.35, muscle: 0.3 }), G.part({ len: 1, r0: 0.2, r1: 0.15, muscle: 0.5, amp: 0.6, range: 1.0 })], links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.5, off: 0.9, angle: 1.2, scale: 1, repeat: 1 })] });
+    const a = mk(limb(), 0, 0.3), b = mk(rod(), 3, 1.2), tot = () => { const m1 = P.momentum(a), m2 = P.momentum(b); return [m1[0] + m2[0], m1[1] + m2[1], m1[2] + m2[2]]; }; assert.ok(!a.rigid && b.rigid);
+    for (const bb of [a, b]) for (let k = 0; k < bb.np; k++) { bb.vx[k] = 0.1 * k; bb.vy[k] = -0.05 * k; } const m0 = tot(), sa = a.segs[2], sb = b.segs[0], ta = 0.37, tb = 0.62, jx = 0.013, jy = -0.021;
+    const xa = sa.ax + (sa.bx - sa.ax) * ta, ya = sa.ay + (sa.by - sa.ay) * ta, xb = sb.ax + (sb.bx - sb.ax) * tb, yb = sb.ay + (sb.by - sb.ay) * tb; P.impulseAt(a, sa, ta, jx, jy); P.impulseAt(b, sb, tb, -jx, -jy); const m1 = tot();
+    assert.ok(Math.abs(m1[0] - m0[0]) < 1e-12 && Math.abs(m1[1] - m0[1]) < 1e-12, 'momentum'); assert.ok(Math.abs((m1[2] - m0[2]) - ((xa * jy - ya * jx) - (xb * jy - yb * jx))) < 1e-9, 'spin'); }
+  // joints and self-contact, over a family of jointed bodies (the lab's samples and mutants of them)
+  { require('../alife2-bodyplan.js'); const w = W({ solid: 1, noBite: 1 }), r = G.rng(11), pool = [], wr = x => { x = (x + Math.PI) % (2 * Math.PI); if (x < 0) x += 2 * Math.PI; return x - Math.PI; };
+    for (const smp of A.bodyplan.SAMPLES) { const g = A.bodyplan.design(smp); pool.push(g); for (let i = 0; i < 12; i++) { let m = g; for (let j = 0; j < 1 + r.int(6); j++) m = G.mutate(m, r, 1.5, 'g'); pool.push(m); } }
+    const run = (g, hard) => { const plan = A.development.develop(g, { stage: 1, maxSegs: 64 }); if (plan.segs.length < 3) return null; const b = P.build(plan, { x: 0, y: 0 }); if (b.rigid) return null; b.hard = hard; const o = { b, plan }, pairs = w.selfPairs(o) || []; o.self = hard && pairs.length ? pairs : null;
+      let over = 0, pen = 0, n = 0; for (let i = 0; i < 450; i++) { P.step(b, 1 / 30); if (o.self) { for (const s of b.segs) s.tch = 0; w.selfTouch(o, 1 / 30); } if (i < 60) continue; for (let a = 1; a < b.segs.length; a++) { const s = b.segs[a], ex = Math.abs(wr(s.theta - s.rest)) - (s.p.range * 1.1 + 0.03); if (ex > over) over = ex; }
+        for (let k = 0; k < pairs.length; k += 2) { const s = b.segs[pairs[k]], q = b.segs[pairs[k + 1]], d = P.nearest(s, q, 0, 0), R = s.r0 + (s.r1 - s.r0) * P.near.s + q.r0 + (q.r1 - q.r0) * P.near.t; n++; if (d < R * 0.5) pen++; } } return { over, pen: n ? pen / n : 0, ok: P.finite(b) }; };
+    let N = 0, o0 = 0, o1 = 0, p0 = 0, p1 = 0; for (const g of pool) { const a = run(g, false); if (!a) continue; const h = run(g, true); N++; assert.ok(a.ok && h.ok, 'no body blows up'); if (a.over > 0.1) o0++; if (h.over > 0.1) o1++; p0 += a.pen; p1 += h.pen; }
+    assert.ok(N >= 30, 'jointed bodies tried: ' + N); assert.ok(o0 >= 8 && o1 <= 0.25 * o0, 'joints more than 0.1 rad past their range: ' + o0 + ' bodies as first built, ' + o1 + ' with stops'); assert.ok(p1 <= 0.5 * p0 + 1e-9, 'limbs through each other: ' + p0.toFixed(3) + ' -> ' + p1.toFixed(3)); }
+  // torn tissue; a limb cut off
+  const chain = () => G.create({ parts: [G.part({ len: 2, r0: 0.5, r1: 0.5, gut: 0.4, store: 0.4 }), G.part({ len: 1, r0: 0.25, r1: 0.2, muscle: 0.3, amp: 0.3, range: 0.8 })], links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.5, off: 0.9, angle: 1.3, scale: 1, repeat: 1 }), G.link({ from: 1, to: 1, sym: 'none', at: 1, off: 0, angle: 0.2, scale: 0.9, repeat: 2 })] });
+  for (const solid of [0, 1]) { const w = W({ solid, noBite: 1 }), o = w.spawn(chain(), 40, 30, 1, null); for (let i = 0; i < 30; i++) w.step(); assert.strictEqual(o.b.segs.length, 7);
+    const m0 = o.b.mass; o.hp = new Array(7).fill(1); o.hp[2] = 0.5; w.wound(o); assert.ok(solid ? o.b.mass < m0 - 0.02 : o.b.mass === m0, 'a half-torn segment ' + (solid ? 'is lighter' : 'weighs what it did') + ': ' + m0 + ' -> ' + o.b.mass);
+    const first = o.b.segs.findIndex((q, i) => i > 0 && q.parent === 0); o.hp[2] = 1; o.hp[first] = 0.001; w.wound(o); for (const k in w.ledger) w.ledger[k] = 0; const s1 = w.stored(), E0 = o.E, food0 = w.food.length; o.hp[first] = 0; w.wound(o);
+    const gone = o.b.segs.filter(q => q.gone).length, L = w.ledger, IN = ['rain', 'regrow', 'placed', 'mutation', 'recycled', 'arrived'], bal = IN.reduce((x, k) => x + (L[k] || 0), 0) - Object.keys(L).filter(k => !IN.includes(k)).reduce((x, k) => x + L[k], 0);
+    if (solid) { assert.strictEqual(gone, 3, 'the limb is cut off with everything beyond it'); assert.ok(w.food.length > food0 && o.E < E0, 'what was cut off becomes food, with its share of the reserve'); assert.ok(Math.abs((w.stored() - s1) - bal) < 0.01, 'and the energy is accounted for: ' + (w.stored() - s1) + ' / ' + bal);
+      for (let i = 0; i < 900; i++) { w.step(); o.E = o.prof.Emax * 0.9; } assert.ok(!o.dead && P.finite(o.b) && o.hp.filter(h => h === 0).length === 3 && o.b.segs.filter(q => q.gone).every(q => !q.circ), 'it lives on; nothing grows back: ' + JSON.stringify(o.hp));
+      const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), o2 = c.bodies[0]; assert.ok(o2.b.segs.filter(q => q.gone).length === 3 && Math.abs(o2.b.mass - o.b.mass) < 1e-9, 'saved and loaded: still cut'); for (let i = 0; i < 120; i++) { w.step(); c.step(); } assert.strictEqual(JSON.stringify([o2.cx, o2.cy, o2.E]), JSON.stringify([o.cx, o.cy, o.E]), 'and continues exactly'); }
+    else { assert.strictEqual(gone, 0); for (let i = 0; i < 900; i++) { w.step(); o.E = o.prof.Emax * 0.9; } assert.ok(!o.hp || o.hp[first] > 0.5, 'as first built the segment grows back'); } }
+});
+
 test('the sound of cilia from the work they do (soundWork): swimming by cilia becomes nearly silent, other sounds are untouched, an eater can hear itself eat; off by default; switched in a running world', () => {
   const G = A.genome, W = o => new A.engine.World(Object.assign({ seed: 5, founders: 0, cap: 0, sound: 1, nerve2: 1, blind: 1 }, o || {}));
   assert.strictEqual(W().soundWork, 0);

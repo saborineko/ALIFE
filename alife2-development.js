@@ -70,10 +70,12 @@
     }
     // geometry at full size
     const n = segs.length, total = 0.3 + 0.7 * stage;
+    const twins = new Map(); if (opt.pair) { const at = new Map(segs.map(s => [s.addr, s.id])); for (const s of segs) { const m = s.addr && s.addr.match(/^(.*>[^>.]+\.)([01])((?:\/\d+)?)$/); if (m) { const t = at.get(m[1] + (m[2] === '0' ? '1' : '0') + m[3]); if (t != null) twins.set(s.addr, t); } } }
     for (const s of segs) {
       const p = parts[s.part], cl = s.chainLi, l = cl >= 0 ? g.links[cl] : null;
       s.p = p;
       s.birth = n > 1 ? 0.62 * s.id / (n - 1) : 0;
+      if (opt.pair && s.addr) { const t = twins.get(s.addr); if (t != null && t < s.id) s.birth = segs[t].birth; } // (pair) the two of a left-right pair appear together, at the stage the first of them would
       s.g = stage >= 1 ? 1 : smooth((stage - s.birth) / 0.3 + 0.12);
       s.chainKid = s.kids.find(k => segs[k].chain);
       const jr = x => p.r0 * s.chainBase * (l ? chainScale(l, x, s.R) : 1);

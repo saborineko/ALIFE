@@ -33,6 +33,10 @@
     voice: 6,       // a voice: per unit volume of sound-making tissue per tick at full strength
     ear: 6          // an ear's reading: loudness times this, times its hearing tissue
   };
+  const MOUTH = { ax: 0, ay: 0, bx: 0, by: 0 }; // (solid) a mouth as a point, for finding the nearest place on another body's segment
+  // (keep) what a segment's nerves hold from one moment to the next: its signal and what it does to cilia, joint and mouth; its rhythm; what each sense reads and has
+  // adapted to (taste A and B, sight, hearing — for the single signal and for neurons); the trace of a swallow; what drives its voice
+  const MIND = ['a', 'm', 'cd', 'ct', 'mo', 'osc', 'dir', 'mA', 'mB', 'mV', 'v', 'nA', 'nB', 'nV', 'mE', 'nE', 'ate', 'nj', 'np', 'vo', 'vq'];
   // the pitch of a sound a body cannot help making follows the size of what makes it: small things sound high
   const pitchOfR = r => clamp(0.5 - Math.log2(Math.max(r, 1e-3) / 0.25) / 5, 0, 1);
   const b64 = f => { const u = new Uint8Array(f.buffer, f.byteOffset, f.byteLength); if (typeof Buffer !== 'undefined') return Buffer.from(u).toString('base64'); let t = ''; for (let i = 0; i < u.length; i += 8192) t += String.fromCharCode.apply(null, u.subarray(i, i + 8192)); return btoa(t); };
@@ -76,11 +80,27 @@
                                           // 0 = the earlier rule: the young is born at the stage and size its own genes describe, whatever the parent paid
     carry: 0,                             // 1 = when a body is rebuilt for growth, each segment keeps its nerve signal, what its senses had adapted to, and the body keeps its rhythm
                                           // (a segment is known by its address). 0 = the earlier rule: these start from nothing at every growth step
+    wire: 0,                              // 1 = neurons have names. A connection between neurons names the neuron it means, so removing or adding a neuron leaves every other
+                                          //     connection where it was (a connection to a neuron that is gone reads nothing), and a new connection is made to a neuron that exists.
+                                          //     0 = connections count places in the part's list: removing a neuron makes the connections to later ones read their neighbours instead,
+                                          //     and three in four of new connections to a neuron of the same segment point at no neuron.
+    keep: 0,                              // 1 = a body keeps what its nerves hold through everything that rebuilds or moves it. When it is rebuilt for growth, every segment that was
+                                          //     there before keeps its nerve signal, the activity of its neurons, the connections it has acquired, what each sense had adapted to
+                                          //     (taste, smell, sight, hearing), the state of its mouth and its rhythm — and the body keeps its motion: its speed, its spin and the
+                                          //     angles of its joints, instead of starting again at rest in the pose it was born with. The same holds when it moves to another island
+                                          //     and when the population is moved to another map (there it lands at rest, but with its mind). Includes all of `carry`.
     audit: 0,                             // 1 = keep a ledger of all energy entering, leaving and changing form (counting only: nothing behaves differently)
     genome2: 0,                           // 1 = the newer gene rules: a stretch of an axis can split into two parts without changing the body (and then mutate apart);
                                           // parts nothing leads to are dormant, can be linked in again, and decay slowly; only parts in use count against the limit; genes carry identities
     contact: 0,                           // 1 = bodies cannot pass through one another, and a mouth tears tissue from whatever body it touches. What is torn is lost to its owner:
                                           // that segment's muscle, gut, eye, cilia... work that much less. Nothing here knows hunter from hunted, kin from stranger
+    pair: 0,                              // 1 = the two segments of a left-right pair appear at the same stage of growth. 0 = each segment appears in its turn, so a growing body has
+                                          //     one of a pair before the other: one eye, one ear, cilia on one side (a quarter to a half of the stages a paired body grows through).
+    solid: 0,                             // 1 = (where bodies touch) a body is a solid thing along its whole length. Each segment is a rod with rounded sides from its near end to
+                                          //     its far end, not just a disc at its far end: two bodies meet wherever their segments come together, a mouth can reach the side of a
+                                          //     segment, and a body cannot pass through itself (segments that do not overlap as the body is built push each other apart). The end of a
+                                          //     joint's range is a stop. Tissue that has been torn away weighs nothing and catches no water. A segment torn through is cut off with
+                                          //     everything beyond it: what is cut off becomes food where it is, and does not grow back.
     adhere: 0,                            // 1 (needs contact) = two more things happen where bodies touch. A pad pressed against another body grips it: it drags on it and
                                           // holds it close. And reserve seeps between touching bodies through bare surface, from the fuller to the emptier (skin and armour block it).
                                           // Nothing says what this is for: clinging, sharing, feeding young, stealing are all the same two rules
@@ -177,7 +197,7 @@
       if (this.noCilia) for (const p of g.parts) p.cilia = 0;
       const o = { id: this.nextId++, g, stage, taxDot: 0, taxLen: 0, taxN: 0, sx: x, sy: y, age: 0, G: 0, egg: 0, grow: 0, dead: false, noise: 0, wander: this.rand() * TAU, path: 0, eaten: 0, absorbed: 0, kids: 0,
         parent: parent ? parent.id : 0, line: parent ? parent.line : this.nextId - 1, gen: parent ? parent.gen + 1 : 0, born: this.t };
-      const C = A.organs.C, baby = A.organs.profile(A.development.develop(g, { stage: g.birth, maxSegs: this.maxSegs }));
+      const C = A.organs.C, baby = A.organs.profile(A.development.develop(g, { stage: g.birth, maxSegs: this.maxSegs, pair: this.pair }));
       { const plan = A.development.develop(g, { maxSegs: this.maxSegs }); o.full = A.organs.profile(plan); o.gu = this.geneUse(g, plan); } o.life = o.full.life * (0.85 + 0.3 * this.rand());
       { const y = this.yolkOf(g); o.eggCost = C.eggFixed + baby.buildCost + y * baby.Emax; o.eggE = y * baby.Emax; }
       this.form(o, x, y, this.rand() * TAU);
@@ -201,20 +221,75 @@
     form(o, x, y, ang) {
       // wounds stay with the segments they are on while the body is rebuilt for growth (a segment is known by its address, not its number)
       const was = o.hp && o.plan ? new Map(o.plan.segs.map((s, i) => [s.addr, o.hp[i]])) : null;
-      const mind = this.carry && o.b && o.plan ? { t: o.b.t, seg: new Map(o.plan.segs.map((s, i) => { const q = o.b.segs[i]; return [s.addr, [q.a, q.m, q.mA, q.mB, q.mV, q.v, q.na ? Float64Array.from(q.na) : null, q.nA, q.nB, q.nV, q.nw ? Float64Array.from(q.nw) : null]]; })) } : null;
-      o.plan = A.development.develop(o.g, { stage: o.stage, maxSegs: this.maxSegs }); o.prof = A.organs.profile(o.plan);
-      if (was) o.hp = o.plan.segs.map(s => (was.has(s.addr) ? was.get(s.addr) : 1));
+      const kept = this.keep && o.b && o.plan ? this.mindOf(o, true) : null;
+      const mind = !kept && this.carry && o.b && o.plan ? { t: o.b.t, seg: new Map(o.plan.segs.map((s, i) => { const q = o.b.segs[i]; return [s.addr, [q.a, q.m, q.mA, q.mB, q.mV, q.v, q.na ? Float64Array.from(q.na) : null, q.nA, q.nB, q.nV, q.nw ? Float64Array.from(q.nw) : null]]; })) } : null;
+      o.plan = A.development.develop(o.g, { stage: o.stage, maxSegs: this.maxSegs, pair: this.pair }); o.prof = A.organs.profile(o.plan);
+      if (was) { o.hp = o.plan.segs.map(s => (was.has(s.addr) ? was.get(s.addr) : 1)); if (this.solid) for (let i = 1; i < o.hp.length; i++) { const pa = o.plan.segs[i].parent; if (pa > 0 && o.hp[pa] <= 0) o.hp[i] = 0; } } // (solid) nothing grows beyond a cut
       o.b = A.physics.build(o.plan, { x, y, angle: ang, env: { fluid: 1, ground: false, gravity: 4, flowX: 0, flowY: 0 } });
       // lay the body's own centre on (x, y)
       const c = A.physics.com(o.b); for (let k = 0; k < o.b.np; k++) { o.b.x[k] += x - c[0]; o.b.y[k] += y - c[1]; }
       A.physics.pose(o.b); o.cx = x; o.cy = y; o.work0 = 0;
+      if (this.solid) { o.b.hard = true; o.self = this.selfPairs(o); } // (as the body is built, before its joints are set to where they were)
+      if (kept) this.mindTo(o, kept, true);
       if (mind) { o.b.t = mind.t; o.plan.segs.forEach((s, i) => { const v = mind.seg.get(s.addr); if (!v) return; const q = o.b.segs[i]; q.a = v[0]; q.m = v[1]; if (v[2] != null) q.mA = v[2]; if (v[3] != null) q.mB = v[3]; if (v[4] != null) q.mV = v[4]; if (v[5] != null) q.v = v[5]; if (v[6] && q.p.nn && q.p.nn.length === v[6].length) { q.na = v[6]; q.nb = new Float64Array(v[6].length); } if (v[7] != null) q.nA = v[7]; if (v[8] != null) q.nB = v[8]; if (v[9] != null) q.nV = v[9]; if (v[10] && q.p.nn && A.neural.compile(q.p.nn).total === v[10].length) q.nw = v[10]; }); }
       // a body with no working joint cannot do anything but drift: move it with the water instead of simulating it
       if (!this.rigid) o.b.rigid = false; // control experiment: solve every body with the jointed solver
+      if (o.b.rigid) o.self = null;
       o.passive = !o.b.hasCilia && o.b.rigid && !this.contact && !this.sound; o.cil0 = 0; // where bodies touch, every body is simulated: even one that cannot move can be pushed
       o.cleanV = o.prof.V; o.cleanBuild = o.prof.buildCost; if (o.hp) { while (o.hp.length < o.b.segs.length) o.hp.push(1); o.hp.length = o.b.segs.length; this.wound(o); }
       if (this.sound) this.soundBody(o);
       o.cil0 = 0; o.nerve0 = 0; o.b.nerveUse = 0; if (o.sig) { for (let i = 0; i < o.b.segs.length && i < o.sig.length; i++) o.b.segs[i].a = o.sig[i]; o.sig = null; }
+    }
+    // (solid) Which pairs of a body's own segments may collide: all that are not parent and child, and that do not already overlap as the body is built —
+    // a limb that starts inside the trunk, or two limbs that leave it at the same place, must not be pushed apart.
+    selfPairs(o) {
+      const b = o.b, segs = b.segs, n = segs.length, P = A.physics, list = []; if (n < 3) return null;
+      for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) { const p = segs[i], q = segs[j]; if (q.parent === i || p.parent === j) continue;
+        const d = P.nearest(p, q, 0, 0), R = p.r0 + (p.r1 - p.r0) * P.near.s + q.r0 + (q.r1 - q.r0) * P.near.t; if (d < R * 1.1) continue; list.push(i, j); }
+      return list.length ? Int16Array.from(list) : null;
+    }
+    selfTouch(o, dt) {
+      const b = o.b, segs = b.segs, L = o.self, P = A.physics, N = P.near; let moved = false;
+      for (let k = 0; k < L.length; k += 2) { const p = segs[L[k]], q = segs[L[k + 1]]; if (p.gone || q.gone) continue;
+        const ex = q.bx - p.bx, ey = q.by - p.by, far = p.len + q.len + p.r0 + p.r1 + q.r0 + q.r1; if (ex * ex + ey * ey > far * far) continue;
+        const d = P.nearest(p, q, 0, 0), R = p.r0 + (p.r1 - p.r0) * N.s + q.r0 + (q.r1 - q.r0) * N.t; if (d >= R) continue;
+        const d0 = d || 1e-6, ma = b.m[p.b], mb = b.m[q.b], J = ma * mb / (ma + mb) * Math.min(0.2, 12 * (R - d) * dt), jx = J * N.x / d0, jy = J * N.y / d0, s1 = N.s, t1 = N.t;
+        P.impulseAt(b, p, s1, -jx, -jy); P.impulseAt(b, q, t1, jx, jy); p.tch += J / ma; q.tch += J / mb; o.selfHit = (o.selfHit || 0) + 1;
+        // and they are moved apart, each by as much as it gives way: half of the overlap now, the rest over the next moments (the joints then settle around it)
+        const wp = P.ease(b, p, s1), wq = P.ease(b, q, t1), lam = 0.5 * (R - d) / (wp + wq), nx = N.x / d0, ny = N.y / d0; P.shiftAt(b, p, s1, -lam * nx, -lam * ny); P.shiftAt(b, q, t1, lam * nx, lam * ny); moved = true; }
+      if (moved) P.pose(b);
+    }
+    // (solid) A segment torn through is cut off, with everything beyond it. What is left of the tissue beyond becomes food at the cut, with that tissue's share
+    // of the body's reserve and gut contents — the same accounting as a bite.
+    sever(o, j) {
+      const C = A.organs.C, segs = o.b.segs, hp = o.hp, lg = this.ledger, at = segs[j]; let vol = 0; const stack = segs[j].kids.slice(); segs[j].gone = true;
+      while (stack.length) { const k = stack.pop(), q = segs[k]; if (hp[k] > 0) vol += Math.PI * (q.r0 + q.r1) / 2 * (q.z0 + q.z1) / 2 * q.len * hp[k]; hp[k] = 0; q.gone = true; for (const c of q.kids) stack.push(c); }
+      this.counts.cut = (this.counts.cut || 0) + 1; if (vol <= 1e-9) return;
+      const share = Math.min(1, vol / Math.max(1e-9, o.prof.V)), eE = Math.max(0, o.E) * share, eG = o.G * share; o.E -= eE; o.G -= eG; o.lost = (o.lost || 0) + C.flesh * C.build * vol + eE + eG;
+      let e = C.flesh * C.build * vol + eE + eG; this.corpse = true;
+      while (e > 0.05) { const size = 0.25 + this.rand() * 0.25, pe = Math.min(e, this.grainEnergy * size ** 3); this.addFood(at.bx + this.rand.gauss() * 0.3, at.by + this.rand.gauss() * 0.3, size, pe, this.isGround(at.bx, at.by), this.grainLife); e -= pe; }
+      this.corpse = false; const gone = (1 - C.flesh) * C.build * vol + e; if (lg) lg.bite += gone; if (this.recycle) this.giveBack(at.bx, at.by, gone);
+    }
+    // (keep) What a body's nerves hold, segment by segment (a segment is known by its address in the body, not by its number), and — with `motion` — how the
+    // body is moving: the speed of its centre, its spin, and the angle of every joint. Plain numbers and lists, so that it can travel between islands.
+    mindOf(o, motion) {
+      const b = o.b, P = A.physics, seg = o.plan.segs.map((s, i) => { const q = b.segs[i], e = {}; for (const k of MIND) if (q[k] != null) e[k] = q[k]; if (q.na) e.na = Array.from(q.na); if (q.nw) e.nw = Array.from(q.nw); if (motion && i) e.th = Math.atan2(b.segs[q.parent].dx * q.dy - b.segs[q.parent].dy * q.dx, b.segs[q.parent].dx * q.dx + b.segs[q.parent].dy * q.dy); return [s.addr, e]; });
+      const mind = { t: b.t, seg };
+      if (motion) { const c = P.com(b), mo = P.momentum(b); let I = 0; for (let k = 0; k < b.np; k++) I += b.m[k] * ((b.x[k] - c[0]) ** 2 + (b.y[k] - c[1]) ** 2); mind.vx = mo[0] / b.mass; mind.vy = mo[1] / b.mass; mind.om = I > 1e-12 ? (mo[2] - b.mass * (c[0] * mind.vy - c[1] * mind.vx)) / I : 0; }
+      return mind;
+    }
+    mindTo(o, mind, motion) {
+      const b = o.b, P = A.physics, at = new Map(mind.seg); b.t = mind.t;
+      o.plan.segs.forEach((s, i) => { const e = at.get(s.addr); if (!e) return; const q = b.segs[i]; for (const k of MIND) if (e[k] != null) q[k] = e[k];
+        if (e.na && q.p.nn && q.p.nn.length === e.na.length) { q.na = Float64Array.from(e.na); q.nb = new Float64Array(e.na.length); }
+        if (e.nw && q.p.nn && A.neural.compile(q.p.nn).total === e.nw.length) q.nw = Float64Array.from(e.nw); });
+      if (!motion || mind.vx == null) return;
+      // the joints that were there before stand at the angle they had (a body that keeps its shape has no joint to set), then the whole body moves on as it did
+      if (!b.rigid) { const c0 = P.com(b), ang = new Float64Array(b.segs.length); ang[0] = Math.atan2(b.segs[0].dy, b.segs[0].dx);
+        for (let i = 1; i < b.segs.length; i++) { const q = b.segs[i], e = at.get(o.plan.segs[i].addr), th = e && e.th != null ? clamp(e.th, q.rest - q.p.range - 0.2, q.rest + q.p.range + 0.2) : q.rest; ang[i] = ang[q.parent] + th;
+          let ax = 0, ay = 0; for (const [k, r, im] of q.aw) { ax += r * b.x[k] - im * b.y[k]; ay += r * b.y[k] + im * b.x[k]; } b.x[q.b] = ax + q.len * Math.cos(ang[i]); b.y[q.b] = ay + q.len * Math.sin(ang[i]); }
+        const c1 = P.com(b); for (let k = 0; k < b.np; k++) { b.x[k] += c0[0] - c1[0]; b.y[k] += c0[1] - c1[1]; } P.pose(b); }
+      const c = P.com(b); for (let k = 0; k < b.np; k++) { b.vx[k] = mind.vx - mind.om * (b.y[k] - c[1]); b.vy[k] = mind.vy + mind.om * (b.x[k] - c[0]); } if (b.rigid) b.om = mind.om;
     }
     // counts for taxis only if it went somewhere by itself: at least 2 units while perceiving food, at 0.02 units/s or more over its life
     traveller(o) { return o.taxLen >= 2 && o.age > 5 && o.path / o.age >= 0.02; }
@@ -243,6 +318,10 @@
       if (o.metamut != null && !!o.metamut !== !!this.metamut) { this.metamut = o.metamut ? 1 : 0; this.log('世界の設定を変更：変異の強さが遺伝し、それ自体も変異する規則を' + (o.metamut ? '有効にした' : '無効にした')); }
       if (o.nibble != null && !!o.nibble !== !!this.nibble) { this.nibble = o.nibble ? 1 : 0; this.log('世界の設定を変更：飲み込めない粒を口が削って食べられる規則を' + (o.nibble ? '有効にした' : '無効にした')); }
       if (o.budget != null && !!o.budget !== !!this.budget) { this.budget = o.budget ? 1 : 0; this.log('世界の設定を変更：出生の収支を合わせる規則（子は卵の予算で作れる段階で生まれる）を' + (o.budget ? '有効にした' : '無効にした')); }
+      if (o.pair != null && !!o.pair !== !!this.pair) { this.pair = o.pair ? 1 : 0; for (const q of this.bodies) if (q.stage < 1) { q.nextCost = null; const root = q.b.segs[0]; this.form(q, q.cx, q.cy, Math.atan2(root.dy, root.dx)); } this.log('世界の設定を変更：左右の対が成長の同じ段階で一緒に現れる規則を' + (o.pair ? '有効にした' : '無効にした')); }
+      if (o.solid != null && !!o.solid !== !!this.solid) { this.solid = o.solid ? 1 : 0; for (const q of this.bodies) { q.b.hard = !!this.solid; q.self = this.solid && !q.b.rigid ? this.selfPairs(q) : null; if (q.hp) this.wound(q); } this.log('世界の設定を変更：身体を全長にわたって固い物体として扱う規則（側面の接触・自分自身との接触・関節の止まり・失った組織の重さ・切断）を' + (o.solid ? '有効にした' : '無効にした')); }
+      if (o.wire != null && !!o.wire !== !!this.wire) { this.wire = o.wire ? 1 : 0; this.log('世界の設定を変更：神経に名前を付け、結合が相手を名前で指す規則を' + (o.wire ? '有効にした（神経が減っても増えても、ほかの結合はずれない）' : '無効にした')); }
+      if (o.keep != null && !!o.keep !== !!this.keep) { this.keep = o.keep ? 1 : 0; this.log('世界の設定を変更：身体が作り直されても・移されても、神経の状態・身につけた結合・動きを保つ規則を' + (o.keep ? '有効にした' : '無効にした')); }
       if (o.carry != null && !!o.carry !== !!this.carry) { this.carry = o.carry ? 1 : 0; this.log('世界の設定を変更：成長の前後で神経の状態と律動を引き継ぐ規則を' + (o.carry ? '有効にした' : '無効にした')); }
       if (o.genome2 != null && !!o.genome2 !== !!this.genome2) { this.genome2 = o.genome2 ? 1 : 0; this.log('世界の設定を変更：遺伝子の新しい規則（軸の分割・休眠遺伝子・識別子）を' + (o.genome2 ? '有効にした' : '無効にした')); }
       for (const k of ['vision', 'scent', 'blind']) { if (o[k] == null || !!o[k] === !!this[k]) continue; this[k] = o[k] ? 1 : 0; this.log('世界の設定を変更：' + names[k] + (o[k] ? 'を有効にした' : 'を無効にした')); }
@@ -483,7 +562,7 @@
     waveCols() { const f = this.wcol || (this.wcol = new Float64Array(this.cols)); for (let x = 0; x < this.cols; x++) f[x] = this.waveAt((x + 0.5) * this.cell); return f; }
     yolkOf(g) { return this.invest && g.yolk != null ? g.yolk : A.organs.C.eggReserve; }
     afford(g, B, rf) { // rf: the share of reserve the mother meant the egg to have, where that is hers to set (never counted above the usual share)
-      const C = A.organs.C, re = rf == null ? C.eggReserve : Math.min(rf, C.eggReserve), cost = s => { const p = A.organs.profile(A.development.develop(g, { stage: s, maxSegs: this.maxSegs })); return [p.buildCost + re * p.Emax, p.buildCost]; };
+      const C = A.organs.C, re = rf == null ? C.eggReserve : Math.min(rf, C.eggReserve), cost = s => { const p = A.organs.profile(A.development.develop(g, { stage: s, maxSegs: this.maxSegs, pair: this.pair })); return [p.buildCost + re * p.Emax, p.buildCost]; };
       if (cost(g.birth)[0] <= B + 1e-9) return g.birth;
       const bud = 0.05, c = cost(bud); if (c[1] > B) return null; if (c[0] > B) return bud;
       let lo = bud, hi = g.birth; for (let i = 0; i < 8; i++) { const mid = (lo + hi) / 2; if (cost(mid)[0] <= B) lo = mid; else hi = mid; }
@@ -529,7 +608,7 @@
     // (equal and opposite, so nothing is gained). A mouth that reaches another body's segment tears tissue from it.
     touch(dt) {
       const bg = this.bgrid, cell = this.cell, W = this.W, half = W / 2; let maxExt = 0; const hurt = [];
-      for (const o of this.bodies) { let e = 0; for (const s of o.b.segs) { s.tch = 0; s.torn = 0; let dx = s.bx - o.cx; dx -= W * Math.round(dx / W); const d = Math.sqrt(dx * dx + (s.by - o.cy) * (s.by - o.cy)) + s.r1; if (d > e) e = d; } o.ext = e; if (e > maxExt) maxExt = e; }
+      for (const o of this.bodies) { let e = 0; for (const s of o.b.segs) { s.tch = 0; s.torn = 0; let dx = s.bx - o.cx; dx -= W * Math.round(dx / W); const d = Math.sqrt(dx * dx + (s.by - o.cy) * (s.by - o.cy)) + s.r1; if (d > e) e = d; if (this.solid && s.id === 0) { let ax = s.ax - o.cx; ax -= W * Math.round(ax / W); const d0 = Math.sqrt(ax * ax + (s.ay - o.cy) * (s.ay - o.cy)) + s.r0; if (d0 > e) e = d0; } } o.ext = e; if (e > maxExt) maxExt = e; }
       for (const a of this.bodies) {
         const R = a.ext + maxExt, c0 = Math.floor((a.cx - R) / cell), c1 = Math.floor((a.cx + R) / cell), r0 = Math.max(0, Math.floor((a.cy - R) / cell)), r1 = Math.min(this.rows - 1, Math.floor((a.cy + R) / cell));
         if (c1 - c0 >= this.cols) continue; // (a body as wide as the world: not handled)
@@ -539,24 +618,29 @@
           if (dx * dx + dy * dy < reach * reach) this.meet(a, b, dt, hurt);
         }
       }
+      if (this.solid) for (const o of this.bodies) if (o.self && !o.dead) this.selfTouch(o, dt); // a body cannot pass through itself
       for (const o of hurt) if (!o.dead) this.wound(o);
     }
     meet(a, b, dt, hurt) {
-      const P = A.physics, W = this.W, half = W / 2, A2 = a.b, B2 = b.b, sa = A2.segs, sb = B2.segs, near = this.adhere ? 0.15 : 0, mix = this.mix; let touch = 0, bare = false;
+      const P = A.physics, W = this.W, half = W / 2, A2 = a.b, B2 = b.b, sa = A2.segs, sb = B2.segs, near = this.adhere ? 0.15 : 0, mix = this.mix, S = this.solid, N = P.near; let touch = 0, bare = false;
       for (let i = 0; i < sa.length; i++) { const p = sa[i]; for (let j = 0; j < sb.length; j++) { const q = sb[j];
-        let dx = q.bx - p.bx; if (dx > half) dx -= W; else if (dx < -half) dx += W; const dy = q.by - p.by, R = p.r1 + q.r1, d2 = dx * dx + dy * dy; if (d2 >= (R + near) * (R + near)) continue;
+        let dx, dy, R, d2, ts = 1, tt = 1; // (ts, tt: how far along each segment they touch; 1 = the far end)
+        if (S) { if (p.gone || q.gone) continue; const ex = q.bx - p.bx, sh = ex > half ? -W : ex < -half ? W : 0, ey = q.by - p.by, far = p.len + q.len + p.r0 + p.r1 + q.r0 + q.r1 + near; if ((ex + sh) * (ex + sh) + ey * ey > far * far) continue;
+          const dn = P.nearest(p, q, sh, 0); ts = N.s; tt = N.t; dx = N.x; dy = N.y; d2 = dn * dn; R = p.r0 + (p.r1 - p.r0) * ts + q.r0 + (q.r1 - q.r0) * tt; }
+        else { dx = q.bx - p.bx; if (dx > half) dx -= W; else if (dx < -half) dx += W; dy = q.by - p.by; R = p.r1 + q.r1; d2 = dx * dx + dy * dy; }
+        if (d2 >= (R + near) * (R + near)) continue;
         if (near) { // (adhere) surfaces within reach of each other
           const d0 = Math.sqrt(d2) || 1e-6, gap = d0 > R ? d0 - R : 0, close = 1 - gap / near, ma = A2.rigid ? A2.mass : A2.m[p.b], mb = B2.rigid ? B2.mass : B2.m[q.b], mr = ma * mb / (ma + mb);
           const hold = (p.pad ? p.p.grip * p.press : 0) + (q.pad ? q.p.grip * q.press : 0); // a pressed pad on either side
           if (hold > 0) { const k = Math.min(0.5, 6 * hold * dt) * close, rvx = B2.vx[q.b] - A2.vx[p.b], rvy = B2.vy[q.b] - A2.vy[p.b], pull = Math.min(0.1, 8 * gap * hold * dt), jx = mr * (k * rvx + pull * dx / d0), jy = mr * (k * rvy + pull * dy / d0); // drag towards the other's speed, and a pull across the gap
-            P.impulse(A2, p.b, jx, jy); P.impulse(B2, q.b, -jx, -jy); a.held = b.held = this.tick; }
+            if (S) { P.impulseAt(A2, p, ts, jx, jy); P.impulseAt(B2, q, tt, -jx, -jy); } else { P.impulse(A2, p.b, jx, jy); P.impulse(B2, q.b, -jx, -jy); } a.held = b.held = this.tick; }
           const c = Math.max(0, 1 - p.p.skin - p.p.armor) * Math.max(0, 1 - q.p.skin - q.p.armor) * close; if (c > touch) touch = c;
           if (d0 >= R) continue;
         }
         const d = Math.sqrt(d2) || 1e-6, ma = A2.rigid ? A2.mass : A2.m[p.b], mb = B2.rigid ? B2.mass : B2.m[q.b], J = ma * mb / (ma + mb) * Math.min(0.2, 12 * (R - d) * dt), jx = J * dx / d, jy = J * dy / d;
         if (mix && !bare && p.p.skin + p.p.armor < 1 && q.p.skin + q.p.armor < 1) bare = true;
-        P.impulse(A2, p.b, -jx, -jy); P.impulse(B2, q.b, jx, jy); p.tch += J / ma; q.tch += J / mb; // each feels the change of speed the push gives it
-        if (this.sound) this.emit(p.bx + dx * 0.5, p.by + dy * 0.5, pitchOfR(Math.min(p.r1, q.r1)), SND.hit * J * J * (ma + mb) / (ma * mb), 'hit');
+        if (S) { P.impulseAt(A2, p, ts, -jx, -jy); P.impulseAt(B2, q, tt, jx, jy); } else { P.impulse(A2, p.b, -jx, -jy); P.impulse(B2, q.b, jx, jy); } p.tch += J / ma; q.tch += J / mb; // each feels the change of speed the push gives it
+        if (this.sound) this.emit((S ? p.ax + (p.bx - p.ax) * ts : p.bx) + dx * 0.5, (S ? p.ay + (p.by - p.ay) * ts : p.by) + dy * 0.5, pitchOfR(Math.min(p.r1, q.r1)), SND.hit * J * J * (ma + mb) / (ma * mb), 'hit');
       } }
       if (bare) { if (!a.got || a.got.id !== b.id) a.got = { id: b.id, g: b.g }; if (!b.got || b.got.id !== a.id) b.got = { id: a.id, g: a.g }; } // (mix) each now carries the other's genetic material, in place of any it had
       if (touch > 0 && !this.noSeep) { // reserve seeps towards the emptier body, never past the point where they are equally full, never more than the receiver can hold
@@ -567,7 +651,9 @@
       if (this.noBite) return;
       for (let k = 0; k < 2; k++) { const e = k ? b : a, v = k ? a : b; // each one's mouths on the other
         for (const m of e.prof.mouths) { const s = e.b.segs[m.seg], gape = m.gape * (s.mo == null ? 1 : s.mo); if (gape <= 0) continue; let best = -1, bd = Infinity; // (a mouth held shut takes nothing)
-          for (let j = 0; j < v.b.segs.length; j++) { const q = v.b.segs[j]; if (v.hp && v.hp[j] <= 0) continue; let dx = q.bx - s.bx; if (dx > half) dx -= W; else if (dx < -half) dx += W; const d = Math.sqrt(dx * dx + (q.by - s.by) * (q.by - s.by)) - q.r1; if (d < gape && d < bd) { bd = d; best = j; } }
+          for (let j = 0; j < v.b.segs.length; j++) { const q = v.b.segs[j]; if (v.hp && v.hp[j] <= 0) continue; let dx = q.bx - s.bx; if (dx > half) dx -= W; else if (dx < -half) dx += W;
+            let d; if (S) { MOUTH.ax = MOUTH.bx = s.bx; MOUTH.ay = MOUTH.by = s.by; const sh = q.bx - s.bx > half ? -W : q.bx - s.bx < -half ? W : 0; d = P.nearest(MOUTH, q, sh, 0) - (q.r0 + (q.r1 - q.r0) * N.t); } else d = Math.sqrt(dx * dx + (q.by - s.by) * (q.by - s.by)) - q.r1;
+            if (d < gape && d < bd) { bd = d; best = j; } }
           if (best >= 0 && this.bite(e, m, s, v, best, dt, gape) && hurt.indexOf(v) < 0) hurt.push(v);
         } }
     }
@@ -591,8 +677,10 @@
     // organ profile; muscle torque, cilia and pads in the physics. It dies of its wounds when the root segment or most of the body is gone.
     wound(o) {
       const hp = o.hp, segs = o.b.segs; if (!hp) return;
+      if (this.solid) for (let i = 1; i < segs.length; i++) if (hp[i] <= 0 && !segs[i].gone) this.sever(o, i);
       for (let i = 0; i < segs.length; i++) { const h = hp[i], s = segs[i]; o.plan.segs[i].hp = h; if (s.base == null) s.base = [s.tauMax, s.cil, s.padCap || 0]; s.tauMax = s.base[0] * h; s.cil = s.base[1] * h; s.padCap = s.base[2] * h; s.hp = h; }
       o.prof = A.organs.profile(o.plan); if (this.sound) this.soundBody(o);
+      if (this.solid) { A.physics.remass(o.b, hp); for (let i = 1; i < segs.length; i++) { const s = segs[i]; if (s.gone) { s.circ = false; s.a = 0; if (s.na) s.na.fill(0); s.vk = 0; } } } // (what is gone weighs nothing, catches no water and carries no signal)
       if (hp[0] < 0.05 || o.prof.V < 0.3 * o.cleanV) o.dead = 'killed';
     }
     // Sight. Each segment with eye tissue and a wire from it looks along its own direction (turned by `gaze`), over a cone
@@ -830,13 +918,13 @@
         if (o.E <= 0) { o.dead = 'starved'; continue; }
         if (o.age > o.life) { o.dead = 'aged'; continue; }
         if (o.hp && o.E > C.growReserve * pr.Emax) { // mending: lost tissue is rebuilt at the price of building it, most damaged segment first
-          let worst = -1; for (let i = 0; i < o.hp.length; i++) if (o.hp[i] < 1 && (worst < 0 || o.hp[i] < o.hp[worst])) worst = i;
-          if (worst < 0) o.hp = null;
+          let worst = -1; for (let i = 0; i < o.hp.length; i++) if (o.hp[i] < 1 && !b.segs[i].gone && (worst < 0 || o.hp[i] < o.hp[worst])) worst = i;
+          if (worst < 0) { if (!o.hp.some(h => h <= 0)) o.hp = null; }
           else { const q = b.segs[worst], vol = Math.PI * (q.r0 + q.r1) / 2 * (q.z0 + q.z1) / 2 * q.len, dv = Math.min(Math.min(o.E - C.growReserve * pr.Emax, pr.basal * 3 * dt + 0.01 * dt) / C.build, vol * (1 - o.hp[worst])); o.E -= dv * C.build; o.hp[worst] = Math.min(1, o.hp[worst] + dv / vol); this.wound(o); pr = o.prof; }
         }
         if (o.stage < 1) { // growth: surplus is set aside until it pays for the next piece of body
           if (o.E > C.growReserve * pr.Emax) { const put = Math.min(o.E - C.growReserve * pr.Emax, pr.basal * 6 * dt + 0.02 * dt); o.E -= put; o.grow += put; }
-          if (o.nextCost == null) { o.nextStage = Math.min(1, o.stage + 0.14); o.nextCost = A.organs.profile(A.development.develop(o.g, { stage: o.nextStage, maxSegs: this.maxSegs })).buildCost - o.cleanBuild; }
+          if (o.nextCost == null) { o.nextStage = Math.min(1, o.stage + 0.14); o.nextCost = A.organs.profile(A.development.develop(o.g, { stage: o.nextStage, maxSegs: this.maxSegs, pair: this.pair })).buildCost - o.cleanBuild; }
           if (o.grow >= o.nextCost) { const paid = o.nextCost, had = pr.buildCost; o.grow -= o.nextCost; o.stage = o.nextStage; o.nextCost = null; const root = b.segs[0]; this.form(o, o.cx, o.cy, Math.atan2(root.dy, root.dx)); if (lg) lg.growth += paid - (o.prof.buildCost - had); }
         } else if (pr.gonadRate > 0 && o.E > C.reproReserve * pr.Emax) {
           const put = Math.max(0, Math.min(pr.gonadRate * dt, o.E - C.reproReserve * pr.Emax, o.eggCost - o.egg)); o.E -= put; o.egg += put;
@@ -849,7 +937,7 @@
       for (const o of born) {
         const split = this.mutsplit, mm = this.metamut || split ? (o.g.mut == null ? 1 : o.g.mut) : 1, mw = split ? (o.g.mutW == null ? mm : o.g.mutW) : 1; // (a lineage that comes from the one-gene rule starts with the width it had)
         let src = o.g, two = 0; if (this.mix && o.got) { src = A.genome.recombine(o.g, o.got.g, this.rand, this.sound); two = o.got.id; o.got = null; } // an egg made from two genomes; the material taken up is used
-        const g = this.rand() < this.mutation * mm ? A.genome.mutate(src, this.rand, split ? mw : this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut && !split ? 'm' : '') + (this.contact ? 'c' : '') + (this.nerve2 ? 'n' : '') + (this.invest ? 'i' : '') + (this.learn ? 'l' : '') + (this.sound ? 's' : ''), split ? 1 : undefined) : two ? src : A.genome.copy(o.g);
+        const g = this.rand() < this.mutation * mm ? A.genome.mutate(src, this.rand, split ? mw : this.metamut ? mm : undefined, (this.scent ? 'x' : '') + (this.vision ? 'v' : '') + (this.genome2 ? 'g' : '') + (this.metamut && !split ? 'm' : '') + (this.contact ? 'c' : '') + (this.nerve2 ? 'n' : '') + (this.invest ? 'i' : '') + (this.learn ? 'l' : '') + (this.sound ? 's' : '') + (this.wire ? 'w' : ''), split ? 1 : undefined) : two ? src : A.genome.copy(o.g);
         if (split) { if (this.rand() < this.mutation) g.mut = clamp(mm * Math.exp(this.rand.gauss() * 0.15), 0.1, 3); if (this.rand() < this.mutation) g.mutW = clamp(mw * Math.exp(this.rand.gauss() * 0.15), 0.1, 3); } // the two genes drift whether or not this birth mutates
         // born in a world under selection: 'evolved' only if the whole ancestry is; a line started from a designed or explored genome stays marked
         g.origin = o.g.origin === 'primordial' || o.g.origin === 'evolved' ? 'evolved' : 'evolved-from-artificial';
@@ -919,7 +1007,7 @@
       const nodes = new Map(d.tree.map(n => [n.id, n]));
       for (const s of d.bodies) {
         const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade, sig: s.sig || null, home: s.home || 0, taxDot: 0, taxLen: 0, taxN: 0, V0: s.v0, stage0: s.s0, seepIn: s.si || 0, seepOut: s.so || 0, held: s.hd == null ? undefined : s.hd, p2: s.p2 || 0, got: s.got ? { id: s.got[0], g: s.got[1] } : null, voOn: s.vo ? !!s.vo[0] : false, voN: s.vo ? s.vo[1] : 0, voT: s.vo ? s.vo[2] : 0, voE: s.vo ? s.vo[3] : 0, hp: s.hp || null, flesh: s.flesh || 0, lost: s.lost || 0 };
-        const baby = A.organs.profile(A.development.develop(o.g, { stage: o.g.birth, maxSegs: w.maxSegs })), C = A.organs.C;
+        const baby = A.organs.profile(A.development.develop(o.g, { stage: o.g.birth, maxSegs: w.maxSegs, pair: w.pair })), C = A.organs.C;
         { const plan = A.development.develop(o.g, { maxSegs: w.maxSegs }); o.full = A.organs.profile(plan); o.gu = w.geneUse(o.g, plan); } o.life = s.life; { const y = w.yolkOf(o.g); o.eggCost = C.eggFixed + baby.buildCost + y * baby.Emax; o.eggE = y * baby.Emax; }
         w.form(o, s.x, s.y, s.angle); o.E = s.E;
         const st = s.st;
@@ -948,7 +1036,7 @@
         const node = this.tree.get(o.id); if (node) { node.died = this.t; node.cause = 'left'; node.life = { eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, stage: o.stage }; }
         if (lg) lg.left = (lg.left || 0) + o.E + o.G + o.grow + o.egg + o.prof.buildCost;
         out.push({ g: A.genome.copy(o.g), stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, life: o.life, gen: o.gen, x: o.cx / this.W, y: o.cy / this.H, hp: o.hp ? Array.from(o.hp) : null, flesh: o.flesh || 0, lost: o.lost || 0,
-          eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, v0: o.V0, s0: o.stage0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage, from: { id: o.id, line: o.line, t: this.t } });
+          eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, v0: o.V0, s0: o.stage0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage, mind: this.keep ? this.mindOf(o, false) : undefined, from: { id: o.id, line: o.line, t: this.t } });
       }
       return out;
     }
@@ -959,6 +1047,7 @@
         if (lg) lg.placed -= o.E + o.prof.buildCost; // (spawn booked it as a founder; it is booked below as an arrival, with what it really carries)
         if (s.hp && s.hp.length === o.b.segs.length && s.hp.some(h => h < 1)) { o.hp = Array.from(s.hp); this.wound(o); }
         Object.assign(o, { age: s.age, life: s.life, gen: s.gen, E: s.E, G: s.G, egg: s.egg, grow: s.grow, eaten: s.eaten, absorbed: s.absorbed, path: s.path, kids: s.kids, flesh: s.flesh || 0, lost: s.lost || 0, V0: s.v0, stage0: s.s0, nextCost: s.nextCost == null ? undefined : s.nextCost, nextStage: s.nextStage == null ? undefined : s.nextStage });
+        if (this.keep && s.mind) this.mindTo(o, s.mind, false); // (it arrives with what it knew)
         const node = this.tree.get(o.id); node.gen = s.gen; node.from = Object.assign({ island: island == null ? null : island }, s.from);
         const cl = this.clades.get(o.clade); if (cl && cl.id === o.id) { cl.gen0 = cl.genMax = s.gen; cl.arrived = 1; /* this plan did not arise here: records of novelty leave it out */ } else if (cl && s.gen > cl.genMax) cl.genMax = s.gen;
         if (lg) lg.arrived = (lg.arrived || 0) + o.E + o.G + o.grow + o.egg + o.prof.buildCost;
@@ -975,7 +1064,8 @@
       const fresh = new World(opt), name = m => m ? (MAPS[m] && MAPS[m].name) || m : '小さな水槽';
       Object.assign(d, { opt: Object.fromEntries(Object.keys(DEFAULTS).map(k => [k, fresh[k]])), nut: Array.from(fresh.nut), food: [], patch: fresh.patch, regionState: null, scA: undefined, scB: undefined, snd: undefined /* (the new map's water starts with its own sound) */, grainDebt: 0, bottomDebt: 0 });
       for (const s of d.bodies) { s.x = s.x / old.W * fresh.W; s.y = clamp(s.y / old.H * fresh.H, 2, fresh.H - 2); delete s.st; s.home = 0; }
-      const w = World.restore(d); w.log('世界を移した：' + name(old.map) + ' → ' + name(map) + '（' + w.bodies.length + ' 個体）'); return w;
+      const minds = old.keep ? new Map(old.bodies.map(o => [o.id, old.mindOf(o, false)])) : null;
+      const w = World.restore(d); if (minds) for (const o of w.bodies) { const m = minds.get(o.id); if (m) w.mindTo(o, m, false); } /* (keep) they land at rest, but with what their nerves held */ w.log('世界を移した：' + name(old.map) + ' → ' + name(map) + '（' + w.bodies.length + ' 個体）'); return w;
     }
     census() {
       const n = this.bodies.length, mean = f => n ? this.bodies.reduce((a, o) => a + f(o), 0) / n : 0;
