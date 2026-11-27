@@ -22,6 +22,7 @@
     const parts = g.parts.map(p => {
       const sum = p.muscle + p.gut + p.gonad + p.store + p.nerve + p.vessel, k = sum > TISSUE_ROOM ? TISSUE_ROOM / sum : 1, q = Object.assign({}, p);
       for (const t of TISSUES) q[t] = p[t] * k;
+      if (opt.late && p.nAt > stage) { for (const c of A.neural.CIRCUIT) q[c] = 0; delete q.nn; } /* (wireLate) this part's circuit is built when the body has grown to stage `nAt`: until then its segments carry no connections, pay for none, and nothing drives them (cilia beat at their plain rate, the mouth stays open, joints follow the body's rhythm alone) */
       return q;
     });
     const chainLink = g.parts.map((_, i) => g.links.findIndex(l => l.from === i && l.to === i));
@@ -128,6 +129,22 @@
       for (let i = 1; i < out.length; i++) { const s = out[i]; dist[i] = Math.min(dist[i], dist[s.parent] + hop(s)); }
     }
     for (const s of out) s.supply = Math.exp(-dist[s.id] / SUPPLY_REACH);
+    // (wireEnds) A connection is made only where both of its ends are. One from a sense the segment does not have (no eye, no ear, no nerve tissue to read
+    // with, a sense this world does not have), one to an effector it does not have (no cilia, no muscled joint, no mouth, no voice), one to a neighbouring
+    // segment that is not there or carries no circuit: none of these could ever change what the body does, and the segment does not build or pay for them.
+    // opt.ends tells which senses the world has ({ scent, vision, contact, sound }). The several-neuron circuits are left as they are.
+    if (opt.ends) { const W = opt.ends, n2 = out.length, own = ['nC', 'nH', 'nB', 'sA', 'sB', 'sT', 'sW', 'vE', 'hE', 'mCil', 'mTurn', 'mJoint', 'mBite', 'mVoice'], senses = ['nC', 'sA', 'sB', 'vE', 'hE'];
+      const has = out.map(s => { const p = s.p, gain = p.nerve > 0, cil = (p.cilia || 0) * (p.beat == null ? 1 : p.beat) !== 0;
+        return { nC: gain, nH: true, nB: true, sA: !!W.scent && gain, sB: !!W.scent && gain, sT: !!W.contact && gain, sW: !!W.contact && gain, vE: !!W.vision && p.eye > 0.1 && gain, hE: !!W.sound && (p.ear || 0) > 0.02 && gain,
+          mCil: cil, mTurn: cil, mJoint: s.id > 0 && p.muscle > 0 && p.range > 0, mBite: !!W.contact && p.mouth > 0.1 && s.tip, mVoice: !!W.sound && (p.voice || 0) > 0.02 }; });
+      // which segments carry a circuit at all once the endless connections are gone: by their own connections, or by listening to a neighbour that does
+      const wired = out.map((s, i) => !!(s.p.nn && s.p.nn.length) || own.some(k => has[i][k] && s.p[k]));
+      for (let ch = true, it = 0; ch && it <= n2; it++) { ch = false; for (let i = 0; i < n2; i++) { if (wired[i]) continue; const s = out[i], p = s.p; if ((p.nP && s.parent >= 0 && wired[s.parent]) || (p.nK && s.kids.some(c => wired[c]))) { wired[i] = true; ch = true; } } }
+      const views = new Map();
+      for (let i = 0; i < n2; i++) { const s = out[i], p = s.p, off = own.filter(k => p[k] && !has[i][k]);
+        if (p.nP && !(s.parent >= 0 && wired[s.parent])) off.push('nP'); if (p.nK && !s.kids.some(c => wired[c])) off.push('nK');
+        if (p.adapt && !(p.nn && p.nn.length) && !senses.some(k => has[i][k] && p[k])) off.push('adapt'); // (how a sense reports: nothing to it where no sense is read)
+        if (!off.length) continue; const key = s.part + '|' + off.join(); let q = views.get(key); if (!q) { q = Object.assign({}, p); for (const k of off) q[k] = 0; views.set(key, q); } s.p = q; } }
     return { segs: out, stage, hue: g.hue, freq: g.freq, origin: g.origin, truncated: segs.length >= cap };
   }
 
