@@ -1,0 +1,41 @@
+Detached-controller probe (tools/alife2-detach-probe.js), 2026-11-27. Not a world run: each living body's controller is run on
+made-up senses, outside its world. Threshold for "responds": the largest change in any output > 0.05.
+Predictions fixed before the first run (Claude): self <5%, noise 60%, hunger 50%, dir 60%, taste 30%, sight 30% of eyed, held >1 s <10%.
+Outcome: self right (0-0.8%); held right (0-0.8%); noise 57-95% (roughly right); hunger 66-86% (underestimated);
+dir 97-100% (underestimated); taste 3-8% (overestimated); sight not readable (2-12 eyed bodies per world).
+Left out: all-on-coast-201-t3000 (saved by v2.0.32). Its parts have no sT / sW / mBite; the probe's outputs are NaN there, and
+resuming that save in the current engine for 2 s leaves 50 of 259 bodies, all 50 with a NaN nerve signal. Not looked into further.
+
+all12-coast-211-t4000.json.gz t=4000 bodies 498 rules {"vision":1,"nerve2":1,"learn":0,"contact":1,"scent":1,"sound":0}
+has local circuit 100.0% | several neurons 5.2% | wired eye 0.4% | moving joints 2.0% | cilia 83.9%
+clock (joint rhythm sd>0.05)       0.2% med 0.000 p90 0.000 max 0.058 (n=498)
+P1 self-variation, no noise (>0.05) 0.0% med 0.000 p90 0.000 max 0.000 (n=498)
+P2 variation with brain noise       56.6% med 0.056 p90 0.269 max 0.615 (n=498)
+P3 hunger 0.1 vs 0.9                65.9% med 0.093 p90 0.366 max 0.769 (n=498)
+P4a food direction vs none          100.0% med 0.743 p90 0.878 max 0.979 (n=498) | drive and turn only 100.0% med 0.531 p90 1.254 max 1.793 (n=498)
+P4b taste step 0.3->0.8 peak        2.6% med 0.000 p90 0.015 max 0.225 (n=498)
+P4c sight step (of eyed bodies)     0.0% med 0.046 p90 0.046 max 0.046 (n=2)
+P5 taste response held >1 s         0.0% med 0.000 p90 0.000 max 0.067 (n=13) | sight held >1 s 0.0%
+
+all12-coast-212-t4000.json.gz t=4000 bodies 507 rules {"vision":1,"nerve2":1,"learn":0,"contact":1,"scent":1,"sound":0}
+has local circuit 100.0% | several neurons 3.0% | wired eye 2.4% | moving joints 2.2% | cilia 87.8%
+clock (joint rhythm sd>0.05)       0.8% med 0.000 p90 0.020 max 0.092 (n=507)
+P1 self-variation, no noise (>0.05) 0.0% med 0.000 p90 0.000 max 0.000 (n=507)
+P2 variation with brain noise       95.1% med 0.182 p90 0.359 max 0.723 (n=507)
+P3 hunger 0.1 vs 0.9                72.6% med 0.091 p90 0.295 max 0.747 (n=507)
+P4a food direction vs none          100.0% med 0.795 p90 0.934 max 1.018 (n=507) | drive and turn only 98.0% med 0.430 p90 0.919 max 1.480 (n=507)
+P4b taste step 0.3->0.8 peak        8.5% med 0.000 p90 0.041 max 0.691 (n=507)
+P4c sight step (of eyed bodies)     16.7% med 0.018 p90 0.074 max 0.074 (n=12)
+P5 taste response held >1 s         0.0% med 0.000 p90 0.000 max 0.033 (n=43) | sight held >1 s 0.0%
+
+all16-coast-221-t3000.json.gz t=3000 bodies 397 rules {"vision":1,"nerve2":1,"learn":1,"contact":1,"scent":1,"sound":0}
+has local circuit 99.0% | several neurons 24.2% | wired eye 0.5% | moving joints 2.0% | cilia 65.2%
+clock (joint rhythm sd>0.05)       1.3% med 0.000 p90 0.004 max 0.101 (n=397)
+P1 self-variation, no noise (>0.05) 0.8% med 0.000 p90 0.000 max 0.165 (n=397)
+P2 variation with brain noise       68.0% med 0.116 p90 0.390 max 0.678 (n=397)
+P3 hunger 0.1 vs 0.9                85.6% med 0.189 p90 0.348 max 0.851 (n=397)
+P4a food direction vs none          100.0% med 0.761 p90 0.984 max 1.159 (n=397) | drive and turn only 97.2% med 0.578 p90 1.148 max 1.680 (n=397)
+P4b taste step 0.3->0.8 peak        8.3% med 0.000 p90 0.034 max 0.302 (n=397)
+P4c sight step (of eyed bodies)     100.0% med 0.248 p90 0.248 max 0.248 (n=2)
+P5 taste response held >1 s         0.8% med 0.000 p90 0.033 max 15.000 (n=33) | sight held >1 s 50.0%
+
