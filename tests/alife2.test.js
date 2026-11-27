@@ -1106,3 +1106,49 @@ test('rewire: a connection withers while it is not used and forms while it is, a
   const count = flags => { let m = one([['c', 3], ['t', 2]]), n = 0; const r = G.rng(11); for (let i = 0; i < 200; i++) { m = G.mutate(m, r, 1, flags); if (m.parts.some(p => (p.nn || []).some(q => q.u != null || q.in.some(e => e[3])))) n++; } return n; };
   assert.strictEqual(count('nwl'), 0); assert.ok(count('nwy') > 100);
 });
+
+test('nest: a gland lays matter into the water when its circuit drives it and the body pays for it; matter stays, fades slowly, calms the water and catches drifting grains; off by default', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, C = A.organs.C;
+  // the primordial blob with a gland and a resting signal; `sec` = how hard that signal drives the gland
+  const body = (sec, gland) => { const g = G.primordial(1); Object.assign(g.parts[0], { gland: gland == null ? 0.3 : gland, nerve: 0.3, nB: 1, mSec: sec }); return G.sanitize(g); };
+  const world = (o, g) => { const w = new A.engine.World(Object.assign({ seed: 1, founders: 0, cap: 0, audit: 1 }, o)), b = g ? w.spawn(g, 60, 40, 1, null) : null; return { w, b }; }, total = w => w.mat.reduce((a, b) => a + b, 0);
+  // it secretes as hard as it is driven, the matter is in the water, and every unit was paid for; a gland nobody drives lays nothing but still costs upkeep
+  { const { w, b } = world({ nest: 1 }, body(1)); for (let i = 0; i < 900; i++) w.step(); const se = b.b.segs[0].se, rate = C.secrete * b.prof.V * 0.3 * se; assert.ok(Math.abs(se - Math.tanh(1)) < 0.01, 'driven by its resting signal: ' + se);
+    assert.ok(Math.abs(b.secreted - rate * 30) < 0.02 * rate * 30, b.secreted + ' vs ' + rate * 30); assert.ok(Math.abs(w.ledger.secreted - b.secreted) < 1e-9 && Math.abs(w.counts.secreted - b.secreted) < 1e-9);
+    assert.ok(total(w) > 0.97 * b.secreted / C.matter && total(w) <= b.secreted / C.matter + 1e-6, 'the matter laid, less what has faded: ' + total(w));
+    const idle = world({ nest: 1 }, body(0)); for (let i = 0; i < 900; i++) idle.w.step(); assert.strictEqual(total(idle.w), 0); assert.strictEqual(idle.b.secreted, undefined);
+    assert.ok(Math.abs(A.organs.profile(develop(body(0))).basal - A.organs.profile(develop(body(0, 0))).basal - C.upkeep.gland * 0.3 * b.prof.V) < 1e-9, 'gland tissue costs upkeep'); }
+  // without the rule: the same genome lays nothing and nothing is tracked; the rule is off by default; a body that cannot move still runs its circuit where it has a gland to drive
+  { const { w, b } = world({}, body(1)); for (let i = 0; i < 300; i++) w.step(); assert.strictEqual(w.mat, undefined); assert.strictEqual(b.secreted, undefined); assert.strictEqual(b.passive, true); assert.strictEqual(new A.engine.World({ seed: 1 }).nest, 0);
+    assert.strictEqual(world({ nest: 1 }, body(1)).b.passive, false); assert.strictEqual(world({ nest: 1 }, body(1, 0)).b.passive, true); }
+  // matter outlives its maker and fades by half in matHalf seconds
+  { const { w, b } = world({ nest: 1, matHalf: 20 }, body(1)); for (let i = 0; i < 600; i++) w.step(); b.dead = 'aged'; w.step(); assert.strictEqual(w.bodies.length, 0); const m0 = total(w); assert.ok(m0 > 0.05); for (let i = 0; i < 600; i++) w.step(); assert.ok(Math.abs(total(w) / m0 - 0.5) < 0.03, 'half after 20 s: ' + total(w) / m0); }
+  // water with matter in it moves less: the current is divided by 1 + matter / matCalm, exactly, and so is what carries a body
+  { const a = world({ nest: 1 }).w, b = world({ nest: 1 }).w, ci = b.cellAt(60, 30); b.mat[ci] = 3; b.stepMatter(0); for (let i = 0; i < 40; i++) { a.step(); b.step(); } const fa = a.flowAt(60, 30), fb = b.flowAt(60, 30), k = 1 / (1 + b.mat[ci] / b.matCalm);
+    assert.ok(Math.abs(fa[0]) > 1e-3); assert.ok(Math.abs(fb[0] - fa[0] * k) < 1e-6 && Math.abs(fb[1] - fa[1] * k) < 1e-6, fb + ' vs ' + fa); assert.deepStrictEqual(a.flowAt(20, 30), b.flowAt(20, 30), 'elsewhere the water is as it was'); }
+  // drifting grains catch in it: after two minutes, a band of matter holds several times the grains of the same band without
+  { const band = w => { let n = 0; for (const f of w.food) if (f.e > 0 && f.x >= 40 && f.x < 80 && f.y >= 20 && f.y < 44) n++; return n; }, a = world({ nest: 1 }).w, b = world({ nest: 1 }).w;
+    for (let i = 0; i < b.mat.length; i++) { const x = (i % b.cols + 0.5) * b.cell, y = (Math.floor(i / b.cols) + 0.5) * b.cell; if (x >= 40 && x < 80 && y >= 20 && y < 44) b.mat[i] = 4; } b.stepMatter(0);
+    for (let i = 0; i < 3600; i++) { a.step(); b.step(); } assert.ok(band(b) > 1.5 * band(a) + 3, 'grains in the band: ' + band(b) + ' with matter, ' + band(a) + ' without'); }
+  // matter holds a body against the current, more strongly than it calms the water: the same body, 20 s, in a cell with matter and in one without
+  { const drift = m => { const { w, b } = world({ nest: 1 }, body(0)); if (m) { for (let i = 0; i < w.mat.length; i++) w.mat[i] = m; w.stepMatter(0); } const x0 = b.cx, y0 = b.cy; for (let i = 0; i < 600; i++) w.step(); return Math.hypot(b.cx - x0, b.cy - y0); };
+    const free = drift(0), held = drift(1), k = 1 / ((1 + 1 / 1) * (1 + 1 / 0.1)); assert.ok(free > 0.5, 'it drifts: ' + free); assert.ok(held < 0.12 * free && held > 0.2 * k * free, 'held: ' + held + ' against ' + free + ' (the current on it is ' + k.toFixed(3) + ' of what it was)'); }
+  // a grain that runs out its time in matter rots into the water there, the more matter the larger the share; outside matter it is lost as before; the ledger shows both
+  { const { w } = world({ nest: 1 }); for (let i = 0; i < 30; i++) w.step(); const ci = w.cellAt(60, 30), cj = w.cellAt(20, 30); w.mat[ci] = 3; w.stepMatter(0); w.food.length = 0; w.addFood(60, 30, 0.3, 2, true, 0.5); w.addFood(20, 30, 0.3, 2, true, 0.5);
+    const n0 = [w.nut[ci], w.nut[cj]]; for (const k in w.ledger) w.ledger[k] = 0; for (let i = 0; i < 31; i++) w.step(); const gain = w.nut[ci] - n0[0], other = w.nut[cj] - n0[1];
+    const m1 = 3 * Math.pow(0.5, 1 / w.matHalf), share = 2 * m1 / (m1 + 1); /* (the matter had faded for one second when the grain ran out) */ assert.ok(Math.abs(w.counts.composted - share) < 1e-5, 'about three quarters of it at matter 3: ' + w.counts.composted); assert.ok(gain > other + 0.3, 'the water there is richer for it (and it spreads to the cells around, as dissolved food does): ' + gain + ' against ' + other);
+    assert.ok(Math.abs(w.ledger.composted - share) < 1e-5 && Math.abs(w.ledger.expire - (4 - share)) < 1e-5 && w.ledger.recycled >= share - 1e-5, JSON.stringify([w.ledger.composted, w.ledger.expire, w.ledger.recycled])); }
+  // saved and reloaded, the world goes on exactly as it was going
+  { const { w } = world({ nest: 1 }, body(1)); for (let i = 0; i < 917; i++) w.step(); const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), sig = x => JSON.stringify([Array.from(x.mat), Array.from(x.calm), x.bodies.map(o => [o.cx, o.cy, o.E, o.secreted]), x.food.length, x.rand.state()]); assert.strictEqual(sig(c), sig(w)); for (let i = 0; i < 600; i++) { w.step(); c.step(); } assert.strictEqual(sig(c), sig(w)); }
+  // the energy ledger still balances with matter being made
+  { const { w } = world({ nest: 1 }, body(1)); for (const k in w.ledger) w.ledger[k] = 0; const s0 = w.stored(); for (let i = 0; i < 1500; i++) w.step(); const L = w.ledger, IN = ['rain', 'regrow', 'placed', 'mutation', 'recycled', 'arrived'], inflow = IN.reduce((x, k) => x + (L[k] || 0), 0), out = Object.keys(L).filter(k => !IN.includes(k)).reduce((x, k) => x + L[k], 0); assert.ok(L.secreted > 0.1); assert.ok(Math.abs((w.stored() - s0) - (inflow - out)) < 1e-6 * Math.max(1, inflow)); }
+  // mutation gives glands, their drive and the neurons' new target only where the world has the rule
+  const count = flags => { let m = G.primordial(3), n = 0; const r = G.rng(7); for (let i = 0; i < 300; i++) { m = G.mutate(m, r, 1, flags); if (m.parts.some(p => (p.gland || 0) > 0 || (p.mSec || 0) !== 0 || (p.nn || []).some(q => q.out.some(e => e[0] === 'S')))) n++; } return n; };
+  assert.strictEqual(count('xvgcn'), 0); assert.ok(count('xvgcnq') > 100);
+  // where genomes mix: the genes of glands join the row of genes that is cut only in worlds with the rule, so every other world draws the same cuts as before
+  // (adding two genes to the row once shifted every cut in worlds that mix genomes; the six-world state check caught it)
+  { const a = body(1), b = body(0, 0), kids = nest => { let moved = 0; for (let k = 0; k < 60; k++) { const c = G.recombine(a, b, G.rng(100 + k), false, false, false, nest); if (c.parts[0].gland !== a.parts[0].gland || c.parts[0].mSec !== a.parts[0].mSec) moved++; } return moved; };
+    assert.strictEqual(kids(false), 0, 'without the rule the mother keeps her gland genes'); assert.ok(kids(true) > 5, 'with it they mix like any other gene');
+    const row = f => Object.keys(G.PART_FIELDS).filter(k => !f.includes(G.PART_FIELDS[k][4])).length; assert.strictEqual(row(['s', 'q']), 45, 'the row that worlds without sound and without glands cut has the length it had'); }
+});

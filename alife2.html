@@ -62,7 +62,7 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
     <label title="溶存栄養の回復と粒の供給が、長さ 120 の波になって世界を一周し続ける（1200 秒で 1 波長ぶん進む＝毎秒 0.1）。どの場所も、豊かな時期と乏しい時期を交互に迎える。時間で平均した供給はどこでも波の無い世界と同じで、乏しい水に降るはずだった粒は別の場所に降る。じっとしていれば飢える時期が来て、波について行けば豊かな水に居続けられる。いまの世界のまま切り替えられる。「全部入り」には含めていない。"><input id="wave" type="checkbox">豊かさの波（餌場が移る）</label>
     <label>始祖 <select id="founder"><option value="primordial">原始個体（1体節）から自然進化</option><option value="file">進化試験の結果を読み込む（JSON）</option></select></label>
     <input id="file" type="file" accept=".json" style="display:none">
-    <span id="additionalRules"></span><button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・音・繊毛の音を仕事から決める・経験と動きを失わない・神経に名前を付ける・左右の対は一緒に生える・身体を固い物体として扱う・なだらかな境界）をすべて有効にし、沿岸の世界を原始個体から始める。変異の強さの進化（2 種類）は長期観察のために含めていない：変異の起きやすさは世界の値のまま一定。入れたいときは個別に印を付ける。">全部入りで最初から</button><button id="pause">一時停止</button>
+    <span id="additionalRules"></span><button id="restart">最初から</button><button id="allOn" title="選択式の規則（匂い・視覚・近道の切断・接触・遺伝子の新しい規則・出生の収支・神経の引き継ぎ・粒を削る・物質の還元・複数の神経・掴む／染み出す・遺伝子が混ざる・卵の蓄え・経験で変わる結合・音・繊毛の音を仕事から決める・経験と動きを失わない・神経に名前を付ける・左右の対は一緒に生える・身体を固い物体として扱う・なだらかな境界・卵を産む距離・回路を作る時期・相手のある結合だけを作る・神経系が身体と別に増えて遠くへつながる・結合が使われ方で細る／できる・分泌した物質が水に残る）をすべて有効にし、沿岸の世界を原始個体から始める。変異の強さの進化（2 種類）は長期観察のために含めていない：変異の起きやすさは世界の値のまま一定。入れたいときは個別に印を付ける。">全部入りで最初から</button><button id="pause">一時停止</button>
     <label title="1 コマ（画面の 1 回の描き直し）のあいだに世界を何刻み進めるか。1 コマの計算は 0.1 秒（描画のほうが長くかかる機械では、描画と同じ時間）で打ち切るので、重い世界では指定より遅く進む（世界の中身は変わらない）。実際の速さは右に出る。">速度 <select id="speed"><option>1</option><option selected>4</option><option>16</option><option>64</option></select>×</label><span id="pace" class="note"></span>
     <label title="同じ種類の世界を、別々のスレッドで同時に回す。増やした島は、いま見ている世界の複製を乱数だけ変えて始める。150 秒ごとに各島から 1 個体が隣の島へ移る（遺伝子・齢・蓄えごと。出入りはエネルギーの収支に記帳される）。裏の島は描画しないので全速で進む。島の数だけ CPU のコアを使う。島を使う世界は、同じ seed でも毎回同じ歴史にはならない。">並列の島 <select id="islands"><option>1</option><option>2</option><option>4</option><option>8</option></select></label>
     <label title="タブを裏に回したり最小化したりしても、世界を止めずに進める（表示中より遅い）。ブラウザがタブを休止させた場合は止まる。"><input id="bg" type="checkbox" checked>裏でも進める</label>
@@ -115,17 +115,17 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=62"></script>
-<script src="./alife2-genome.js?v=62"></script>
-<script src="./alife2-development.js?v=62"></script>
-<script src="./alife2-neural.js?v=62"></script>
-<script src="./alife2-physics.js?v=62"></script>
-<script src="./alife2-organs.js?v=62"></script>
-<script src="./alife2-rules.js?v=62"></script><script src="./alife2-engine.js?v=62"></script>
-<script src="./alife2-render.js?v=62"></script>
-<script src="./alife2-gpu.js?v=62"></script>
-<script src="./alife2-observer.js?v=62"></script>
-<script src="./alife2-observer-ui.js?v=62"></script>
-<script src="./alife2-world.js?v=62"></script>
+<script src="./alife2-version.js?v=63"></script>
+<script src="./alife2-genome.js?v=63"></script>
+<script src="./alife2-development.js?v=63"></script>
+<script src="./alife2-neural.js?v=63"></script>
+<script src="./alife2-physics.js?v=63"></script>
+<script src="./alife2-organs.js?v=63"></script>
+<script src="./alife2-rules.js?v=63"></script><script src="./alife2-engine.js?v=63"></script>
+<script src="./alife2-render.js?v=63"></script>
+<script src="./alife2-gpu.js?v=63"></script>
+<script src="./alife2-observer.js?v=63"></script>
+<script src="./alife2-observer-ui.js?v=63"></script>
+<script src="./alife2-world.js?v=63"></script>
 </body>
 </html>

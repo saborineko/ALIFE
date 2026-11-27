@@ -83,7 +83,11 @@
     voice: [0, 1, 0, 'n', 's'],     // sound-making tissue (costs upkeep, and energy for every sound): how loud this segment can be
     pitch: [0, 1, 0.5, 'n', 's'],   // the pitch of its voice at rest
     bend: [0, 0.5, 0.1, 'n', 's'],  // how far a neuron can push that pitch up or down
-    mVoice: [-1.5, 1.5, 0, 'n', 's'] // signal -> how loudly this segment's voice sounds (0 = no effect: silent unless a neuron drives it)
+    mVoice: [-1.5, 1.5, 0, 'n', 's'], // signal -> how loudly this segment's voice sounds (0 = no effect: silent unless a neuron drives it)
+    // Matter (marked 'q': these only change in worlds where bodies can secrete). A segment with gland tissue lays inert matter into the water where its outer end is.
+    // The matter stays for long after the body is gone; water in it moves less, and drifting grains catch in it (see the engine: nest).
+    gland: [0, 1, 0, 'n', 'q'],     // secreting tissue (costs upkeep): how much matter this segment can lay down per second
+    mSec: [-1.5, 1.5, 0, 'n', 'q']  // signal -> how hard this segment's gland secretes (0 = no effect: idle unless a neuron drives it)
   };
   const LINK_FIELDS = {
     at: [0, 1, 1, 'n'],            // where along the parent
@@ -225,7 +229,7 @@
       b: clamp(Number.isFinite(q.b) ? q.b : 0, -2, 2), k: clamp(Number.isFinite(q.k) ? q.k : 1, 0.02, 1),
       in: (Array.isArray(q.in) ? q.in : []).filter(e => Array.isArray(e) && nnValid(e[0]) && Number.isFinite(e[1])).slice(0, NN_IN).map(e => (Number.isFinite(e[3]) && e[3] !== 0 ? [e[0], clamp(e[1], -4, 4), Number.isFinite(e[2]) ? clamp(e[2], -1, 1) : 0, clamp(e[3], -1, 1)] /* (rewire: a fourth number, how the connection itself comes and goes with use) */ : Number.isFinite(e[2]) && e[2] !== 0 ? [e[0], clamp(e[1], -4, 4), clamp(e[2], -1, 1)] : [e[0], clamp(e[1], -4, 4)])), // (a third number: how fast this connection changes with use, in worlds where connections can)
       m: q.m, u: q.u,
-      out: (Array.isArray(q.out) ? q.out : []).filter(e => Array.isArray(e) && NN_EFF_S.includes(e[0]) && Number.isFinite(e[1])).slice(0, NN_OUT).map(e => [e[0], clamp(e[1], -2, 2)]),
+      out: (Array.isArray(q.out) ? q.out : []).filter(e => Array.isArray(e) && (NN_EFF_S.includes(e[0]) || e[0] === 'S') && Number.isFinite(e[1])).slice(0, NN_OUT).map(e => [e[0], clamp(e[1], -2, 2)]),
       id: q.id
     }));
     { const seen = new Set(); let named = false; for (const q of p.nn) { if (Number.isInteger(q.id) && q.id >= 0 && q.id < 36 && !seen.has(q.id)) { seen.add(q.id); named = true; } else delete q.id; } if (named) nameNeurons(p); }
@@ -233,9 +237,9 @@
     for (const q of p.nn) { if (Number.isFinite(q.u)) q.u = clamp(q.u, 0.02, 1); else delete q.u; } // (rewire: how active a neuron and a source must be together for their connection to count as used; absent = 0.15) // (which of its own inputs gates the changing of its connections; none: they change with use alone)
     if (!p.nn.length) delete p.nn;
   }
-  function mutateNN(p, r, s, L, S, t, W, B, Y) {
+  function mutateNN(p, r, s, L, S, t, W, B, Y, Q) {
     if (t == null) t = s; // t: how often the wiring changes; s: how wide the steps are (the same number, unless the world keeps them as two genes)
-    const nn = p.nn || [], EFF = S ? NN_EFF_S : NN_EFF;
+    const nn = p.nn || [], EFF = Q ? (S ? NN_EFF_S : NN_EFF).concat('S') : S ? NN_EFF_S : NN_EFF; // (nest: Q) one more target: S, how hard the segment's gland secretes
     // (wire: W = { g, all }) a new reference is made to a neuron that exists: one of this part for `s` and `m`, one of any part for `p` and `k`
     const src = W ? () => { if (r() < 0.6) { const pool = NN_POOL[(L ? 1 : 0) + (S ? 2 : 0)]; return pool[r.int(pool.length)]; } const kind = B ? NN_REF_B[r.int(NN_REF_B.length)] : NN_REF[r.int(NN_REF.length)], from = kind === 's' || kind === 'm' ? nn.map(q => q.id) : kind === 'r' ? W.root : W.all; /* (brain: B) also to the root's neurons and to a name over the whole body */ if (!from.length) { const pool = NN_POOL[(L ? 1 : 0) + (S ? 2 : 0)]; return pool[r.int(pool.length)]; } return kind + NAME[from[r.int(from.length)]]; } : () => nnSource(r, L, S);
     for (const q of nn) {
@@ -268,7 +272,7 @@
     if (g.root > i) g.root--;
   }
   // how far a part's numbers are from another's, as a share of each gene's range (0 = a perfect copy)
-  function divergence(a, b) { let d = 0, n = 0; for (const k in PART_FIELDS) { const [lo, hi, , kind, flag] = PART_FIELDS[k]; if (flag === 's' && a[k] === b[k]) continue; /* (genes of sound count only where they differ: the measure reads as before in worlds without sound) */ d += Math.abs(kind === 'a' ? wrapPi(a[k] - b[k]) / TAU : (a[k] - b[k]) / (hi - lo)); n++; } return d / n; }
+  function divergence(a, b) { let d = 0, n = 0; for (const k in PART_FIELDS) { const [lo, hi, , kind, flag] = PART_FIELDS[k]; if ((flag === 's' || flag === 'q') && a[k] === b[k]) continue; /* (genes of sound count only where they differ: the measure reads as before in worlds without sound) */ d += Math.abs(kind === 'a' ? wrapPi(a[k] - b[k]) / TAU : (a[k] - b[k]) / (hi - lo)); n++; } return d / n; }
 
   // strength: how wide the steps are, and — unless `structural` is given — also how often the plan of the body and the wiring change.
   function mutate(g0, r, strength, extra, structural) {
@@ -285,7 +289,7 @@
     for (const p of g.parts) num(p, PART_FIELDS);
     if (extra === true || (extra && extra.includes('n'))) { let W = null; if (extra && extra !== true && extra.includes('w')) { for (const p of g.parts) nameNeurons(p); W = { g, all: g.parts.flatMap(p => (p.nn || []).map(q => q.id)), root: ((g.parts[g.root] || {}).nn || []).map(q => q.id) }; }
       const B = !!(W && extra.includes('b'));
-      for (const p of g.parts) mutateNN(p, r, s, !!(extra && extra !== true && extra.includes('l')), !!(extra && extra !== true && extra.includes('s')), t, W, B, !!(extra && extra !== true && extra.includes('y')));
+      for (const p of g.parts) mutateNN(p, r, s, !!(extra && extra !== true && extra.includes('l')), !!(extra && extra !== true && extra.includes('s')), t, W, B, !!(extra && extra !== true && extra.includes('y')), !!(extra && extra !== true && extra.includes('q')));
       // (brain) a block of neurons is copied from one part into another, wiring and all: a circuit that works in one place can be tried in another, or doubled in the trunk
       if (B && r() < 0.03 * t) { const from = g.parts.filter(p => p.nn && p.nn.length); if (from.length && g.parts.length > 1) { const src = from[r.int(from.length)]; let to = g.parts[r.int(g.parts.length)]; if (to === src) to = g.parts[(g.parts.indexOf(src) + 1) % g.parts.length];
           const at = r.int(src.nn.length), n = 1 + r.int(src.nn.length - at), block = src.nn.slice(at, at + n).map(q => copy(q)), mine = to.nn || [], used = new Set(mine.map(q => q.id)), re = new Map();
@@ -342,8 +346,8 @@
   // genes lie in a row and are cut at one place: one side comes from one parent, the rest from the other — neighbouring genes tend to stay
   // together, genes far apart are easily parted. A part's neurons go with the far end of the row. A shared rule is tuned as in one parent or
   // the other. The genes of the whole body are drawn one by one. A part or rule that the other genome lacks stays as it is.
-  function recombine(a, b, r, sound, cast, late) {
-    const g = copy(a), ids = g.parts.some(p => p.id != null) && b.parts.some(p => p.id != null), K = Object.keys(PART_FIELDS).filter(k => sound || PART_FIELDS[k][4] !== 's') /* (the genes of sound join the row only where sound exists: other worlds mix exactly as before) */, pb = new Map(), lb = new Map();
+  function recombine(a, b, r, sound, cast, late, nest) {
+    const g = copy(a), ids = g.parts.some(p => p.id != null) && b.parts.some(p => p.id != null), K = Object.keys(PART_FIELDS).filter(k => (sound || PART_FIELDS[k][4] !== 's') && (nest || PART_FIELDS[k][4] !== 'q')) /* (the genes of sound, and of glands, join the row only where the world has them: other worlds mix exactly as before) */, pb = new Map(), lb = new Map();
     b.parts.forEach((p, i) => { if (!ids || p.id != null) pb.set(ids ? p.id : i, p); }); b.links.forEach((l, i) => { if (!ids || l.id != null) lb.set(ids ? l.id : i, l); });
     g.parts.forEach((p, i) => {
       const q = pb.get(ids ? p.id : i); if (!q) return;

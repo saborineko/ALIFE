@@ -5,8 +5,8 @@ const diagnostic=()=>A.genome.create({parts:[A.genome.part({nerve:1,ear:.8,voice
 const observe=(g,opt)=>{const x=new A.explorer.Observation(g,opt);while(!x.done)x.step();return x;};
 
 test('shared catalog covers engine defaults and preserves legacy mutation flag ordering',()=>{
- assert.equal(A.rules.flags(all),'xvgcnidlswtby');
- assert.equal(A.rules.flags({...all,mutsplit:0}),'xvgmcnidlswtby');
+ assert.equal(A.rules.flags(all),'xvgcnidlswtbyq');
+ assert.equal(A.rules.flags({...all,mutsplit:0}),'xvgmcnidlswtbyq');
  assert.equal(A.rules.flags({}),'');
  for(const r of A.rules.catalog)assert.equal(A.engine.DEFAULTS[r.key],r.default,r.key);
  const q=A.rules.normalize({learn:1,wire:1,solid:1,soundWork:1,mix:1});
