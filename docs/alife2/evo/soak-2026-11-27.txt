@@ -225,3 +225,34 @@ soak: all seed 51 for 1200 s | rules on: scent vision genome2 contact nerve2 inv
     900 s | bodies  524 gen 3.3 | births 2315 starved 1289 aged 509 wounds 53 | BROKEN 0 not-numbers 0 blocked 0 stillborn 0 | step mean 81.7 ms worst 335231 ms | heap 68 MB | notebook events 249 samples 451 | save 5.4 MB in 225 ms (tree 778, plans 391, grains 17444) | reloads checked 1
    1200 s | bodies  419 gen 4.0 | births 3129 starved 1894 aged 775 wounds 101 | BROKEN 0 not-numbers 0 blocked 0 stillborn 0 | step mean 42.3 ms worst 141 ms | heap 58 MB | notebook events 300 samples 502 | save 7.8 MB in 200 ms (tree 744, plans 524, grains 16953) | reloads checked 2 (1 DIFFER)
 RESULT {"kind":"all","seed":51,"ran":1200,"bodies":419,"gen":4,"births":3129,"broken":0,"unsound":0,"blocked":0,"worstStepMs":335231,"heapMaxMB":276,"reloadsChecked":2,"reloadsDiffer":1,"saveSizes":[[500,5.39,542,181],[1000,7.8,789,445]],"ledgerGap":0.000943,"inflow":195442,"wallMinutes":30.1,"trouble":["at 630 s a step took 335231 ms","at 660 s a step took 335231 ms","at 690 s a step took 335231 ms","at 720 s a step took 335231 ms","at 750 s a step took 335231 ms","at 780 s a step took 335231 ms","at 810 s a step took 335231 ms","at 840 s a step took 335231 ms","at 870 s a step took 335231 ms","at 900 s a step took 335231 ms","at 1002 s the reloaded world went a different way"]}
+
+=== vents: premise probe (hand-made vents in the all-21 world at 1700 s, 300 s; scratch vent-probe.js)
+VENTS ON: 8 discs of radius 8, 105 cells of 4800 (2.2% of the water); regrowth x23.4 inside, x0.5 outside | bodies 554
+distance from the nearest vent |   <8   |  8-16  | 16-32  | 32-64  |  >64
+dissolved food at the end      |  0.619 |  0.503 |  0.470 |  0.450 |  0.481
+body-seconds spent there       |  11222 |  16351 |  38869 |  59963 |  15500
+income / upkeep while there    |   1.86 |   1.53 |   1.43 |   1.49 |   1.36
+  of which through the skin    |   1.62 |   1.22 |   1.05 |   1.00 |   1.07
+births there                   |     90 |    129 |    273 |    457 |     77
+bodies within 16 of a vent at the start: 45; alive at the end 10, of those still within 16: 7, within 32: 9
+end: bodies 423, within 16 of a vent 102 (24.1%; the area within 16 is 8.5% of the water) | mean dissolved food 0.468 | speed 0.121
+
+vents off (same places, for comparison): 8 discs of radius 8, 105 cells of 4800 (2.2% of the water); regrowth x23.4 inside, x0.5 outside | bodies 554
+distance from the nearest vent |   <8   |  8-16  | 16-32  | 32-64  |  >64
+dissolved food at the end      |  0.461 |  0.465 |  0.474 |  0.488 |  0.465
+body-seconds spent there       |   4421 |  12099 |  46200 |  71830 |  22327
+income / upkeep while there    |   1.39 |   1.51 |   1.62 |   1.44 |   1.49
+  of which through the skin    |   1.06 |   1.06 |   1.06 |   1.08 |   1.22
+births there                   |     30 |     91 |    381 |    476 |    149
+bodies within 16 of a vent at the start: 45; alive at the end 11, of those still within 16: 6, within 32: 9
+end: bodies 560, within 16 of a vent 68 (12.1%; the area within 16 is 8.5% of the water) | mean dissolved food 0.478 | speed 0.138
+
+=== vents: designed bodies in an empty coast world with vents, 30 bodies, 400 s (scratch vent-one.js)
+{"kind":"cut","seed":1,"nearShare":0.0772,"waterShare":0.0815,"waterWhereTheyWere":0.6525,"worldWater":0.8534,"absorbed":49.371,"eaten":5.017,"path":89.6,"ciliaDrive":1,"alive":15,"upkeep":0.0706,"wiring":4}
+{"kind":"cut","seed":2,"nearShare":0.0714,"waterShare":0.0808,"waterWhereTheyWere":0.642,"worldWater":0.8422,"absorbed":48.878,"eaten":5.144,"path":83.6,"ciliaDrive":1,"alive":18,"upkeep":0.0706,"wiring":4}
+{"kind":"drifter","seed":1,"nearShare":0.0807,"waterShare":0.0775,"waterWhereTheyWere":0.681,"worldWater":0.8437,"absorbed":51.262,"eaten":3.843,"path":0,"ciliaDrive":1,"alive":15,"upkeep":0.0619,"wiring":0}
+{"kind":"drifter","seed":2,"nearShare":0.1325,"waterShare":0.0823,"waterWhereTheyWere":0.6915,"worldWater":0.8434,"absorbed":52.203,"eaten":3.505,"path":0,"ciliaDrive":1,"alive":18,"upkeep":0.0619,"wiring":0}
+{"kind":"kinesis","seed":1,"nearShare":0.1044,"waterShare":0.0825,"waterWhereTheyWere":0.6802,"worldWater":0.8503,"absorbed":51.166,"eaten":5.058,"path":51,"ciliaDrive":0.458,"alive":15,"upkeep":0.0706,"wiring":4}
+{"kind":"kinesis","seed":2,"nearShare":0.0668,"waterShare":0.0831,"waterWhereTheyWere":0.6684,"worldWater":0.8479,"absorbed":50.674,"eaten":3.38,"path":58.4,"ciliaDrive":0.48,"alive":18,"upkeep":0.0706,"wiring":4}
+{"kind":"swimmer","seed":1,"nearShare":0.0772,"waterShare":0.0815,"waterWhereTheyWere":0.6525,"worldWater":0.8534,"absorbed":49.371,"eaten":5.017,"path":89.6,"ciliaDrive":1,"alive":15,"upkeep":0.0666,"wiring":0}
+{"kind":"swimmer","seed":2,"nearShare":0.0714,"waterShare":0.0808,"waterWhereTheyWere":0.642,"worldWater":0.8422,"absorbed":48.878,"eaten":5.144,"path":83.6,"ciliaDrive":1,"alive":18,"upkeep":0.0666,"wiring":0}

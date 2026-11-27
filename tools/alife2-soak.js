@@ -7,7 +7,7 @@
 const A = require('../alife2-genome.js'); for (const f of ['development', 'neural', 'physics', 'organs', 'rules', 'engine', 'observer']) require('../alife2-' + f + '.js');
 const zlib = require('zlib'), fs = require('fs'), crypto = require('crypto'), [secs, seedArg, kind, minutes] = process.argv.slice(2), T = Number(secs), seed = Number(seedArg), budget = Number(minutes) || 1e9, EVERY = Number(process.env.SOAK_EVERY) || 15000, FOR = Number(process.env.SOAK_FOR) || 60; // (how many steps between two save-and-reload checks, and for how many steps the two worlds are compared)
 let w;
-if (kind === 'all') { const rules = Object.fromEntries(A.rules.catalog.filter(r => !['metamut', 'mutsplit', 'wave'].includes(r.key)).map(r => [r.key, r.on])); w = new A.engine.World(Object.assign(A.rules.normalize(rules), { seed, map: 'coast', audit: 1 })); w.seedWith(A.genome.primordial(seed)); }
+if (kind === 'all') { const rules = Object.fromEntries(A.rules.catalog.filter(r => !['metamut', 'mutsplit', 'wave', 'vents'].includes(r.key)).map(r => [r.key, r.on])); w = new A.engine.World(Object.assign(A.rules.normalize(rules), { seed, map: 'coast', audit: 1 })); w.seedWith(A.genome.primordial(seed)); }
 else if (kind === 'none') { w = new A.engine.World({ seed, audit: 1 }); w.seedWith(A.genome.primordial(seed)); }
 else { const d = JSON.parse(zlib.gunzipSync(fs.readFileSync(kind))); d.opt.audit = 1; w = A.observer.restoreWorld(d); w.rand = A.genome.rng(7000 + seed); }
 const ob = A.observer.attach(w); ob.setEnabled(true);

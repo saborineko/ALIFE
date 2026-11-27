@@ -1156,3 +1156,25 @@ test('nest: a gland lays matter into the water when its circuit drives it and th
     assert.strictEqual(kids(false), 0, 'without the rule the mother keeps her gland genes'); assert.ok(kids(true) > 5, 'with it they mix like any other gene');
     const row = f => Object.keys(G.PART_FIELDS).filter(k => !f.includes(G.PART_FIELDS[k][4])).length; assert.strictEqual(row(['s', 'q']), 45, 'the row that worlds without sound and without glands cut has the length it had'); }
 });
+
+test('vents: the water regains its dissolved food fast in a few small places and slowly elsewhere, the same capacity over the whole; vents close and open elsewhere; off by default', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const mk = o => new A.engine.World(Object.assign({ seed: 2, founders: 0, cap: 0, audit: 1 }, o));
+  // off by default, and then nothing of it exists; the catalogue lists it as a kind of water, without a gene flag
+  { const w = mk({}); assert.strictEqual(w.vents, 0); assert.strictEqual(w.ventList, undefined); const r = A.rules.catalog.find(q => q.key === 'vents'); assert.ok(r && r.flag === '' && r.requires.length === 0); }
+  // one vent per ventArea of water; the factor on regrowth is ventLean outside and, inside the discs, as much more as keeps the mean over the water near 1
+  { const w = mk({ map: 'coast', vents: 1 }); assert.strictEqual(w.ventList.length, 8); for (let i = 0; i < 1200; i++) w.step(); /* (every vent fully open: the first ones are given an age when the world starts, but a vent may be fading) */
+    for (const v of w.ventList) { v.born = w.t - 100; v.until = w.t + 100; } const f = w.ventField(); let sum = 0, rich = 0, mx = 0; for (const v of f) { sum += v; if (v > w.ventLean) rich++; if (v > mx) mx = v; }
+    assert.ok(Math.abs(sum / f.length - 1) < 0.12, 'mean factor ' + sum / f.length); assert.ok(mx > 15 && rich > 60 && rich < 140, mx + ' in ' + rich + ' cells'); assert.ok(Array.from(f).every(v => v === w.ventLean || Math.abs(v - mx) < 1e-6));
+    // a fading vent is in between; a closed one is replaced by another somewhere else, and the count stays
+    const v0 = w.ventList[0], at = [v0.x, v0.y]; v0.until = w.t + 15; const half = w.ventField()[w.cellAt(v0.x, v0.y)]; assert.ok(half > w.ventLean + 1 && half < mx - 1, 'half open: ' + half); v0.until = w.t - 1; w.ventField(); assert.strictEqual(w.ventList.length, 8); assert.ok(w.ventList[0].x !== at[0] && w.ventList[0].born === w.t && w.ventList[0].until > w.t + 0.7 * w.ventLife); }
+  // what it does to the water: drained to the same level everywhere, a cell in a vent is well above the rest while a cell far from any vent has regained half as much as it would without vents
+  { const drained = o => { const w = mk(Object.assign({ map: 'coast' }, o)); for (let i = 0; i < 60; i++) w.step(); if (w.ventList) for (const v of w.ventList) { v.born = w.t - 100; v.until = w.t + 1e6; } w.nut.fill(0.2); for (let i = 0; i < 600; i++) w.step(); return w; }, a = drained({ vents: 1 }), b = drained({});
+    const far = (() => { let best = 0, bi = 0; for (let i = 0; i < a.nut.length; i++) { const d = a.ventDist((i % a.cols + 0.5) * a.cell, (Math.floor(i / a.cols) + 0.5) * a.cell); if (d > best && a.hRegrow[i] > 0.9) { best = d; bi = i; } } return bi; })(), v = a.ventList[0], vi = a.cellAt(v.x, v.y);
+    assert.ok(a.nut[vi] > a.nut[far] + 0.25 && a.nut[vi] > b.nut[vi] + 0.2, 'in a vent: ' + a.nut[vi] + ' (it spreads into the water around, so a vent does not sit at the cap)'); assert.ok(a.nut[far] < b.nut[far] - 0.02 && a.nut[far] > 0.2 && Math.abs((a.nut[far] - 0.2) / (b.nut[far] - 0.2) - 0.5) < 0.15, 'far from any: ' + a.nut[far] + ' against ' + b.nut[far] + ' without vents');
+    assert.ok(a.ledger.regrow > 0 && Number.isFinite(a.ledger.regrow)); }
+  // a world saved with vents goes on exactly as it was going, through a vent closing and another opening; and the rule can be switched on in a running world
+  { const w = mk({ vents: 1, ventLife: 20, founders: 20 }); w.seedWith(A.genome.primordial(2)); for (let i = 0; i < 400; i++) w.step(); const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), sig = x => JSON.stringify([Array.from(x.nut), x.ventList, x.rand.state(), x.bodies.map(o => [o.cx, o.cy, o.E])]); assert.strictEqual(sig(c), sig(w)); const before = JSON.stringify(w.ventList);
+    for (let i = 0; i < 1200; i++) { w.step(); c.step(); } assert.strictEqual(sig(c), sig(w)); assert.notStrictEqual(JSON.stringify(w.ventList), before, 'the vents have moved');
+    const p = mk({ founders: 20 }); p.seedWith(A.genome.primordial(2)); for (let i = 0; i < 60; i++) p.step(); p.enable({ vents: 1 }); assert.ok(p.ventList.length >= 1); for (let i = 0; i < 60; i++) p.step(); p.enable({ vents: 0 }); assert.strictEqual(p.ventList, null); for (let i = 0; i < 30; i++) p.step(); }
+});
