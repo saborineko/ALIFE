@@ -971,3 +971,22 @@ test('a world saved before a gene existed resumes: genomes get the starting valu
   for (let i = 0; i < 150; i++) { a.step(); b.step(); } assert.ok(b.bodies.length > 0); assert.ok(b.bodies.every(o => Number.isFinite(o.E) && o.b.segs.every(s => Number.isFinite(s.a))), 'no body lost its signal');
   assert.deepStrictEqual(state(b), state(a));
 });
+
+test('solid: a limb that was cut off is counted once, however often the body is rebuilt or reloaded, and the body no longer pays for its nerves', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, C = A.organs.C, body = () => G.create({ parts: [G.part({ len: 2, r0: 0.5, r1: 0.5, gut: 0.4, store: 0.4, nerve: 0.5, nC: 1, nK: 0.5, nB: 0.2 }), G.part({ len: 1, r0: 0.25, r1: 0.2, muscle: 0.3, amp: 0.3, range: 0.8, nerve: 0.5, nC: 0.7, mJoint: 0.6, nP: 0.4 })],
+    links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.5, off: 0.9, angle: 1.3, scale: 1, repeat: 1 }), G.link({ from: 1, to: 1, sym: 'none', at: 1, off: 0, angle: 0.2, scale: 0.9, repeat: 2 })] });
+  const cut = solid => { const w = new A.engine.World({ seed: 3, n: 0, contact: 1, solid }), o = w.spawn(body(), 40, 30, 1, null); for (let i = 0; i < 30; i++) w.step(); assert.strictEqual(o.b.segs.length, 7);
+    const wiring0 = o.prof.wiring, first = o.b.segs.findIndex((q, i) => i > 0 && q.parent === 0); o.hp = new Array(7).fill(1); o.hp[first] = 0; w.wound(o); return { w, o, wiring0, first }; };
+  { const { w, o, wiring0 } = cut(1), gone = () => o.b.segs.filter(q => q.gone).length;
+    assert.strictEqual(gone(), 3, 'the limb and what is beyond it'); assert.strictEqual(w.counts.cut, 1);
+    assert.ok(Math.abs((wiring0 - o.prof.wiring) - 3 * (0.7 + 0.6 + 0.4)) < 1e-9, 'the nerves of the three lost segments are no longer paid for: ' + wiring0 + ' -> ' + o.prof.wiring);
+    const paid = o.prof.wiring, basal = o.prof.basal;
+    for (let k = 0; k < 3; k++) { w.form(o, o.cx, o.cy, 0); assert.strictEqual(gone(), 3, 'rebuilt: still cut'); assert.strictEqual(w.counts.cut, 1, 'rebuilt: not cut, or counted, again'); assert.ok(Math.abs(o.prof.wiring - paid) < 1e-12 && Math.abs(o.prof.basal - basal) < 1e-12); }
+    for (let i = 0; i < 60; i++) { w.step(); o.E = o.prof.Emax * 0.9; }
+    const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), o2 = c.bodies[0]; for (let i = 0; i < 60; i++) { w.step(); c.step(); o.E = o.prof.Emax * 0.9; o2.E = o2.prof.Emax * 0.9; }
+    assert.strictEqual(c.counts.cut, 1, 'reloaded: the count is what it was'); assert.strictEqual(o2.b.segs.filter(q => q.gone).length, 3); assert.ok(Math.abs(o2.prof.wiring - paid) < 1e-12);
+    assert.strictEqual(JSON.stringify([o2.cx, o2.cy]), JSON.stringify([o.cx, o.cy]), 'and it goes on as the world that was not reloaded'); }
+  // as bodies were first built (without the rule) a segment eaten away stays, works and is paid for: unchanged
+  { const { w, o, wiring0 } = cut(0); assert.strictEqual(o.b.segs.filter(q => q.gone).length, 0); assert.strictEqual(w.counts.cut || 0, 0); assert.ok(Math.abs(o.prof.wiring - wiring0) < 1e-12); }
+});

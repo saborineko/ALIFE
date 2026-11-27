@@ -292,7 +292,7 @@
       if (!this.rigid) o.b.rigid = false; // control experiment: solve every body with the jointed solver
       if (o.b.rigid) o.self = null;
       o.passive = !o.b.hasCilia && o.b.rigid && !this.contact && !this.sound; o.cil0 = 0; // where bodies touch, every body is simulated: even one that cannot move can be pushed
-      o.cleanV = o.prof.V; o.cleanBuild = o.prof.buildCost; if (o.hp) { while (o.hp.length < o.b.segs.length) o.hp.push(1); o.hp.length = o.b.segs.length; this.wound(o); }
+      o.cleanV = o.prof.V; o.cleanBuild = o.prof.buildCost; if (o.hp) { while (o.hp.length < o.b.segs.length) o.hp.push(1); o.hp.length = o.b.segs.length; this.lost(o); this.wound(o); }
       if (this.sound) this.soundBody(o);
       o.cil0 = 0; o.nerve0 = 0; o.b.nerveUse = 0; if (o.sig) { for (let i = 0; i < o.b.segs.length && i < o.sig.length; i++) o.b.segs[i].a = o.sig[i]; o.sig = null; }
     }
@@ -317,9 +317,14 @@
     }
     // (solid) A segment torn through is cut off, with everything beyond it. What is left of the tissue beyond becomes food at the cut, with that tissue's share
     // of the body's reserve and gut contents — the same accounting as a bite.
+    // (solid) What has been cut off stays cut off, and carries no circuit. unwire: the plan's segment gets a copy of its part without connections, so the body's
+    // profile no longer charges it the upkeep of nerves it has lost. lost: on a body that has just been rebuilt (growth, a reloaded world, arrival from another
+    // island), the segments cut off earlier are marked as gone again without being cut - and counted - a second time.
+    unwire(q) { if (!q || q.cut) return; const p = Object.assign({}, q.p); for (const k of A.neural.CIRCUIT) p[k] = 0; delete p.nn; q.p = p; q.cut = true; }
+    lost(o) { if (!this.solid || !o.hp) return; const segs = o.b.segs, ps = o.plan.segs; for (let i = 1; i < segs.length && i < o.hp.length; i++) if (o.hp[i] <= 0) { segs[i].gone = true; this.unwire(ps[i]); } }
     sever(o, j) {
-      const C = A.organs.C, segs = o.b.segs, hp = o.hp, lg = this.ledger, at = segs[j]; let vol = 0; const stack = segs[j].kids.slice(); segs[j].gone = true;
-      while (stack.length) { const k = stack.pop(), q = segs[k]; if (hp[k] > 0) vol += Math.PI * (q.r0 + q.r1) / 2 * (q.z0 + q.z1) / 2 * q.len * hp[k]; hp[k] = 0; q.gone = true; for (const c of q.kids) stack.push(c); }
+      const C = A.organs.C, segs = o.b.segs, hp = o.hp, lg = this.ledger, at = segs[j]; let vol = 0; const stack = segs[j].kids.slice(); segs[j].gone = true; this.unwire(o.plan.segs[j]);
+      while (stack.length) { const k = stack.pop(), q = segs[k]; if (hp[k] > 0) vol += Math.PI * (q.r0 + q.r1) / 2 * (q.z0 + q.z1) / 2 * q.len * hp[k]; hp[k] = 0; q.gone = true; this.unwire(o.plan.segs[k]); for (const c of q.kids) stack.push(c); }
       this.counts.cut = (this.counts.cut || 0) + 1; if (vol <= 1e-9) return;
       const share = Math.min(1, vol / Math.max(1e-9, o.prof.V)), eE = Math.max(0, o.E) * share, eG = o.G * share; o.E -= eE; o.G -= eG; o.lost = (o.lost || 0) + C.flesh * C.build * vol + eE + eG;
       let e = C.flesh * C.build * vol + eE + eG; this.corpse = true;
@@ -1113,7 +1118,7 @@
       for (const s of list || []) {
         const o = this.spawn(A.genome.copy(s.g), ((s.x * this.W) % this.W + this.W) % this.W, clamp(s.y * this.H, 2, this.H - 2), s.stage, null);
         if (lg) lg.placed -= o.E + o.prof.buildCost; // (spawn booked it as a founder; it is booked below as an arrival, with what it really carries)
-        if (s.hp && s.hp.length === o.b.segs.length && s.hp.some(h => h < 1)) { o.hp = Array.from(s.hp); this.wound(o); }
+        if (s.hp && s.hp.length === o.b.segs.length && s.hp.some(h => h < 1)) { o.hp = Array.from(s.hp); this.lost(o); this.wound(o); }
         Object.assign(o, { age: s.age, life: s.life, gen: s.gen, E: s.E, G: s.G, egg: s.egg, grow: s.grow, eaten: s.eaten, absorbed: s.absorbed, path: s.path, kids: s.kids, flesh: s.flesh || 0, lost: s.lost || 0, V0: s.v0, stage0: s.s0, nextCost: s.nextCost == null ? undefined : s.nextCost, nextStage: s.nextStage == null ? undefined : s.nextStage });
         if (this.keep && s.mind) this.mindTo(o, s.mind, false); // (it arrives with what it knew)
         const node = this.tree.get(o.id); if (s.introduction) o.introduction = node.introduction = s.introduction; node.gen = s.gen; node.from = Object.assign({ island: island == null ? null : island }, s.from);
@@ -1157,7 +1162,7 @@
         // taxis: of the distance bodies moved by themselves while perceiving food, the fraction that went towards it.
         // Weighted by distance, and only bodies that really travelled count: a body that merely trembles says nothing.
         taxis: (() => { const l = this.bodies.filter(o => this.traveller(o)); const len = l.reduce((a, o) => a + o.taxLen, 0); return len ? l.reduce((a, o) => a + o.taxDot, 0) / len : 0; })(), taxisN: this.bodies.filter(o => this.traveller(o)).length,
-        turnGain: mean(o => Math.abs(o.g.brain[7])), sessileMulti: mean(o => o.full.mouths.length >= 3 && (o.age > 5 ? o.path / o.age : 0) < 0.01 ? 1 : 0), food: this.food.length, nutrient: this.nut.reduce((a, b) => a + b, 0) / this.nut.length, ...this.counts
+        turnGain: mean(o => Math.abs(o.g.brain[7])), sessileMulti: mean(o => o.full.mouths.length >= 3 && (o.age > 5 ? o.path / o.age : 0) < 0.01 ? 1 : 0), food: this.food.length, unsound: this.bodies.reduce((k, o) => k + (Number.isFinite(o.E) && Number.isFinite(o.cx) && Number.isFinite(o.cy) && o.b.segs.every(q => Number.isFinite(q.a)) ? 0 : 1), 0) /* (a watch, not a rule) living bodies that hold something that is not a number - a reserve, a place, a nerve signal. The world's physics never makes one: any is a fault of the program */, nutrient: this.nut.reduce((a, b) => a + b, 0) / this.nut.length, ...this.counts
       };
     }
   }
