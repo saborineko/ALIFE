@@ -98,6 +98,10 @@
     cast: 0,                              // 1 = how far from itself a body lays its eggs is inherited and mutates (gene `cast`, 0..40 units of length added to the usual distance,
                                           //     starting at 0). 0 = every egg is laid beside its mother (her own size + 1), whatever she is. Nothing is paid for the throw and
                                           //     nothing rewards it: an egg thrown far lands in water its mother has not eaten down, or in a place her kind cannot live.
+    wireGrow: 0,                          // 1 = the upkeep of a segment's nerve connections follows how much of the segment has grown: a segment at a tenth of its full volume pays
+                                          //     a tenth of what the same connections cost in the adult. A full-grown body pays exactly what it paid before. No new number.
+                                          //     0 = the earlier rule: connections cost the same in a newborn as in the adult it grows into, whatever its size.
+                                          //     The circuit itself works the same at every size under both rules. (Experiment: docs/alife2/prereg/2026-11-27-stage1-wiring.md)
     pair: 0,                              // 1 = the two segments of a left-right pair appear at the same stage of growth. 0 = each segment appears in its turn, so a growing body has
                                           //     one of a pair before the other: one eye, one ear, cilia on one side (a quarter to a half of the stages a paired body grows through).
     solid: 0,                             // 1 = (where bodies touch) a body is a solid thing along its whole length. Each segment is a rod with rounded sides from its near end to
@@ -270,7 +274,7 @@
       const was = o.hp && o.plan ? new Map(o.plan.segs.map((s, i) => [s.addr, o.hp[i]])) : null;
       const kept = this.keep && o.b && o.plan ? this.mindOf(o, true) : null;
       const mind = !kept && this.carry && o.b && o.plan ? { t: o.b.t, seg: new Map(o.plan.segs.map((s, i) => { const q = o.b.segs[i]; return [s.addr, [q.a, q.m, q.mA, q.mB, q.mV, q.v, q.na ? Float64Array.from(q.na) : null, q.nA, q.nB, q.nV, q.nw ? Float64Array.from(q.nw) : null]]; })) } : null;
-      o.plan = A.development.develop(o.g, { stage: o.stage, maxSegs: this.maxSegs, pair: this.pair }); o.prof = A.organs.profile(o.plan);
+      o.plan = A.development.develop(o.g, { stage: o.stage, maxSegs: this.maxSegs, pair: this.pair }); o.prof = A.organs.profile(o.plan, this.wireGrow);
       if (was) { o.hp = o.plan.segs.map(s => (was.has(s.addr) ? was.get(s.addr) : 1)); if (this.solid) for (let i = 1; i < o.hp.length; i++) { const pa = o.plan.segs[i].parent; if (pa > 0 && o.hp[pa] <= 0) o.hp[i] = 0; } } // (solid) nothing grows beyond a cut
       o.b = A.physics.build(o.plan, { x, y, angle: ang, env: { fluid: 1, ground: false, gravity: 4, flowX: 0, flowY: 0 } });
       // lay the body's own centre on (x, y)
@@ -366,6 +370,7 @@
       if (o.nibble != null && !!o.nibble !== !!this.nibble) { this.nibble = o.nibble ? 1 : 0; this.log('世界の設定を変更：飲み込めない粒を口が削って食べられる規則を' + (o.nibble ? '有効にした' : '無効にした')); }
       if (o.budget != null && !!o.budget !== !!this.budget) { this.budget = o.budget ? 1 : 0; this.log('世界の設定を変更：出生の収支を合わせる規則（子は卵の予算で作れる段階で生まれる）を' + (o.budget ? '有効にした' : '無効にした')); }
       if (o.cast != null && !!o.cast !== !!this.cast) { this.cast = o.cast ? 1 : 0; this.log('世界の設定を変更：卵を親からどれだけ離して産むかが遺伝し、変異する規則を' + (o.cast ? '有効にした（0 から始まる）' : '無効にした（卵は親のすぐ脇に産まれる）')); }
+      if (o.wireGrow != null && !!o.wireGrow !== !!this.wireGrow) { this.wireGrow = o.wireGrow ? 1 : 0; for (const q of this.bodies) { const pr = A.organs.profile(q.plan, this.wireGrow); q.prof.basal = pr.basal; q.prof.wireCost = pr.wireCost; } this.log('世界の設定を変更：神経の配線の維持費が、体節の育ち具合（成体の体積に対する今の体積）に比例する規則を' + (o.wireGrow ? '有効にした（成体が払う額は変わらない）' : '無効にした（新生個体も成体と同じ額を払う）')); }
       if (o.pair != null && !!o.pair !== !!this.pair) { this.pair = o.pair ? 1 : 0; for (const q of this.bodies) if (q.stage < 1) { q.nextCost = null; const root = q.b.segs[0]; this.form(q, q.cx, q.cy, Math.atan2(root.dy, root.dx)); } this.log('世界の設定を変更：左右の対が成長の同じ段階で一緒に現れる規則を' + (o.pair ? '有効にした' : '無効にした')); }
       if (o.solid != null && !!o.solid !== !!this.solid) { this.solid = o.solid ? 1 : 0; for (const q of this.bodies) { q.b.hard = !!this.solid; q.self = this.solid && !q.b.rigid ? this.selfPairs(q) : null; if (q.hp) this.wound(q); } this.log('世界の設定を変更：身体を全長にわたって固い物体として扱う規則（側面の接触・自分自身との接触・関節の止まり・失った組織の重さ・切断）を' + (o.solid ? '有効にした' : '無効にした')); }
       if (o.wire != null && !!o.wire !== !!this.wire) { this.wire = o.wire ? 1 : 0; this.log('世界の設定を変更：神経に名前を付け、結合が相手を名前で指す規則を' + (o.wire ? '有効にした（神経が減っても増えても、ほかの結合はずれない）' : '無効にした')); }
@@ -727,7 +732,7 @@
       const hp = o.hp, segs = o.b.segs; if (!hp) return;
       if (this.solid) for (let i = 1; i < segs.length; i++) if (hp[i] <= 0 && !segs[i].gone) this.sever(o, i);
       for (let i = 0; i < segs.length; i++) { const h = hp[i], s = segs[i]; o.plan.segs[i].hp = h; if (s.base == null) s.base = [s.tauMax, s.cil, s.padCap || 0]; s.tauMax = s.base[0] * h; s.cil = s.base[1] * h; s.padCap = s.base[2] * h; s.hp = h; }
-      o.prof = A.organs.profile(o.plan); if (this.sound) this.soundBody(o);
+      o.prof = A.organs.profile(o.plan, this.wireGrow); if (this.sound) this.soundBody(o);
       if (this.solid) { A.physics.remass(o.b, hp); for (let i = 1; i < segs.length; i++) { const s = segs[i]; if (s.gone) { s.circ = false; s.a = 0; if (s.na) s.na.fill(0); s.vk = 0; } } } // (what is gone weighs nothing, catches no water and carries no signal)
       if (hp[0] < 0.05 || o.prof.V < 0.3 * o.cleanV) o.dead = 'killed';
     }

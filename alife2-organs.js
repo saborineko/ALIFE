@@ -34,7 +34,10 @@
     flesh: 0.5            // share of the cost of building tissue that is still in it as food (the same share a dead body leaves)
   };
 
-  function profile(plan) {
+  // (wireGrow) how much of its full-grown volume a segment has: length x radius x depth, by the same factors development grows it with. 1 in an adult.
+  const grown = (s, stage) => { const g = s.g == null ? 1 : s.g, total = 0.3 + 0.7 * stage, k = (0.35 + 0.65 * g) * total; return g * total * k * k; };
+  // wireGrow (optional, a world's rule): a segment's connections cost upkeep in proportion to how much of the segment has grown.
+  function profile(plan, wireGrow) {
     const o = { V: 0, area: 0, Vgut: 0, Vgonad: 0, Vmuscle: 0, Vnerve: 0, Emax: 0, basal: 0, absorb: [], mouths: [], eye: 0, cilia: 0, wiring: 0, segs: plan.segs.length };
     for (const s of plan.segs) {
       // hp: how much of this segment's tissue is left (1 = whole). What is gone does nothing and costs nothing.
@@ -43,7 +46,7 @@
       o.Emax += v * (C.store0 + C.store1 * p.store);
       o.basal += v * (C.basal + u.muscle * p.muscle + u.nerve * p.nerve + u.gut * p.gut + u.vessel * p.vessel + u.gonad * p.gonad + u.store * p.store + u.eye * p.eye + u.armor * p.armor + u.mouth * p.mouth + u.ear * (p.ear || 0) + u.voice * (p.voice || 0));
       o.basal += a * C.surface + a * (p.cilia || 0) * C.ciliaUpkeep; o.cilia += a * (p.cilia || 0);
-      const wire = A.neural ? A.neural.wiring(p) : 0; o.wiring += wire; o.basal += wire * C.synapse; // every wired segment pays for its connections
+      const wire = A.neural ? A.neural.wiring(p) : 0; o.wiring += wire; if (wireGrow) { const c = wire * C.synapse * grown(s, plan.stage == null ? 1 : plan.stage); o.basal += c; o.wireCost = (o.wireCost || 0) + c; } else o.basal += wire * C.synapse; // every wired segment pays for its connections
       o.absorb.push(a * Math.max(0, 1 - p.skin - p.armor));
       if (p.mouth > 0.1 && s.tip) o.mouths.push({ seg: s.id, gape: s.r1 * (0.3 + 0.7 * p.mouth) * hp });
       if (p.eye > 0.1) o.eye = Math.max(o.eye, p.eye * Math.max(s.r0, s.r1) * hp);
