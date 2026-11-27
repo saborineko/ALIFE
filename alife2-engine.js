@@ -193,10 +193,47 @@
     isGround(x, y) { return this.regions ? (this.shore > 0 ? this.slope(x, false) > 0.5 : this.hGround[this.cellAt(x, clamp(y, 0, this.H - 0.01))] === 1) : y >= this.yBottom; }
     seedWith(genome, n) { for (let i = 0; i < (n || this.founders); i++) this.spawn(A.genome.copy(genome), this.rand() * this.W, this.rand() * this.H, 1, null); }
 
+    // Human intervention adds founders to this world, never resets or advances it.
+    introduce(data, opt = {}) {
+      if (!data || data.format !== 'alife2-genome-1' || !Number.isFinite(data.hue) || !Array.isArray(data.parts) || !data.parts.length || !Array.isArray(data.links) || data.parts.some(p => !p || typeof p !== 'object') || data.links.some(l => !l || typeof l !== 'object')) throw new Error('探索で保存した遺伝子 JSON を選んでください');
+      const count = Number(opt.count == null ? 1 : opt.count), place = opt.place || 'random', age = opt.age || 'adult';
+      if (!Number.isSafeInteger(count) || count < 1 || count > 1000) throw new Error('投入数は 1〜1000 の整数で指定してください');
+      if (!['random', 'center', 'ocean', 'bottom'].includes(place) || !['adult', 'juvenile'].includes(age)) throw new Error('投入条件が不正です');
+      const g = A.genome.sanitize(A.genome.copy(data)); g.origin = 'artificial-introduced';
+      const stage = age === 'adult' ? 1 : g.birth;
+      // Validate development before changing world state. spawn owns bodies, genealogy and energy accounting.
+      A.development.develop(g, { stage, maxSegs: this.maxSegs, pair: this.pair });
+      let sites = null;
+      if (place === 'ocean' || place === 'bottom') {
+        sites = [];
+        for (let y = this.cell / 2; y < this.H; y += this.cell) for (let x = this.cell / 2; x < this.W; x += this.cell) {
+          const ground = this.isGround(x, y), ocean = this.regions ? this.regions[this.regionAt(x)].name === '外洋' && !ground : !ground;
+          if (place === 'bottom' ? ground : ocean) sites.push([x, y]);
+        }
+        if (!sites.length) throw new Error('この世界には指定された投入場所がありません');
+      }
+      const center = opt.center || { x: this.W / 2, y: this.H / 2 };
+      if (place === 'center' && (!Number.isFinite(center.x) || !Number.isFinite(center.y))) throw new Error('画面中央の座標が不正です');
+      const group = { seed: this.seed, root: this.nextId, t: this.t, count, place, age };
+      const got = [];
+      for (let i = 0; i < count; i++) {
+        const xy = sites ? sites[this.rand.int(sites.length)] : place === 'center' ? [((center.x % this.W) + this.W) % this.W, clamp(center.y, 2, this.H - 2)] : [this.rand() * this.W, 2 + this.rand() * (this.H - 4)];
+        const o = this.spawn(A.genome.copy(g), xy[0], xy[1], stage, null), node = this.tree.get(o.id);
+        o.introduction = node.introduction = group;
+        o.line = node.line = group.root; this.clades.get(o.clade).line = group.root;
+        got.push(o);
+      }
+      (this.introductions || (this.introductions = [])).push(group);
+      this.counts.introduced = (this.counts.introduced || 0) + count;
+      this.log('人為的な外来個体の投入：系統 ' + group.root + '、' + count + ' 匹、' + place + '、' + age + '（自然進化による出現ではない）');
+      return got;
+    }
+
     spawn(g, x, y, stage, parent) {
       if (this.noCilia) for (const p of g.parts) p.cilia = 0;
       const o = { id: this.nextId++, g, stage, taxDot: 0, taxLen: 0, taxN: 0, sx: x, sy: y, age: 0, G: 0, egg: 0, grow: 0, dead: false, noise: 0, wander: this.rand() * TAU, path: 0, eaten: 0, absorbed: 0, kids: 0,
         parent: parent ? parent.id : 0, line: parent ? parent.line : this.nextId - 1, gen: parent ? parent.gen + 1 : 0, born: this.t };
+      if (parent && parent.introduction) o.introduction = parent.introduction;
       const C = A.organs.C, baby = A.organs.profile(A.development.develop(g, { stage: g.birth, maxSegs: this.maxSegs, pair: this.pair }));
       { const plan = A.development.develop(g, { maxSegs: this.maxSegs }); o.full = A.organs.profile(plan); o.gu = this.geneUse(g, plan); } o.life = o.full.life * (0.85 + 0.3 * this.rand());
       { const y = this.yolkOf(g); o.eggCost = C.eggFixed + baby.buildCost + y * baby.Emax; o.eggE = y * baby.Emax; }
@@ -208,6 +245,7 @@
       o.kind = [o.full.segs, o.full.mouths.length, o.full.eye > 0 ? 1 : 0, this.motile(g) ? 1 : 0, o.full.cilia > 0.05 ? 1 : 0].join('/');
       const pn = parent ? this.tree.get(parent.id) : null;
       this.tree.set(o.id, { id: o.id, parent: o.parent, line: o.line, gen: o.gen, born: this.t, died: null, cause: null, kind: o.kind, V: o.full.V, hue: g.hue, kids: 0, changed: !pn || pn.kind !== o.kind, g });
+      if (o.introduction) this.tree.get(o.id).introduction = o.introduction;
       if (pn) pn.kids++;
       // a clade = everything descended from the individual in which a body plan first appeared, until the plan changes again.
       // Its record is kept after it dies out: extinct ways of living are evidence too.
@@ -570,7 +608,7 @@
     }
     note(o) {
       const F = this.firsts, f = o.full, once = (k, text) => { if (!F[k]) { F[k] = o.id; this.log(text, o.id); } };
-      if (o.gen === 0) return;
+      if (o.gen === 0 || o.introduction) return; // introduced ancestry is not a natural-evolution first
       if (f.segs > 1) once('multi', '初の多体節（' + f.segs + ' 体節）');
       if (f.mouths.length > 1) once('mouths', '初の複数の口（' + f.mouths.length + ' 個）');
       if (f.eye > 0) once('eye', '初の眼');
@@ -988,7 +1026,7 @@
         nut: Array.from(this.nut), scA: this.scent ? Array.from(this.scA) : undefined, scB: this.scent ? Array.from(this.scB) : undefined, food: this.food.filter(f => f.e > 0).map(f => [f.x, f.y, f.size, f.e, f.fixed ? 1 : 0, f.die]),
         snd: this.sound && this.snd ? { f: this.snd.map(b64), i: this.sndIn.map(b64), v: this.sndV.map(b64), vi: this.sndVIn.map(b64), aco: this.aco } : undefined,
         patch: this.patch, grainDebt: this.grainDebt || 0, bottomDebt: this.bottomDebt || 0, liveLines: this.liveLines ? [...this.liveLines] : null, regionState: this.regions ? this.regions.map(q => ({ debt: q.debt, patch: q.patch })) : null,
-        counts: this.counts, events: this.events, history: this.history, firsts: this.firsts, pruned: this.pruned, tree: [...this.tree.values()],
+        introductions: this.introductions, counts: this.counts, events: this.events, history: this.history, firsts: this.firsts, pruned: this.pruned, tree: [...this.tree.values()],
         // body plans that only one or two bodies ever had keep their numbers but not their genome (worlds begun before this rule still carry them)
         clades: [...this.clades.values()].map(c => c.ended != null && c.members <= 2 && c.g ? Object.assign({}, c, { g: null }) : c), cladesDropped: this.cladesDropped || 0,
         bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home, v0: o.V0, s0: o.stage0, si: o.seepIn || undefined, so: o.seepOut || undefined, hd: o.held == null ? undefined : o.held, p2: o.p2 || undefined, got: o.got ? [o.got.id, o.got.g] : undefined, vo: o.voN ? [o.voOn ? 1 : 0, o.voN, o.voT || 0, o.voE || 0] : undefined, hp: o.hp || undefined, flesh: o.flesh || undefined, lost: o.lost || undefined,
@@ -1000,13 +1038,14 @@
     // Older saves (without `exact`) lack pose, velocities, rhythm phase, sensory memory and birth region: bodies then restart from rest.
     static restore(d) {
       if (!d || d.format !== 'alife2-world-1') throw new Error('not an ALIFE 2.0 world');
-      const w = new World(d.opt); w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = Object.assign({}, d.counts); for (const k of ['killed', 'flesh', 'torn', 'stillborn']) if (w.counts[k] == null) w.counts[k] = 0; /* worlds saved before bodies could touch */ w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
+      const w = new World(d.opt); w.introductions = d.introductions; w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = Object.assign({}, d.counts); for (const k of ['killed', 'flesh', 'torn', 'stillborn']) if (w.counts[k] == null) w.counts[k] = 0; /* worlds saved before bodies could touch */ w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
       if (w.sound && d.snd) { w.snd = d.snd.f.map(unb64); w.sndIn = d.snd.i.map(unb64); w.sndV = d.snd.v.map(unb64); w.sndVIn = d.snd.vi.map(unb64); w.aco = Object.assign(w.acoNew(), d.snd.aco || {}); while (w.aco.lis.length < 3) w.aco.lis.push(w.acoNew().lis[0]); for (const c of w.aco.lis) if (!c.ids) c.ids = {}; /* (worlds saved before the notebook grew keep what they had) */ }
       for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: d.exact ? f[5] : w.t + f[5] });
       if (d.exact) { w.grainDebt = d.grainDebt; w.bottomDebt = d.bottomDebt; if (d.liveLines) w.liveLines = new Set(d.liveLines); if (d.regionState && w.regions) d.regionState.forEach((q, i) => { w.regions[i].debt = q.debt; w.regions[i].patch = q.patch; }); }
       const nodes = new Map(d.tree.map(n => [n.id, n]));
       for (const s of d.bodies) {
         const n = nodes.get(s.id), o = { id: s.id, g: n.g, stage: s.stage, age: s.age, G: s.G, egg: s.egg, grow: s.grow, dead: false, noise: 0, wander: 0, path: s.path, eaten: s.eaten, absorbed: s.absorbed, kids: s.kids, parent: n.parent, line: n.line, gen: n.gen, born: s.born, kind: n.kind, clade: n.clade, sig: s.sig || null, home: s.home || 0, taxDot: 0, taxLen: 0, taxN: 0, V0: s.v0, stage0: s.s0, seepIn: s.si || 0, seepOut: s.so || 0, held: s.hd == null ? undefined : s.hd, p2: s.p2 || 0, got: s.got ? { id: s.got[0], g: s.got[1] } : null, voOn: s.vo ? !!s.vo[0] : false, voN: s.vo ? s.vo[1] : 0, voT: s.vo ? s.vo[2] : 0, voE: s.vo ? s.vo[3] : 0, hp: s.hp || null, flesh: s.flesh || 0, lost: s.lost || 0 };
+        if (n.introduction) o.introduction = n.introduction;
         const baby = A.organs.profile(A.development.develop(o.g, { stage: o.g.birth, maxSegs: w.maxSegs, pair: w.pair })), C = A.organs.C;
         { const plan = A.development.develop(o.g, { maxSegs: w.maxSegs }); o.full = A.organs.profile(plan); o.gu = w.geneUse(o.g, plan); } o.life = s.life; { const y = w.yolkOf(o.g); o.eggCost = C.eggFixed + baby.buildCost + y * baby.Emax; o.eggE = y * baby.Emax; }
         w.form(o, s.x, s.y, s.angle); o.E = s.E;
@@ -1035,7 +1074,7 @@
         if (cl) { cl.alive--; cl.dead++; cl.causes.left = (cl.causes.left || 0) + 1; cl.eaten += o.eaten; cl.absorbed += o.absorbed; cl.path += o.path; cl.lived += o.age; cl.kids += o.kids; if (cl.alive === 0) { cl.ended = this.t; if (cl.members <= 2) cl.g = null; } }
         const node = this.tree.get(o.id); if (node) { node.died = this.t; node.cause = 'left'; node.life = { eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, stage: o.stage }; }
         if (lg) lg.left = (lg.left || 0) + o.E + o.G + o.grow + o.egg + o.prof.buildCost;
-        out.push({ g: A.genome.copy(o.g), stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, life: o.life, gen: o.gen, x: o.cx / this.W, y: o.cy / this.H, hp: o.hp ? Array.from(o.hp) : null, flesh: o.flesh || 0, lost: o.lost || 0,
+        out.push({ introduction: o.introduction, g: A.genome.copy(o.g), stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, life: o.life, gen: o.gen, x: o.cx / this.W, y: o.cy / this.H, hp: o.hp ? Array.from(o.hp) : null, flesh: o.flesh || 0, lost: o.lost || 0,
           eaten: o.eaten, absorbed: o.absorbed, path: o.path, kids: o.kids, v0: o.V0, s0: o.stage0, nextCost: o.nextCost == null ? null : o.nextCost, nextStage: o.nextStage == null ? null : o.nextStage, mind: this.keep ? this.mindOf(o, false) : undefined, from: { id: o.id, line: o.line, t: this.t } });
       }
       return out;
@@ -1048,7 +1087,7 @@
         if (s.hp && s.hp.length === o.b.segs.length && s.hp.some(h => h < 1)) { o.hp = Array.from(s.hp); this.wound(o); }
         Object.assign(o, { age: s.age, life: s.life, gen: s.gen, E: s.E, G: s.G, egg: s.egg, grow: s.grow, eaten: s.eaten, absorbed: s.absorbed, path: s.path, kids: s.kids, flesh: s.flesh || 0, lost: s.lost || 0, V0: s.v0, stage0: s.s0, nextCost: s.nextCost == null ? undefined : s.nextCost, nextStage: s.nextStage == null ? undefined : s.nextStage });
         if (this.keep && s.mind) this.mindTo(o, s.mind, false); // (it arrives with what it knew)
-        const node = this.tree.get(o.id); node.gen = s.gen; node.from = Object.assign({ island: island == null ? null : island }, s.from);
+        const node = this.tree.get(o.id); if (s.introduction) o.introduction = node.introduction = s.introduction; node.gen = s.gen; node.from = Object.assign({ island: island == null ? null : island }, s.from);
         const cl = this.clades.get(o.clade); if (cl && cl.id === o.id) { cl.gen0 = cl.genMax = s.gen; cl.arrived = 1; /* this plan did not arise here: records of novelty leave it out */ } else if (cl && s.gen > cl.genMax) cl.genMax = s.gen;
         if (lg) lg.arrived = (lg.arrived || 0) + o.E + o.G + o.grow + o.egg + o.prof.buildCost;
         this.counts.arrived = (this.counts.arrived || 0) + 1; got.push(o);

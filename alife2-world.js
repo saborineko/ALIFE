@@ -346,7 +346,7 @@
       zx.fillStyle = '#07121d'; zx.fillRect(0, 0, zc.width, zc.height);
       zoomR.draw(zx, sel.b.segs, { cx: cm[0], cy: cm[1], scale: sc, w: zc.width, h: zc.height }, { hue: sel.g.hue, glow: false, time: sel.b.t, clock: w.t, gut: sel.G / Math.max(1e-6, sel.prof.gutCap), speed: sel._v || 0, fill: sel.E / sel.prof.Emax, drive: sel.b.cmd.drive });
       const p = sel.prof, inc = sel.eaten + sel.absorbed;
-      $('info').textContent = (notice ? notice + '\n' : '') + (ruleName ? '［' + ruleName + 'を自動で観察中］ ' : '') + '#' + sel.id + ' / 由来 ' + ({ evolved: 'evolved（自然進化）', primordial: 'primordial（始祖）', 'evolved-from-artificial': 'evolved-from-artificial（人工個体の子孫）' }[sel.g.origin] || sel.g.origin + '（人工）') + ' / 系統 ' + sel.line + (sel.p2 ? '（2 つの遺伝子から：産んだ親 #' + sel.parent + '、もう一方 #' + sel.p2 + '）' : '') + ' / 世代 ' + sel.gen + ' / 変異 ' + sel.g.mutations + ' 回\n齢 ' + sel.age.toFixed(0) + ' / ' + sel.life.toFixed(0) + ' 秒 / 成熟段階 ' + sel.stage.toFixed(2) + ' / 子 ' + sel.kids + ' / 出生時の大きさ ' + sel.g.birth.toFixed(2)
+      $('info').textContent = (notice ? notice + '\n' : '') + (ruleName ? '［' + ruleName + 'を自動で観察中］ ' : '') + '#' + sel.id + ' / 由来 ' + ({ evolved: 'evolved（自然進化）', primordial: 'primordial（始祖）', 'evolved-from-artificial': 'evolved-from-artificial（人工個体の子孫）' }[sel.g.origin] || sel.g.origin + '（人工）') + ' / 系統 ' + sel.line + (sel.p2 ? '（2 つの遺伝子から：産んだ親 #' + sel.parent + '、もう一方 #' + sel.p2 + '）' : '') + (sel.introduction ? ' / 人為投入系統 ' + sel.introduction.seed + ':' + sel.introduction.root + '（' + sel.introduction.t.toFixed(1) + ' 秒）' : '') + ' / 世代 ' + sel.gen + ' / 変異 ' + sel.g.mutations + ' 回\n齢 ' + sel.age.toFixed(0) + ' / ' + sel.life.toFixed(0) + ' 秒 / 成熟段階 ' + sel.stage.toFixed(2) + ' / 子 ' + sel.kids + ' / 出生時の大きさ ' + sel.g.birth.toFixed(2)
         + '\n体節 ' + sel.b.segs.length + '（成体 ' + sel.full.segs + '）/ 体積 ' + p.V.toFixed(2) + ' / 口 ' + p.mouths.length + ' / 部品 ' + sel.g.parts.length + ' 種・規則 ' + sel.g.links.length + ' 本'
         + '\n遺伝子：部品 ' + sel.gu.parts + '（規則が届く ' + sel.gu.reach + '・身体に現れる ' + sel.gu.expr + ' 種類・休眠 ' + (sel.gu.parts - sel.gu.reach) + '）' + (() => { const G = A.genome, li = G.axisOf(sel.g, sel.g.root); return li < 0 ? '' : ' / 根の軸：' + G.zones(sel.g, li).map(z => '部品' + z.part + '×' + z.len).join(' → ') + (sel.gu.zones ? '（複製元との差 ' + (sel.gu.div * 100).toFixed(1) + '%）' : ''); })()
         + (sel.g.parts.some(p => p.nn) ? '\n神経：' + sel.g.parts.map((p, i) => (p.nn ? '部品' + i + '［' + p.nn.map(q => q.in.map(e => e[0] + (e[1] >= 0 ? '+' : '') + e[1].toFixed(1)).join(' ') + ' → ' + (q.out.map(e => e[0] + (e[1] >= 0 ? '+' : '') + e[1].toFixed(1)).join(' ') || '出力なし')).join(' ｜ ') + '］' : '')).filter(Boolean).join(' ') : '')
@@ -420,7 +420,20 @@
       const kk = set ? await openSet(set) : openSaved(text), added = Object.keys(want).filter(k => !w[k]); enableAll(want); for (const k in names) $(k).checked = !!w[k];
       $('saveNote').textContent = '読み込んだ（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体' + (kk > 1 ? '、島 ' + kk + ' 個' : '') + '）。' + (added.length ? 'チェックしてあった設定をこの世界に足した：' + added.map(k => names[k]).join('、') + '。ここから先は元の世界とは別の歴史になる。' : '設定と地図はこの世界が保存されたときのもの。視覚や匂いはチェックを入れれば、沿岸などへは「世界」の欄で選べば、いまの個体のまま移せる。'); } catch (err) { $('saveNote').textContent = '読み込めない：' + err.message; } };
   $('resume').onclick = async () => { try { let d = await dbGet('autosave'); if (d == null) d = localStorage.getItem(KEY); if (d == null) { $('saveNote').textContent = '自動保存は無い。'; return; } if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); $('saveNote').textContent = '自動保存から再開（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。'; } catch (err) { $('saveNote').textContent = '再開できない：' + (err && err.message || err); } };
-  $('csv').onclick = () => { const rows = ['id,parent,line,generation,born,died,cause,segments,mouths,eye,working_joint,adult_volume,children,mutations']; for (const n of w.tree.values()) rows.push([n.id, n.parent, n.line, n.gen, Math.round(n.born), n.died == null ? '' : Math.round(n.died), n.cause || '', ...n.kind.split('/'), n.V.toFixed(3), n.kids, n.g.mutations].join(',')); download('alife2-lineage-t' + Math.round(w.t) + '.csv', rows.join('\n'), 'text/csv'); };
+  $('introduce').onclick = async () => {
+    const button = $('introduce'); button.disabled = true;
+    try {
+      const file = $('introFile').files[0]; if (!file) throw new Error('遺伝子 JSON を選んでください');
+      if (file.size > 2 * 1024 * 1024) throw new Error('遺伝子ファイルは 2 MB 以下にしてください');
+      const target = w, data = JSON.parse(await file.text());
+      if (w !== target) throw new Error('表示中の島が変わりました。もう一度投入してください');
+      const got = w.introduce(data, { count: Number($('introCount').value), place: $('introPlace').value, age: $('introAge').value, center: { x: view.cx, y: view.cy } });
+      sel = got[0]; shown = null; lastPanels = 0;
+      $('introNote').textContent = got.length + ' 匹を人為的に投入した。投入系統 ' + sel.introduction.root + '（元の世界 seed ' + sel.introduction.seed + '、' + sel.introduction.t.toFixed(1) + ' 秒）。';
+    } catch (e) { $('introNote').textContent = '投入できない：' + e.message; }
+    finally { button.disabled = false; }
+  };
+  $('csv').onclick = () => { const rows = ['id,parent,line,generation,born,died,cause,segments,mouths,eye,working_joint,adult_volume,children,mutations,introduction_seed,introduction_root,introduction_time']; for (const n of w.tree.values()) rows.push([n.id, n.parent, n.line, n.gen, Math.round(n.born), n.died == null ? '' : Math.round(n.died), n.cause || '', ...n.kind.split('/'), n.V.toFixed(3), n.kids, n.g.mutations, n.introduction ? n.introduction.seed : '', n.introduction ? n.introduction.root : '', n.introduction ? n.introduction.t : ''].join(',')); download('alife2-lineage-t' + Math.round(w.t) + '.csv', rows.join('\n'), 'text/csv'); };
   $('rank').onchange = $('lostFilter').onchange = () => { lastPanels = 0; };
   // The choice to save automatically is remembered. With it on, opening the page again (a forced reload included)
   // carries on from the last automatic save instead of starting a new world.
