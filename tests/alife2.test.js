@@ -710,6 +710,26 @@ test('wire: neurons with names. Removing a neuron leaves every other connection 
     const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); for (let i = 0; i < 300; i++) { w.step(); c.step(); } assert.strictEqual(JSON.stringify(c.bodies.map(o => [o.cx, o.E])), JSON.stringify(w.bodies.map(o => [o.cx, o.E]))); }
 });
 
+test('cast: how far from itself a body lays its eggs is a gene; it starts at 0, changes only where the rule holds, and is drawn in mixing only there; off by default', () => {
+  const G = A.genome, r = G.rng(3), base = G.primordial(1);
+  let moved = 0; for (let i = 0; i < 400; i++) { const m = G.mutate(base, r, 1, 'gn'); if (m.cast != null) moved++; } assert.strictEqual(moved, 0, 'without the rule no genome gets the gene');
+  let got = 0, far = 0; for (let i = 0; i < 400; i++) { const m = G.mutate(base, r, 1, 'gnd'); if (m.cast != null) { got++; assert.ok(m.cast >= 0 && m.cast <= 40); if (m.cast > 0) far++; } } assert.ok(got > 40 && far > 10, 'with it the gene appears and moves: ' + got + ', ' + far);
+  // mixing: the same random numbers as before unless the rule holds
+  { const a = G.primordial(1), b = Object.assign(G.primordial(2), { cast: 9 }), r1 = G.rng(8), r2 = G.rng(8); const x = G.recombine(a, b, r1, false), y = G.recombine(a, b, r2, false, 0); assert.strictEqual(JSON.stringify(x), JSON.stringify(y)); assert.strictEqual(r1(), r2());
+    let took = 0; const r3 = G.rng(9); for (let i = 0; i < 200; i++) if (G.recombine(a, b, r3, false, 1).cast === 9) took++; assert.ok(took > 60 && took < 140, 'where the rule holds, the gene comes from either parent: ' + took); }
+  assert.strictEqual(new A.engine.World({ seed: 3, founders: 0, cap: 0 }).cast, 0);
+  // in a world: eggs of a mother with the gene land far from her; without the rule, or without the gene, beside her
+  const lay = (opt, cast) => { const w = new A.engine.World(Object.assign({ seed: 5, founders: 0, mutation: 0 }, opt)), g = G.primordial(5); if (cast != null) g.cast = cast; const m = w.spawn(g, 80, 50, 1, null), d = [];
+    for (let i = 0; i < 3000 && d.length < 12; i++) { const n = w.bodies.length; m.E = m.prof.Emax; m.egg = m.eggCost; w.step(); for (const o of w.bodies.slice(n)) if (o.parent === m.id) { let dx = Math.abs(o.sx - m.cx); if (dx > w.W / 2) dx = w.W - dx; d.push(Math.hypot(dx, o.sy - m.cy)); } } return d; };
+  const beside = lay({ cast: 1 }, null), far2 = lay({ cast: 1 }, 20), off = lay({}, 20);
+  assert.ok(beside.length >= 8 && beside.every(x => x < 3), 'no gene: beside the mother: ' + beside.map(x => x.toFixed(1))); assert.ok(far2.length >= 8 && far2.every(x => x > 15 && x < 26), 'gene 20: about twenty units further: ' + far2.map(x => x.toFixed(1)));
+  assert.ok(off.every(x => x < 3), 'the gene does nothing in a world without the rule: ' + off.map(x => x.toFixed(1)));
+  // a world with the rule evolves, saves and continues exactly; switching it on is logged
+  { const w = new A.engine.World({ seed: 5, cast: 1 }); w.seedWith(G.primordial(5)); for (let i = 0; i < 3000; i++) w.step(); const c = w.census(); assert.ok(Number.isFinite(c.castGene) && w.bodies.some(o => o.g.cast > 0), 'the gene arises: ' + c.castGene);
+    const v = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); assert.strictEqual(v.cast, 1); for (let i = 0; i < 300; i++) { w.step(); v.step(); } assert.strictEqual(JSON.stringify(v.bodies.map(o => [o.cx, o.E])), JSON.stringify(w.bodies.map(o => [o.cx, o.E])));
+    const u = new A.engine.World({ seed: 3, founders: 0, cap: 0 }); u.enable({ cast: 1 }); assert.ok(u.cast === 1 && /卵を親からどれだけ離して/.test(u.events[u.events.length - 1].text)); }
+});
+
 test('pair: the two segments of a left-right pair appear at the same stage of growth; the grown body is the same; off by default; switched in a running world', () => {
   const G = A.genome, g = G.create({ parts: [G.part({ len: 1, r0: 0.5, r1: 0.4, cilia: 0.3 }), G.part({ len: 0.5, r0: 0.25, r1: 0.2, eye: 0.5, cilia: 0.4 })], links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.3, off: 0.8, angle: 1.0, scale: 1, repeat: 1 })] });
   const eyes = (st, pair) => A.development.develop(g, { stage: st, pair }).segs.filter(q => q.p.eye > 0.1).length;

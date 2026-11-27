@@ -142,6 +142,7 @@
     g.odor = clamp(Number.isFinite(g.odor) ? g.odor : 0.5, 0, 1); // what the body leaks: this share as substance A, the rest as B. Inherited, so relatives smell alike
     if (g.mut != null) g.mut = clamp(Number.isFinite(g.mut) ? g.mut : 1, 0.1, 3); // how strongly this lineage mutates (only in worlds where that evolves)
     if (g.mutW != null) g.mutW = clamp(Number.isFinite(g.mutW) ? g.mutW : 1, 0.1, 3); // how wide its steps are (only in worlds that keep frequency and width apart)
+    if (g.cast != null) g.cast = clamp(Number.isFinite(g.cast) ? g.cast : 0, 0, 40); // how much farther from itself a body lays its eggs, in units of length (only in worlds where that evolves)
     if (g.yolk != null) g.yolk = clamp(Number.isFinite(g.yolk) ? g.yolk : 0.5, 0.05, 3); // how much reserve an egg is given, as a share of what the young can hold (only in worlds where that evolves)
     g.birth = clamp(Number.isFinite(g.birth) ? g.birth : 0.3, 0.2, 0.9); // how developed offspring are when released (bigger young cost more each)
     if (!Array.isArray(g.brain) || g.brain.length !== BRAIN_IN * BRAIN_OUT) g.brain = [2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
@@ -308,6 +309,7 @@
     if (extra === true || (extra && extra.includes('m'))) g.mut = (g.mut == null ? 1 : g.mut) * Math.exp(r.gauss() * 0.15); // the mutation strength itself drifts, by a step that does not depend on it
     if ((extra === true || (extra && extra.includes('x'))) && r() < 0.2) g.odor += r.gauss() * 0.08 * s;
     if ((extra === true || (extra && extra.includes('i'))) && r() < 0.2) g.yolk = (g.yolk == null ? 0.5 : g.yolk) * Math.exp(r.gauss() * 0.2 * s);
+    if (extra && extra !== true && extra.includes('d') && r() < 0.2) g.cast = (g.cast == null ? 0 : g.cast) + r.gauss() * 2 * s; // (it starts at 0 and moves by steps: nothing favours a longer throw by itself)
     for (let i = 0; i < g.brain.length; i++) if (r() < 0.2) g.brain[i] += r.gauss() * 0.35 * s;
     g.mutations = (g.mutations || 0) + 1;
     if (g.origin === 'artificial') g.origin = 'artificial-mutated';
@@ -319,7 +321,7 @@
   // genes lie in a row and are cut at one place: one side comes from one parent, the rest from the other — neighbouring genes tend to stay
   // together, genes far apart are easily parted. A part's neurons go with the far end of the row. A shared rule is tuned as in one parent or
   // the other. The genes of the whole body are drawn one by one. A part or rule that the other genome lacks stays as it is.
-  function recombine(a, b, r, sound) {
+  function recombine(a, b, r, sound, cast) {
     const g = copy(a), ids = g.parts.some(p => p.id != null) && b.parts.some(p => p.id != null), K = Object.keys(PART_FIELDS).filter(k => sound || PART_FIELDS[k][4] !== 's') /* (the genes of sound join the row only where sound exists: other worlds mix exactly as before) */, pb = new Map(), lb = new Map();
     b.parts.forEach((p, i) => { if (!ids || p.id != null) pb.set(ids ? p.id : i, p); }); b.links.forEach((l, i) => { if (!ids || l.id != null) lb.set(ids ? l.id : i, l); });
     g.parts.forEach((p, i) => {
@@ -334,6 +336,7 @@
       if (r() < 0.5 && same) for (const k in LINK_FIELDS) l[k] = m[k];
     });
     for (const k of ['hue', 'freq', 'odor', 'birth', 'mut', 'yolk']) if (r() < 0.5 && g[k] != null && b[k] != null) g[k] = b[k];
+    if (cast && r() < 0.5 && b.cast != null) g.cast = b.cast; // (drawn only in worlds where the laying distance is a gene: other worlds draw the same numbers as before)
     if (r() < 0.5 && b.brain && b.brain.length === g.brain.length) g.brain = b.brain.slice();
     return sanitize(g);
   }

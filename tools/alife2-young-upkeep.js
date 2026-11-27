@@ -1,0 +1,27 @@
+// What is a newborn's upkeep made of, and which part of it rises in mutated newborns that need richer water than their mother's kind?
+// In saved evolved worlds; it counts, nothing is changed. "Need": the water a body must have to pay its upkeep through its skin alone.
+// Usage: node tools/alife2-young-upkeep.js <seconds> <world.json.gz> [...]
+const A = require('../alife2-genome.js'); for (const f of ['development', 'neural', 'physics', 'organs', 'engine']) require('../alife2-' + f + '.js');
+const zlib = require('zlib'), fs = require('fs'), [secs, ...files] = process.argv.slice(2), T = Number(secs) || 200, C = A.organs.C, PI = Math.PI;
+const JA = { plain: 'ふつうの組織', fixed: '固定費', surface: '表面', wiring: '神経の配線', cilia: '繊毛', muscle: '筋肉', nerve: '神経組織', gut: '消化管', vessel: '脈管', gonad: '生殖腺', store: '貯蔵', eye: '眼', armor: '殻', mouth: '口', ear: '耳', voice: '声', none: '（上がった項目なし）' };
+// the same sum as the body's profile makes, kept apart by what it pays for
+const parts = plan => { const o = { plain: 0, surface: 0, cilia: 0, wiring: 0, fixed: C.fixed, V: 0, absorb: 0 }; for (const k in C.upkeep) o[k] = 0;
+  for (const s of plan.segs) { const p = s.p, hp = s.hp == null ? 1 : s.hp, rm = (s.r0 + s.r1) / 2, zm = (s.z0 + s.z1) / 2, v = PI * rm * zm * s.len * hp, a = PI * (rm + zm) * s.len * hp; o.V += v; o.plain += v * C.basal; for (const k in C.upkeep) o[k] += v * C.upkeep[k] * (p[k] || 0); o.surface += a * C.surface; o.cilia += a * (p.cilia || 0) * C.ciliaUpkeep; o.wiring += A.neural.wiring(p) * C.synapse; o.absorb += a * Math.max(0, 1 - p.skin - p.armor); } return o; };
+const KEYS = ['plain', ...Object.keys(C.upkeep), 'surface', 'cilia', 'wiring', 'fixed'], sum = o => KEYS.reduce((a, k) => a + o[k], 0), mean = L => L.reduce((a, b) => a + b, 0) / Math.max(1, L.length);
+const q = (a, p) => { const s = a.filter(Number.isFinite).sort((x, y) => x - y); return s.length ? s[Math.floor(p * (s.length - 1))] : NaN; }, f = (x, d) => (Number.isFinite(x) ? x.toFixed(d == null ? 2 : d) : '—'), pct = (x, d) => (Number.isFinite(x) ? (x * 100).toFixed(d || 0) + '%' : '—');
+for (const file of files) {
+  const w = A.engine.World.restore(JSON.parse(zlib.gunzipSync(fs.readFileSync(file)))), name = file.split('/').pop().replace('-t3000.json.gz', ''), dev = (g, st) => A.development.develop(g, { stage: st, maxSegs: w.maxSegs, pair: w.pair });
+  // as the world stands: a newborn and an adult of every living genome
+  const now = w.bodies.map(o => { const n = parts(dev(o.g, o.g.birth)), a = parts(dev(o.g, 1)); return { n, a, wn: n.wiring / sum(n), wa: a.wiring / sum(a) }; });
+  console.log('== ' + name + '（' + now.length + ' 個体の遺伝子）：神経の配線が維持費に占める割合：新生個体 中央値 ' + pct(q(now.map(r => r.wn), 0.5), 1) + '（四分位 ' + pct(q(now.map(r => r.wn), 0.25), 1) + '〜' + pct(q(now.map(r => r.wn), 0.75), 1) + '、上位 1 割 ' + pct(q(now.map(r => r.wn), 0.9), 1) + '）・成体 ' + pct(q(now.map(r => r.wa), 0.5), 1) + ' ｜ 維持費：新生個体 ' + f(q(now.map(r => sum(r.n)), 0.5), 4) + '・成体 ' + f(q(now.map(r => sum(r.a)), 0.5), 4) + '/秒');
+  console.log('  新生個体の維持費の内訳（平均）：' + KEYS.map(k => [k, mean(now.map(r => r.n[k] / sum(r.n)))]).filter(x => x[1] >= 0.005).sort((a, b) => b[1] - a[1]).map(x => JA[x[0]] + ' ' + pct(x[1])).join('・') + ' ｜ 成体：' + KEYS.map(k => [k, mean(now.map(r => r.a[k] / sum(r.a)))]).filter(x => x[1] >= 0.005).sort((a, b) => b[1] - a[1]).map(x => JA[x[0]] + ' ' + pct(x[1])).join('・'));
+  // the mutated young born in the stretch, each beside a newborn of its mother's kind
+  const R = [], spawn0 = w.spawn.bind(w); w.spawn = function (g, x, y, stage, parent) { const o = spawn0(g, x, y, stage, parent);
+    if (parent && (o.g.mutations || 0) > (parent.g.mutations || 0)) { const pc = dev(o.g, stage), pm = dev(parent.g, parent.g.birth), c = parts(pc), m = parts(pm), aim = parts(dev(o.g, o.g.birth)); R.push({ c, m, rel: (sum(c) / c.absorb) / (sum(m) / m.absorb), built: (sum(c) / c.absorb) / (sum(aim) / aim.absorb), segs: pc.segs.length, segsM: pm.segs.length }); } return o; };
+  for (let i = 0; i < 30 * T && w.bodies.length; i++) w.step();
+  const hi = R.filter(r => r.rel > 1.05), mid = R.filter(r => r.rel <= 1.05 && r.rel >= 0.95), lo = R.filter(r => r.rel < 0.95);
+  console.log('  ' + T + ' 秒に生まれた、変異の入った子 ' + R.length + ' 匹：必要な濃さが母の型より 5% 以上高い ' + hi.length + '（' + pct(hi.length / R.length) + '）・±5% 以内 ' + mid.length + '・5% 以上低い ' + lo.length + '（' + pct(lo.length / R.length) + '）');
+  const top = L => { const m = new Map(); for (const r of L) { let best = 'none', bv = 0; for (const k of KEYS) { const x = r.c[k] / r.c.V - r.m[k] / r.m.V; if (x > bv) { bv = x; best = k; } } m.set(best, (m.get(best) || 0) + 1); } return [...m.entries()].sort((a, b) => b[1] - a[1]); };
+  for (const [L, label] of [[hi, '5% 以上高い子'], [mid, '±5% 以内の子']]) console.log('  ' + label + '：体積あたりの維持費 ÷ 母の型 中央値 ' + f(q(L.map(r => (sum(r.c) / r.c.V) / (sum(r.m) / r.m.V)), 0.5)) + '・体積あたりの吸収する表面 ÷ 母の型 ' + f(q(L.map(r => (r.c.absorb / r.c.V) / (r.m.absorb / r.m.V)), 0.5)) + '・体積 ÷ 母の型 ' + f(q(L.map(r => r.c.V / r.m.V), 0.5)) + '・生まれたときの体節数 ' + f(mean(L.map(r => r.segs))) + '（母の型 ' + f(mean(L.map(r => r.segsM))) + '）・作られた身体の必要な濃さ ÷ 遺伝子の狙いどおりに作った場合 ' + f(q(L.map(r => r.built), 0.5)) + ' ｜ 体積あたりでいちばん上がった項目（匹数）：' + top(L).slice(0, 6).map(([k, n]) => JA[k] + ' ' + n).join('・'));
+  console.log('JSON ' + JSON.stringify({ name, wiringNewborn: q(now.map(r => r.wn), 0.5), wiringAdult: q(now.map(r => r.wa), 0.5), mutated: R.length, hi: hi.length, lo: lo.length, topHi: top(hi).slice(0, 3) }));
+}
