@@ -990,3 +990,21 @@ test('solid: a limb that was cut off is counted once, however often the body is 
   // as bodies were first built (without the rule) a segment eaten away stays, works and is paid for: unchanged
   { const { w, o, wiring0 } = cut(0); assert.strictEqual(o.b.segs.filter(q => q.gone).length, 0); assert.strictEqual(w.counts.cut || 0, 0); assert.ok(Math.abs(o.prof.wiring - wiring0) < 1e-12); }
 });
+
+test('the safety valve: a body whose numbers run away is taken out at once, and what broke is written down; the world goes on', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, swimmer = () => G.create({ parts: [G.part({ len: 0.8, r0: 0.4, r1: 0.4, muscle: 0, skin: 0.2, cilia: 0.8, mouth: 0.4, gut: 0.5, gonad: 0.3, nerve: 0.3, nC: 0.5, mCil: 0.5 })] });
+  const mk = () => { const w = new A.engine.World({ seed: 8, contact: 1, vision: 1 }); w.seedWith(G.primordial(8)); w.spawn(swimmer(), 60, 40, 1, null); for (let i = 0; i < 60; i++) w.step(); return w; };
+  // (the distances are chosen so that the test fails, and does not hang, on a version without the valve: beyond about 9e15 a search of the cells around a body
+  // never ends, because adding 1 to such a number changes nothing - that is the fault the valve is for)
+  for (const [name, spoil] of [['a huge speed', b => { for (let k = 0; k < b.np; k++) b.vx[k] = 3e7; }], ['far away', b => { for (let k = 0; k < b.np; k++) { b.x[k] += 1e6; b.ox[k] += 1e6; } }], ['not a number', b => { b.y[0] = NaN; }]]) {
+    const w = mk(), o = w.bodies.find(q => !q.passive && q.b.segs[0].cil); assert.ok(o, 'a body that swims by itself'); spoil(o.b); w.step();
+    assert.strictEqual(o.dead, 'broken', name + ': taken out in the same step'); assert.strictEqual(w.counts.broken, 1); assert.ok(!w.bodies.includes(o));
+    const f = w.faults[0]; assert.strictEqual(f.id, o.id); assert.strictEqual(f.how, name === 'not a number' ? 'not a number' : 'far outside the world'); assert.ok(f.g && f.g.parts.length && f.body.x.length === o.b.np && Array.isArray(f.near), 'the record holds the genome, the body as it was left, and who was near');
+    assert.ok(w.events.some(e => /物理の計算が破綻/.test(e.text) && e.id === o.id), 'and the world says so');
+    for (let i = 0; i < 90; i++) w.step(); assert.ok(w.bodies.length > 0 && w.bodies.every(q => Number.isFinite(q.cx) && q.cx >= -1 && q.cx <= w.W + 1), name + ': the others go on');
+    assert.strictEqual(w.census().unsound, 0); assert.strictEqual(w.census().broken, 1);
+    const back = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); assert.strictEqual(back.faults.length, 1, 'the record is saved with the world'); assert.strictEqual(back.faults[0].id, o.id); }
+  // a healthy world never trips it, and writes no record
+  const w = mk(); for (let i = 0; i < 600; i++) w.step(); assert.strictEqual(w.counts.broken, 0); assert.strictEqual(w.faults, undefined); assert.strictEqual(JSON.parse(JSON.stringify(w.save())).faults, undefined);
+});

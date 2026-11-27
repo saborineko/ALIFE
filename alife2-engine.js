@@ -320,6 +320,18 @@
     // (solid) What has been cut off stays cut off, and carries no circuit. unwire: the plan's segment gets a copy of its part without connections, so the body's
     // profile no longer charges it the upkeep of nerves it has lost. lost: on a body that has just been rebuilt (growth, a reloaded world, arrival from another
     // island), the segments cut off earlier are marked as gone again without being cut - and counted - a second time.
+    // The safety valve. A body's arithmetic can run away: its numbers grow without bound and, some steps later, stop being numbers. On the way they pass through
+    // values that are numbers still but astronomically large, and a search of the cells around such a place never ends (adding 1 to 1e18 changes nothing): the
+    // whole world would stop. So a body any part of which is a whole world's width or height outside the world is taken out at once, as one whose numbers are
+    // no longer numbers is. No body gets there by swimming: the world wraps sideways, and its floor and surface hold. fault: what broke is written down
+    // (the last few, with their genomes), so that the cause can be found; the record is saved with the world and changes nothing in it.
+    flung(b) { const W = this.W, H = this.H; for (let k = 0; k < b.np; k++) { const x = b.x[k], y = b.y[k]; if (x < -W || x > 2 * W || y < -H || y > 2 * H) return true; } return false; }
+    fault(o) { const b = o.b; let n = 0, far = 0; for (let k = 0; k < b.np; k++) { if (!Number.isFinite(b.x[k]) || !Number.isFinite(b.y[k])) n++; else if (Math.abs(b.x[k]) > 2 * this.W || Math.abs(b.y[k]) > 2 * this.H) far++; }
+      if (!this.faults) this.faults = []; this.faults.push({ t: this.t, id: o.id, parent: o.parent, gen: o.gen, stage: o.stage, age: o.age, kind: o.kind, segs: b.segs.length, how: n ? 'not a number' : 'far outside the world', notNumbers: n, far, was: [o.cx, o.cy], E: o.E, hp: o.hp ? Array.from(o.hp) : null, g: A.genome.copy(o.g),
+        /* for finding the cause: the body as the physics left it and as it stood a step before, what it is made of, and who was near */
+        body: { rigid: !!b.rigid, passive: !!o.passive, mass: b.mass, inertia: b.inertia, massMin: Math.min(...Array.from(b.m)), x: Array.from(b.x), y: Array.from(b.y), vx: Array.from(b.vx), vy: Array.from(b.vy), ox: b.ox ? Array.from(b.ox) : null, oy: b.oy ? Array.from(b.oy) : null, len: b.segs.map(q => q.len), tauMax: b.segs.map(q => q.tauMax), cil: b.segs.map(q => q.cil), target: b.segs.map(q => q.target), cd: b.segs.map(q => q.cd), a: b.segs.map(q => q.a), ground: this.isGround(o.cx, o.cy), held: o.held || 0, tick: this.tick },
+        near: this.bodies.filter(q => q !== o && !q.dead && Math.abs(q.cy - o.cy) < 12 && Math.min(Math.abs(q.cx - o.cx), this.W - Math.abs(q.cx - o.cx)) < 12).slice(0, 12).map(q => ({ id: q.id, kind: q.kind, stage: q.stage, at: [q.cx, q.cy], V: q.prof.V, rigid: !!q.b.rigid })) }); if (this.faults.length > 8) this.faults.shift();
+      this.log('不具合：身体 #' + o.id + ' の物理の計算が破綻した（' + (n ? '数でない値' : '世界の外へ飛び出した') + '。' + b.segs.length + ' 体節、成長段階 ' + o.stage.toFixed(2) + '、' + o.age.toFixed(0) + ' 秒齢）。世界の出来事ではない。この身体は取り除かれ、遺伝子型は保存に残る', o.id); }
     unwire(q) { if (!q || q.cut) return; const p = Object.assign({}, q.p); for (const k of A.neural.CIRCUIT) p[k] = 0; delete p.nn; q.p = p; q.cut = true; }
     lost(o) { if (!this.solid || !o.hp) return; const segs = o.b.segs, ps = o.plan.segs; for (let i = 1; i < segs.length && i < o.hp.length; i++) if (o.hp[i] <= 0) { segs[i].gone = true; this.unwire(ps[i]); } }
     sever(o, j) {
@@ -935,7 +947,7 @@
         // a body that cannot move itself is simply carried by the water, and lies still on a stepped floor. On a sloping floor it gets the same physics as any body: the current drags it, the floor holds it by its weight
         if (o.passive && !(ground && this.shore > 0)) { if (!ground) for (let k = 0; k < b.np; k++) { b.x[k] += fl[0] * dt; b.y[k] += fl[1] * dt; } P.pose(b); }
         else P.step(b, dt, this.substeps);
-        if (!P.finite(b)) { o.dead = 'broken'; continue; }
+        if (!P.finite(b) || this.flung(b)) { this.fault(o); o.dead = 'broken'; continue; } // (a fault of the arithmetic, not an event of the world: see flung)
         let c = P.com(b);
         if (c[0] < 0 || c[0] >= this.W) { const s = c[0] < 0 ? this.W : -this.W; for (let k = 0; k < b.np; k++) b.x[k] += s; c[0] += s; P.pose(b); }
         if (c[1] < 2 || c[1] > this.H - 2) { const push = (c[1] < 2 ? 2 - c[1] : this.H - 2 - c[1]) * 0.5; for (let k = 0; k < b.np; k++) { b.y[k] += push; b.vy[k] *= 0.5; } c[1] += push; P.pose(b); }
@@ -1056,7 +1068,7 @@
         patch: this.patch, grainDebt: this.grainDebt || 0, bottomDebt: this.bottomDebt || 0, liveLines: this.liveLines ? [...this.liveLines] : null, regionState: this.regions ? this.regions.map(q => ({ debt: q.debt, patch: q.patch })) : null,
         introductions: this.introductions, counts: this.counts, events: this.events, history: this.history, firsts: this.firsts, pruned: this.pruned, tree: [...this.tree.values()],
         // body plans that only one or two bodies ever had keep their numbers but not their genome (worlds begun before this rule still carry them)
-        clades: [...this.clades.values()].map(c => c.ended != null && c.members <= 2 && c.g ? Object.assign({}, c, { g: null }) : c), cladesDropped: this.cladesDropped || 0,
+        clades: [...this.clades.values()].map(c => c.ended != null && c.members <= 2 && c.g ? Object.assign({}, c, { g: null }) : c), cladesDropped: this.cladesDropped || 0, faults: this.faults && this.faults.length ? this.faults : undefined /* (bodies taken out by the safety valve: written only if there are any) */,
         bodies: this.bodies.map(o => { const b = o.b, r = b.segs[0]; return { id: o.id, stage: o.stage, age: o.age, E: o.E, G: o.G, egg: o.egg, grow: o.grow, x: o.cx, y: o.cy, angle: Math.atan2(r.dy, r.dx), life: o.life, eaten: o.eaten, absorbed: o.absorbed, kids: o.kids, path: o.path, born: o.born, home: o.home, v0: o.V0, s0: o.stage0, si: o.seepIn || undefined, so: o.seepOut || undefined, hd: o.held == null ? undefined : o.held, p2: o.p2 || undefined, got: o.got ? [o.got.id, o.got.g] : undefined, vo: o.voN ? [o.voOn ? 1 : 0, o.voN, o.voT || 0, o.voE || 0] : undefined, hp: o.hp || undefined, flesh: o.flesh || undefined, lost: o.lost || undefined,
           sig: b.hasCircuit ? b.segs.map(q => q.a) : undefined,
           st: { x: Array.from(b.x), y: Array.from(b.y), vx: Array.from(b.vx), vy: Array.from(b.vy), t: b.t, work: b.work, heat: b.heat, cilia: b.ciliaUse, nerve: b.nerveUse, om: b.om || 0, th: b.th || 0, loc: b.loc ? Array.from(b.loc) : null, inertia: b.inertia == null ? null : b.inertia, carried: b.carried == null ? null : b.carried, cmd: b.cmd,
@@ -1066,7 +1078,7 @@
     // Older saves (without `exact`) lack pose, velocities, rhythm phase, sensory memory and birth region: bodies then restart from rest.
     static restore(d) {
       if (!d || d.format !== 'alife2-world-1') throw new Error('not an ALIFE 2.0 world');
-      const w = new World(d.opt); w.introductions = d.introductions; w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = Object.assign({}, d.counts); for (const k of ['killed', 'flesh', 'torn', 'stillborn']) if (w.counts[k] == null) w.counts[k] = 0; /* worlds saved before bodies could touch */ w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
+      const w = new World(d.opt); w.introductions = d.introductions; w.t = d.t; w.tick = d.tick; w.nut.set(d.nut); if (w.scent && d.scA) { w.scA.set(d.scA); w.scB.set(d.scB); } w.patch = d.patch; w.counts = Object.assign({}, d.counts); for (const k of ['killed', 'flesh', 'torn', 'stillborn']) if (w.counts[k] == null) w.counts[k] = 0; /* worlds saved before bodies could touch */ w.events = d.events; w.history = d.history; w.firsts = d.firsts; w.pruned = d.pruned || 0; if (d.faults) w.faults = d.faults; w.clades = new Map((d.clades || []).map(c => [c.id, c])); w.cladesDropped = d.cladesDropped || 0;
       if (w.sound && d.snd) { w.snd = d.snd.f.map(unb64); w.sndIn = d.snd.i.map(unb64); w.sndV = d.snd.v.map(unb64); w.sndVIn = d.snd.vi.map(unb64); w.aco = Object.assign(w.acoNew(), d.snd.aco || {}); while (w.aco.lis.length < 3) w.aco.lis.push(w.acoNew().lis[0]); for (const c of w.aco.lis) if (!c.ids) c.ids = {}; /* (worlds saved before the notebook grew keep what they had) */ }
       for (const f of d.food) w.food.push({ x: f[0], y: f[1], size: f[2], e: f[3], fixed: !!f[4], die: d.exact ? f[5] : w.t + f[5] });
       if (d.exact) { w.grainDebt = d.grainDebt; w.bottomDebt = d.bottomDebt; if (d.liveLines) w.liveLines = new Set(d.liveLines); if (d.regionState && w.regions) d.regionState.forEach((q, i) => { w.regions[i].debt = q.debt; w.regions[i].patch = q.patch; }); }

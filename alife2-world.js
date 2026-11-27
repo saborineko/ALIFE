@@ -372,12 +372,20 @@
       else { const heir = w.bodies.find(o => w.ancestors(o.id).some(n => n.id === gone.id)); if (heir) { select(heir, true); follow = wasFollowing; notice = '#' + gone.id + ' が' + cause + '。その子孫 #' + heir.id + ' に移った。'; } else { $('info').textContent = '#' + gone.id + ' は' + cause + '。生きている子孫はいない。記録は「絶滅した体制の記録」に残る。'; sel = null; } }
     }
   }
+  // One frame. Each part is run on its own: a fault in one (the statistics, the commentary, the sound, a save) must not stop the others, and must never stop the
+  // next frame from being asked for - a display that has stopped looks like a world that has died. What went wrong is shown in a bar at the top of the page.
+  // If the world's own step fails, the world is paused (stepping it again would only fail again) and can still be saved.
+  const faultsSeen = new Map();
+  function fault(part, e) { const text = String(e && e.message || e), n = (faultsSeen.get(part) || 0) + 1; faultsSeen.set(part, n); if (n > 1 && n % 600) return; console.error('ALIFE2 ' + part, e);
+    let bar = $('fatal'); if (!bar) { bar = document.createElement('div'); bar.id = 'fatal'; bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99;background:#7a1020;color:#fff;padding:6px 10px;font-size:13px;white-space:pre-wrap'; document.body.append(bar); }
+    bar.textContent = '【異常】' + part + 'で例外が起きた（' + n + ' 回）：' + text + '\nこれはプログラムの不具合です。' + (part === '世界の計算' ? '世界を一時停止しました。' : '表示のほかの部分と世界は動き続けます。') + '「世界を保存」で保存して知らせてください。'; }
+  const part = (name, f) => { try { f(); } catch (e) { fault(name, e); return false; } return true; };
   function loop(ms) {
-    if (!paused && !ISL.busy) { const n = Number($('speed').value); for (let i = 0; i < n; i++) advance(); }
-    draw();
-    audioFrame();
-    if (ms - lastPanels > 1000) { lastPanels = ms; panels(); islandPanel(); }
-    if ($('auto').checked && ms - lastSave > (ISL.ws.length ? 120000 : 30000)) { lastSave = ms; autosave(); }
+    if (!paused && !ISL.busy) { const n = Number($('speed').value); if (!part('世界の計算', () => { for (let i = 0; i < n; i++) advance(); })) { paused = true; const p = $('pause'); if (p) p.textContent = '再開'; } }
+    part('描画', draw);
+    part('音', audioFrame);
+    if (ms - lastPanels > 1000) { lastPanels = ms; part('統計・個体の表示', panels); part('島の表示', islandPanel); }
+    if ($('auto').checked && ms - lastSave > (ISL.ws.length ? 120000 : 30000)) { lastSave = ms; part('自動保存', autosave); }
     requestAnimationFrame(loop);
   }
 // Saving. The browser's small key-value store (about 5 MB) cannot hold a world with its genealogy, so automatic
