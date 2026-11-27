@@ -89,22 +89,22 @@ button{cursor:pointer}.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:
   <details class="panel"><summary><b>生存個体 TOP 10</b></summary><div class="controls"><label>順位 <select id="rank"><option value="kids">子の数</option><option value="age">齢</option><option value="V">体積</option><option value="segs">体節数</option><option value="eaten">口から得た量</option><option value="speed">自力移動の速度</option></select></label></div><div id="top" class="note"></div></details>
   <details class="panel" open><summary><b>進化の記録</b></summary><div id="events" class="note" style="max-height:180px;overflow:auto"></div></details>
   <details class="panel"><summary><b>外来個体を投入</b></summary>
-  <div class="note">形態可能性探索の「遺伝子を保存」で保存した JSON を、表示中の島に投入する。既存の世界は維持する。人為的な投入として記録し、子孫にも投入系統を表示する。投入は物質とエネルギーを外から加える操作で、自然出生ではない。個体数上限を超えた場合は通常の出生が抑制される。</div>
+  <div class="note"><a href="./alife2-explorer.html">生命体の可能性探索</a>で保存した「遺伝子JSON」または「投入パッケージJSON」を、表示中の島に投入する。既存の世界は維持する。人為的な投入として記録し、子孫にも投入系統を表示する。投入は物質とエネルギーを外から加える操作で、自然出生ではない。個体数上限を超えた場合は通常の出生が抑制される。</div>
   <div class="controls"><label>遺伝子 JSON <input id="introFile" type="file" accept=".json,application/json"></label><label>投入数 <input id="introCount" type="number" min="1" max="1000" step="1" value="1"></label><label>場所 <select id="introPlace"><option value="random">ランダム</option><option value="center">画面中央</option><option value="ocean">外洋</option><option value="bottom">海底</option></select></label><label>成長段階 <select id="introAge"><option value="adult">成体</option><option value="juvenile">幼体</option></select></label><button id="introduce">現在の島に投入</button></div><div id="introNote" class="note" role="status" aria-live="polite">1 回に 1〜1000 匹。投入後の生存・繁殖は環境による。</div></details>
   <details class="panel"><summary><b>保存・読み込み</b></summary><div class="controls"><button id="save">世界を保存（圧縮ファイル）</button><button id="load">世界を読み込む</button><input id="loadFile" type="file" accept=".json,.gz,.alife2" style="display:none"><label><input id="auto" type="checkbox">この端末に自動保存</label><button id="resume">自動保存から再開</button></div><div id="saveNote" class="note">自動保存にチェックを入れておくと、次に開いたとき（再読み込みを含む）に、最後の自動保存から自動で再開する。30 秒ごとと、タブを離れたときに保存する。保存先はこのブラウザの IndexedDB「alife2-worlds」（ALIFE 23 の保存とは別）。v2.0.16 以降の保存は、姿勢・速度・神経の状態まで含み、復元すると保存しなかった場合と同じ続きをたどる。</div></details>
   <section class="panel note warning">原始個体から自然進化した系統は origin: evolved と記録する。外来個体を投入した場合、その個体と子孫は人工個体由来として区別する。複雑さ・大きさ・運動への報酬は無い。複雑さ・大きさ・運動・捕食への報酬は無い。「身体の接触と組織の摂取」を入れた世界では、口が他個体の組織を削り取れるが、捕食者という種類や本能は定義していない。島・巣・社会は ALIFE 2.0 には無い（ALIFE 23 にはある）。</section>
 </div>
 </div>
 </main>
-<script src="./alife2-version.js?v=47"></script>
-<script src="./alife2-genome.js?v=47"></script>
-<script src="./alife2-development.js?v=47"></script>
-<script src="./alife2-neural.js?v=47"></script>
-<script src="./alife2-physics.js?v=47"></script>
-<script src="./alife2-organs.js?v=47"></script>
-<script src="./alife2-rules.js?v=47"></script><script src="./alife2-engine.js?v=47"></script>
-<script src="./alife2-render.js?v=47"></script>
-<script src="./alife2-gpu.js?v=47"></script>
-<script src="./alife2-world.js?v=47"></script>
+<script src="./alife2-version.js?v=48"></script>
+<script src="./alife2-genome.js?v=48"></script>
+<script src="./alife2-development.js?v=48"></script>
+<script src="./alife2-neural.js?v=48"></script>
+<script src="./alife2-physics.js?v=48"></script>
+<script src="./alife2-organs.js?v=48"></script>
+<script src="./alife2-rules.js?v=48"></script><script src="./alife2-engine.js?v=48"></script>
+<script src="./alife2-render.js?v=48"></script>
+<script src="./alife2-gpu.js?v=48"></script>
+<script src="./alife2-world.js?v=48"></script>
 </body>
 </html>
