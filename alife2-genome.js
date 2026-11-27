@@ -256,7 +256,7 @@
     if (g.root > i) g.root--;
   }
   // how far a part's numbers are from another's, as a share of each gene's range (0 = a perfect copy)
-  function divergence(a, b) { let d = 0, n = 0; for (const k in PART_FIELDS) { const [lo, hi, , kind, flag] = PART_FIELDS[k]; if (flag === 's' && a[k] === b[k]) continue; /* (genes of sound count only where they differ: the measure reads as before in worlds without sound) */ d += Math.abs(kind === 'a' ? wrapPi(a[k] - b[k]) / TAU : (a[k] - b[k]) / (hi - lo)); n++; } return d / n; }
+  function divergence(a, b) { let d = 0, n = 0; for (const k in PART_FIELDS) { const [lo, hi, def, kind, flag] = PART_FIELDS[k]; if (a[k] === b[k] && (flag === 's' || a[k] == null)) continue; /* (genes of sound count only where they differ: the measure reads as before in worlds without sound. A gene that neither part has — parts written before it existed — is not counted either: the measure reads as it did when that world was saved) */ const x = a[k] == null ? def : a[k], y = b[k] == null ? def : b[k]; d += Math.abs(kind === 'a' ? wrapPi(x - y) / TAU : (x - y) / (hi - lo)); n++; } return d / n; }
 
   // strength: how wide the steps are, and — unless `structural` is given — also how often the plan of the body and the wiring change.
   function mutate(g0, r, strength, extra, structural) {

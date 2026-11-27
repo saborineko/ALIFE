@@ -883,3 +883,15 @@ test('a world saved before a gene existed resumes: a part that lacks the gene is
   { const g = G.primordial(3); for (const k of later) delete g.parts[0][k]; const txt = JSON.stringify(g), plan = A.development.develop(g);
     assert.ok(plan.segs.every(s => Object.keys(F).every(k => Number.isFinite(s.p[k])) && later.every(k => s.p[k] === F[k][2]))); assert.strictEqual(JSON.stringify(g), txt); }
 });
+
+test('how far a copied part has drifted from its source stays a number for parts written before a gene existed, and counts the genes they have', () => {
+  const G = A.genome, F = G.PART_FIELDS, v32 = ['sT', 'sW', 'mBite', 'ear', 'hTune', 'hWide', 'hE', 'voice', 'pitch', 'bend', 'mVoice'];
+  const a = G.part({ len: 2 }), b = G.part({ len: 3 }), d = Math.abs((2 - 3) / (F.len[1] - F.len[0])), all = Object.keys(F).filter(k => F[k][4] !== 's').length;
+  assert.strictEqual(G.divergence(a, b), d / all); // (complete parts: every gene but those of sound, which count only where they differ)
+  for (const k of v32) { delete a[k]; delete b[k]; } assert.strictEqual(G.divergence(a, b), d / (all - 3)); assert.strictEqual(G.divergence(a, a), 0); // (as the version without the three genes of touch counted it)
+  // in a world: a body whose axis is split in two kinds of part, restored from a save without those genes
+  const g = G.ensureIds(design(SAMPLES[0].params)), li = G.axisOf(g, g.root), Q = G.splitZone(g, li, 0, G.zones(g, li)[0].len >> 1, G.rng(5)); g.parts[Q].r0 *= 1.2; G.sanitize(g);
+  const w = new A.engine.World({ seed: 3, founders: 0, cap: 0, genome2: 1, contact: 1 }), o = w.spawn(g, 40, 30, 1, null), div = o.gu.div; assert.ok(o.gu.zones > 0 && div > 0, JSON.stringify(o.gu));
+  const data = JSON.parse(JSON.stringify(w.save())); for (const n of data.tree) for (const p of n.g.parts) for (const k of v32) delete p[k];
+  const o2 = A.engine.World.restore(data).bodies[0]; assert.ok(Number.isFinite(o2.gu.div) && Math.abs(o2.gu.div * (all - 3) - div * all) < 1e-12, o2.gu.div + ' against ' + div);
+});
