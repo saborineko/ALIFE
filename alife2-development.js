@@ -11,6 +11,7 @@
   const PI = Math.PI, TAU = PI * 2;
   const MAX_SEGS = 160, TISSUE_ROOM = 1.5, TISSUES = ['muscle', 'gut', 'gonad', 'store', 'nerve', 'vessel'];
   const SUPPLY_REACH = 6;
+  const GENES = Object.keys(A.genome.PART_FIELDS).map(k => [k, A.genome.PART_FIELDS[k][2]]); // every gene of a part, with its default
   const smooth = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
 
   // stage: 0 = newly born bud, 1 = adult.
@@ -22,6 +23,9 @@
     const parts = g.parts.map(p => {
       const sum = p.muscle + p.gut + p.gonad + p.store + p.nerve + p.vessel, k = sum > TISSUE_ROOM ? TISSUE_ROOM / sum : 1, q = Object.assign({}, p);
       for (const t of TISSUES) q[t] = p[t] * k;
+      // A part written before a gene existed lacks it (a world saved by an earlier version). The body is built as if the gene had its default,
+      // which is what it meant then: no wire, no organ. Only this copy, which the body reads, is filled; the genome stays as it was written.
+      for (let i = 0; i < GENES.length; i++) if (q[GENES[i][0]] == null) q[GENES[i][0]] = GENES[i][1];
       return q;
     });
     const chainLink = g.parts.map((_, i) => g.links.findIndex(l => l.from === i && l.to === i));

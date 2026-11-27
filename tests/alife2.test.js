@@ -854,3 +854,32 @@ test('the record of sound is only a notebook: wiping it changes nothing in the w
     for (const k of ['lisEffect', 'alternation', 'sequenceOrder', 'dialectBits', 'resemble', 'answer', 'callsEnded']) assert.ok(Number.isFinite(c[k]), k + ' after loading an older save: ' + c[k]); }
 });
 
+
+test('a world saved before a gene existed resumes: a part that lacks the gene is built with its default, nothing becomes NaN, and the genome is written as it was', () => {
+  const G = A.genome, F = G.PART_FIELDS, later = Object.keys(F).filter(k => F[k][4]); // later: every gene that came with an optional rule
+  const v32 = ['sT', 'sW', 'mBite', 'ear', 'hTune', 'hWide', 'hE', 'voice', 'pitch', 'bend', 'mVoice']; // what the parts of a world saved by v2.0.32 lack: bodies touched then, but the senses of touch, the mouth that shuts and sound came later
+  const grow = (on, steps) => { const w = new A.engine.World(Object.assign({ seed: 7 }, on)), g = G.primordial(7); Object.assign(g.parts[0], { nerve: 0.4, nC: 1, mCil: 0.5, cilia: 0.3, eye: 0.3 }); w.seedWith(g); for (let i = 0; i < steps; i++) w.step(); return w; };
+  // the same save in two forms: without the genes (as the earlier version wrote it) and with them at their defaults (what it meant)
+  const data = (w, keys, strip, o) => { const d = JSON.parse(JSON.stringify(w.save())); Object.assign(d.opt, o); for (const g of [...d.tree.map(n => n.g), ...d.clades.map(c => c.g)]) if (g) for (const p of g.parts) for (const k of keys) { if (strip) delete p[k]; else p[k] = F[k][2]; } return d; };
+  const nerves = q => [q.a, q.cd, q.ct, q.mo, q.v, q.e, q.vo], state = x => JSON.stringify([x.rand.state(), x.counts, x.bodies.map(o => [o.id, o.cx, o.cy, o.E, o.G, Array.from(o.b.x), Array.from(o.b.y), o.b.segs.map(nerves)])]);
+  const sick = x => x.bodies.filter(o => !Number.isFinite(o.E) || o.b.x.some(Number.isNaN) || o.b.segs.some(q => nerves(q).some(Number.isNaN))).length;
+  // 1. the case that was found: a world where bodies touch, saved before the senses of touch existed. Then every rule that brought genes, alone, with all of those genes missing.
+  for (const [name, on, keys, steps] of [['v2.0.32', { contact: 1, scent: 1, vision: 1 }, v32, 900], ['touch', { contact: 1 }, later, 300], ['smell', { scent: 1 }, later, 300], ['sight', { vision: 1 }, later, 300], ['sound', { sound: 1 }, later, 300]]) {
+    const w = grow(on, steps), n0 = w.bodies.length; assert.ok(w.bodies.every(o => o.b.hasCircuit), name + ': every body is wired');
+    // it continues exactly as the same world with the genes written out. (Mutation is off here: a mutation's step on a gene that is not there is dropped, as it always was, so the two would part at the first mutated birth.)
+    const old = A.engine.World.restore(data(w, keys, true, { mutation: 0 })), full = A.engine.World.restore(data(w, keys, false, { mutation: 0 }));
+    assert.ok(old.bodies.every(o => o.g.parts.every(p => keys.every(k => p[k] === undefined)) && o.b.segs.every(q => keys.every(k => q.p[k] === F[k][2]))), name + ': restoring leaves the genome alone; the body reads defaults');
+    for (let i = 0; i < steps / 3; i++) { old.step(); full.step(); if (i === 0 || i === steps / 3 - 1) { assert.strictEqual(sick(old), 0, name + ': not a number, step ' + (i + 1)); assert.strictEqual(state(old), state(full), name + ': differs from the world with the genes at their defaults, step ' + (i + 1)); } }
+    assert.strictEqual(old.counts.broken, w.counts.broken, name + ': bodies lost to broken physics'); assert.ok(old.bodies.length >= 0.9 * n0, name + ': ' + n0 + ' -> ' + old.bodies.length);
+    // and what it writes when saved again is the genome it was given: no gene is added to a part that did not have it
+    const was = new Map(data(w, keys, true, {}).tree.map(n => [n.id, JSON.stringify(n.g)])); for (const n of old.save().tree) if (was.has(n.id)) assert.strictEqual(JSON.stringify(n.g), was.get(n.id), name + ': genome of #' + n.id + ' as written');
+    if (name !== 'v2.0.32') continue;
+    // 2. with mutation it goes on living: births, nothing broken, and a young made by mutation carries every gene
+    const live = A.engine.World.restore(data(w, keys, true, {})), t0 = live.t, b0 = live.counts.births; for (let i = 0; i < 600; i++) live.step();
+    const kids = live.bodies.filter(o => o.born > t0); assert.strictEqual(sick(live), 0); assert.strictEqual(live.counts.broken, w.counts.broken); assert.ok(live.counts.births - b0 >= 5 && kids.length >= 3 && live.bodies.length >= n0, 'births ' + (live.counts.births - b0) + ', ' + n0 + ' -> ' + live.bodies.length);
+    assert.ok(kids.some(o => o.g.mutations > 0) && kids.every(o => !(o.g.mutations > 0) || o.g.parts.every(p => keys.every(k => Number.isFinite(p[k])))), 'mutated young have the genes');
+  }
+  // 3. development itself: the plan's parts are complete, the genome is not touched
+  { const g = G.primordial(3); for (const k of later) delete g.parts[0][k]; const txt = JSON.stringify(g), plan = A.development.develop(g);
+    assert.ok(plan.segs.every(s => Object.keys(F).every(k => Number.isFinite(s.p[k])) && later.every(k => s.p[k] === F[k][2]))); assert.strictEqual(JSON.stringify(g), txt); }
+});
