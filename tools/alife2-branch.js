@@ -1,6 +1,7 @@
 // Continue one saved world several times as it is and several times with some settings changed (only the random numbers differ
 // between runs of a kind), and compare what the two kinds become. The general form of the comparisons used for each new rule.
 // Usage: node tools/alife2-branch.js <seconds> <world.json(.gz)> <key=value,key=value...> run <k> <0|1>   (one run: prints one JSON line)
+//        BRANCH_SAVE=<file.json.gz> in the environment: write the world at the end of the run (to branch it again from there)
 //        node tools/alife2-branch.js report <lines.txt>
 const fs = require('fs'), zlib = require('zlib'), A = require('../alife2-genome.js');
 for (const f of ['development', 'neural', 'physics', 'organs', 'engine']) require('../alife2-' + f + '.js');
@@ -13,13 +14,14 @@ if (process.argv[2] === 'report') {
 }
 const [secs, file, optStr, , k, flag] = process.argv.slice(2), T = Number(secs), d = JSON.parse(file.endsWith('.gz') ? zlib.gunzipSync(fs.readFileSync(file)) : fs.readFileSync(file)); d.opt.audit = 1;
 const w = A.engine.World.restore(d), on = {}; for (const s of optStr.split(',')) { const [key, v] = s.split('='); on[key] = Number.isNaN(Number(v)) ? v : Number(v); }
-w.rand = A.genome.rng(7000 + Number(k)); if (Number(flag)) w.enable(on); for (const key in w.ledger) w.ledger[key] = 0;
+w.rand = A.genome.rng(7000 + Number(k)); if (Number(flag)) { w.enable(on); for (const key of ['numb', 'sightless', 'anosmic', 'numbSkin']) if (on[key] != null) w[key] = on[key] ? 1 : 0; /* (control switches the world keeps outside its rules: a sense is cut for every body) */ } for (const key in w.ledger) w.ledger[key] = 0;
 const t0 = w.t, dead0 = { starved: w.counts.starved, aged: w.counts.aged, killed: w.counts.killed || 0 }; let bMid = 0, nSum = 0; const tail = Math.min(1000, T);
 const young = { n: 0, up: 0, open: [] }; { const spawn0 = w.spawn.bind(w); w.spawn = function (g, x, y, stage, parent) { const o = spawn0(g, x, y, stage, parent); if (parent && w.t - t0 >= T - 600 && w.t - t0 < T - 300) young.open.push(o); return o; }; }
 let WU = null; const WUmod = require('./alife2-wiring-use.js');
 for (let i = 0; i < 30 * T && w.bodies.length; i++) { w.step(); if (i === 30 * (T - 60)) WU = WUmod.watch(w, w.bodies.filter(o => o.stage >= 1)); if (WU) WU.tick(); if (i === 30 * (T - tail)) bMid = w.counts.births; if (i >= 30 * (T - tail)) nSum += w.bodies.length; }
 for (const o of young.open) { young.n++; if (o.stage >= 1) young.up++; }
 const use = (() => { const L = WU.result(), n = Math.max(1, L.length), sum = k => L.reduce((a, r) => a + (r.T[k] || 0), 0) / n; return { n: L.length, wDead: sum('partner') + sum('out') + sum('in'), wThrough: sum('through'), commanding: L.filter(r => r.commands).length / n }; })();
+if (process.env.BRANCH_SAVE) fs.writeFileSync(process.env.BRANCH_SAVE, zlib.gzipSync(JSON.stringify(w.save())));
 const c = w.census(), L = w.ledger, lasting = [...w.clades.values()].filter(q => q.born >= t0 && q.members >= 20 && q.genMax - q.gen0 >= 5).length;
 const atBodies = (() => { let s = 0; for (const o of w.bodies) s += w.nutAt(o.cx, o.cy, w.nut); return w.bodies.length && c.nutrient > 0 ? s / w.bodies.length / c.nutrient : 0; })();
 console.log(JSON.stringify({ on: Number(flag), k: Number(k), opts: optStr, ventNear: c.ventNear, ventWater: c.ventWater, castGene: c.castGene, lateBodies: c.lateBodies, lateWiring: c.lateWiring, wiringAdult: (() => { const L = w.bodies.filter(o => o.stage >= 1); return L.length ? L.reduce((a, o) => a + o.prof.wiring, 0) / L.length : 0; })(), upShare: young.n ? young.up / young.n : 0, wDead: use.wDead, wThrough: use.wThrough, commanding: use.commanding, atBodies, popTail: nSum / (30 * tail), n: c.n, gen: c.gen, birthRate: nSum ? (w.counts.births - bMid) / (nSum / 30 / tail) * 1000 / tail : 0, segs: c.segMean, adultV: c.adultV, mouthShare: c.mouthShare, speed: c.speed, nutrient: c.nutrient, partsUsed: c.partsUsed, zoned: c.zoned, fleshShare: c.fleshShare, wired: c.wired, voiced: c.voiced, eared: c.eared, callTime: c.callTime, signalBits: c.signalBits, listening: c.listening, answer: c.answer, grainEaters: c.grainEaters, starved1000: (w.counts.starved - dead0.starved) / Math.max(1, nSum / 30 / tail) * 1000 / T * (tail / T < 1 ? 1 : 1), killed1000: ((w.counts.killed || 0) - dead0.killed) / Math.max(1, nSum / 30 / tail) * 1000 / T, cilia: c.cilia, tasteWired: c.tasteWired, taxis: c.taxis, multi: c.multi, senseNeurons: c.senseNeurons, twoParents: c.twoParents, mutGene: c.mutGene, starvedShare: (w.counts.starved - dead0.starved) / Math.max(1, w.counts.starved - dead0.starved + w.counts.aged - dead0.aged + (w.counts.killed || 0) - dead0.killed), lasting, uneaten: L.expire / Math.max(1e-9, L.rain + L.regrow) }));
