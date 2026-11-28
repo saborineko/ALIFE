@@ -22,6 +22,8 @@
   let w, view, paused = false, sel = null, shown = null, follow = false, loaded = window.ALIFE2_LOAD || null, lastPanels = 0, lastSave = 0;
   // (a mark kept for this tab only: there while the page is open, taken away when the page is left while it still answers. Found at the start, it means the page ended without answering.)
   let unclean = false; try { unclean = sessionStorage.getItem('alife2_open') === '1'; sessionStorage.setItem('alife2_open', '1'); addEventListener('pagehide', () => { try { sessionStorage.removeItem('alife2_open'); } catch (e) {} }); } catch (e) {}
+  // A tab the browser itself put away to save memory (and loads again when it is looked at) did not stop answering: its world is taken up again.
+  const discarded = !!document.wasDiscarded; if (discarded) unclean = false;
 
   // ---- islands: more worlds of the same kind, each in its own thread (alife2-island.js); now and then a body moves from each to the next ----
   // Slot 0 is the world on screen; the others run unseen at full speed. Bodies leave by each world's own clock, so a run with islands
@@ -411,6 +413,46 @@
   // next frame from being asked for - a display that has stopped looks like a world that has died. What went wrong is shown in a bar at the top of the page.
   // If the world's own step fails, the world is paused (stepping it again would only fail again) and can still be saved.
   const FRAME_MS = 100, pace = { steps: 0, frames: 0, cut: 0, since: 0, other: 0 };
+  // ---- A record of the run, kept by the page itself. Nothing here goes back into the world. ----
+  // Every 10 s one line goes to this browser's small store: where the world is and how the page is doing (steps, frames, the time of a step and of
+  // drawing, the longest time without a frame, memory, the state of the GPU). If the page stops answering, the lines up to then are still there the
+  // next time it is opened, and can be written to a file. Kept for each run: the last 15 minutes line by line, before that one line in ten minutes,
+  // and every line with a stall (no frame for 2 s, or one step over 1 s). Five runs are kept; a run enters the store with its first line (so a page
+  // opened for a few seconds pushes nothing out), and when a sixth comes, the oldest run that was closed while answering goes first: the runs that
+  // ended without answering are the ones worth keeping.
+  const RL = { key: 'alife2_runlog_', idx: 'alife2_runlog_index', run: null, last: 0, tick: 0, steps: 0, stepMs: 0, stepMax: 0, frames: 0, drawMs: 0, drawMax: 0, gapMax: 0, saveMs: 0, saveMB: 0, before: [] };
+  const RL_COLS = ['時刻', '世界の秒', '個体数', '体節数', '速度の指定（0 は一時停止）', '世界の秒÷実時間 1 秒', 'コマ÷秒', '1 刻み ms（平均）', '1 刻み ms（最大）', '描画 ms（平均）', '描画 ms（最大）', 'コマの間隔 ms（最大）', 'メモリ MB', 'GPU の描画が失われた回数', 'GPU 正常（1）', '裏（1）', '個体の絵を描き直す間隔（コマ）', '線にする大きさ（ピクセル）', '島', '自動保存 MB', '自動保存 ms'];
+  const runlogWrite = () => { if (RL.run && RL.run.recent.length) try { localStorage.setItem(RL.key + RL.run.id, JSON.stringify(RL.run)); } catch (e) {} };
+  const runlogEnter = () => { try { const ids = JSON.parse(localStorage.getItem(RL.idx) || '[]').filter(id => localStorage.getItem(RL.key + id) != null);
+    while (ids.length > 4) { let i = ids.findIndex(id => { try { return JSON.parse(localStorage.getItem(RL.key + id)).clean; } catch (e) { return true; } }); if (i < 0) i = 0; localStorage.removeItem(RL.key + ids[i]); ids.splice(i, 1); }
+    ids.push(RL.run.id); localStorage.setItem(RL.idx, JSON.stringify(ids)); } catch (e) {} };
+  const runlogRuns = () => { try { return JSON.parse(localStorage.getItem(RL.idx) || '[]').map(id => { try { return JSON.parse(localStorage.getItem(RL.key + id)); } catch (e) { return null; } }).filter(r => r && r.recent); } catch (e) { return []; } };
+  function runlogStart() {
+    try { const id = Date.now(); let gl = ''; try { const g = gpuOn && A.gpu && A.gpu.shared().gl, x = g && g.getExtension('WEBGL_debug_renderer_info'); gl = x ? String(g.getParameter(x.UNMASKED_RENDERER_WEBGL)) : gpuOn ? '' : '使わない設定（?gfx=cpu）'; } catch (e) {}
+      RL.run = { id, build: A.version.label, ua: navigator.userAgent, cores: navigator.hardwareConcurrency || 0, gl, opened: discarded ? 'ブラウザが休止させたタブを開き直した' : unclean ? '前回が応答しないまま終わったあと' : '', clean: 0, recent: [], sparse: [], stalls: [] }; } catch (e) { RL.run = null; }
+    addEventListener('pagehide', () => { if (RL.run) { RL.run.clean = 1; runlogWrite(); } }); addEventListener('pageshow', e => { if (e.persisted && RL.run) { RL.run.clean = 0; runlogWrite(); } });
+  }
+  // called at every frame, and at every beat while the tab is hidden
+  function runlogTick(hidden) {
+    const now = Date.now(); if (RL.tick && now - RL.tick > RL.gapMax) RL.gapMax = now - RL.tick; RL.tick = now;
+    if (!RL.run || !w) return; if (!RL.last) { RL.last = now; return; } if (now - RL.last < 10000) return;
+    const sec = (now - RL.last) / 1000, r1 = x => Math.round(x * 10) / 10; let segs = 0, ok = 0; for (const o of w.bodies) segs += o.b.segs.length; try { ok = gpuOn && A.gpu && A.gpu.shared().ok ? 1 : 0; } catch (e) {}
+    const line = [now, Math.round(w.t), w.bodies.length, segs, paused ? 0 : Number($('speed').value), r1(RL.steps / 30 / sec), r1(RL.frames / sec), RL.steps ? r1(RL.stepMs / RL.steps) : 0, Math.round(RL.stepMax), RL.frames ? r1(RL.drawMs / RL.frames) : 0, Math.round(RL.drawMax), Math.round(RL.gapMax),
+      performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : 0, A.gpu ? A.gpu.losses || 0 : 0, ok, hidden ? 1 : 0, spriteEvery, Math.round(detailMin), ISL.ws.length, RL.saveMB, Math.round(RL.saveMs)];
+    const R = RL.run; if (!R.recent.length && !R.sparse.length) runlogEnter(); R.recent.push(line); if (line[11] >= 2000 || line[8] >= 1000) { R.stalls.push(line); if (R.stalls.length > 120) R.stalls.splice(40, 1); } // (of very many stalls, the first 40 and the last 80 stay)
+    while (R.recent.length > 90) { const x = R.recent.shift(), sp = R.sparse; if (!sp.length || x[0] - sp[sp.length - 1][0] >= 600000) { sp.push(x); if (sp.length > 150) sp.shift(); } }
+    runlogWrite(); RL.last = now; RL.steps = RL.stepMs = RL.stepMax = RL.frames = RL.drawMs = RL.drawMax = RL.gapMax = 0;
+  }
+  const rlTime = x => { const d = new Date(x), z = n => String(n).padStart(2, '0'); return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds()); };
+  const runlogLast = r => r.recent.length ? r.recent[r.recent.length - 1] : r.sparse.length ? r.sparse[r.sparse.length - 1] : null;
+  const runlogSay = r => { const l = runlogLast(r); return '始まり ' + rlTime(r.id) + '（' + r.build + '）' + (l ? '、最後の記録 ' + rlTime(l[0]) + '：世界の ' + l[1] + ' 秒、' + l[2] + ' 匹、世界の ' + l[5] + ' 秒／実時間 1 秒、' + l[6] + ' コマ／秒、1 刻み 平均 ' + l[7] + '・最大 ' + l[8] + ' ミリ秒、描画 平均 ' + l[9] + '・最大 ' + l[10] + ' ミリ秒、コマの間隔 最大 ' + l[11] + ' ミリ秒' + (l[12] ? '、メモリ ' + l[12] + ' MB' : '') + '、GPU の描画が失われた回数 ' + l[13] + (r.stalls.length ? '。2 秒以上コマが出なかった（または 1 刻みが 1 秒を超えた）10 秒間が ' + r.stalls.length + ' 回' : '。2 秒以上コマが出なかった 10 秒間は無い') : '、記録は 1 行も無い（10 秒もたなかった）'); };
+  function runlogText() {
+    const runs = runlogRuns(), out = ['ALIFE 2.0 運転の記録（書き出し ' + rlTime(Date.now()) + '、' + A.version.label + '）。10 秒ごとに 1 行。各運転：10 分に 1 行（古い部分）、止まりかけた行、最後の 15 分。', '「コマの間隔（最大）」が 60000 を超える行は、ページが動いていなかった時間（スリープ、ブラウザによるタブの凍結）。', RL_COLS.join('\t')];
+    runs.forEach((r, i) => { const me = RL.run && r.id === RL.run.id; out.push('', '== 運転 ' + (i + 1) + '／' + runs.length + '：' + rlTime(r.id) + ' に開いた。' + r.build + '。' + (me ? 'いま開いているページ' : r.clean ? '応答したまま閉じた' : '応答しないまま終わった（固まった、落ちた、またはブラウザがタブを休止させた）') + (r.opened ? '。' + r.opened : '') + '。ブラウザ：' + r.ua + '、コア ' + r.cores + '、GPU：' + (r.gl || '不明'));
+      const rows = (name, l) => { if (l.length) { out.push('-- ' + name + '（' + l.length + ' 行）'); for (const x of l) out.push([rlTime(x[0])].concat(x.slice(1)).join('\t')); } };
+      rows('10 分に 1 行', r.sparse); rows('止まりかけた行', r.stalls); rows('最後の 15 分', r.recent); });
+    return out.join('\n') + '\n';
+  }
   const faultsSeen = new Map();
   function fault(part, e) { const text = String(e && e.message || e), n = (faultsSeen.get(part) || 0) + 1; faultsSeen.set(part, n); if (n > 1 && n % 600) return; console.error('ALIFE2 ' + part, e);
     let bar = $('fatal'); if (!bar) { bar = document.createElement('div'); bar.id = 'fatal'; bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:99;background:#7a1020;color:#fff;padding:6px 10px;font-size:13px;white-space:pre-wrap'; document.body.append(bar); }
@@ -422,12 +464,13 @@
     // (speed x the time of one step), which is seconds in a grown world at speed 64. Where drawing itself is slow, the world still gets half of the time.
     // How many steps a frame holds changes nothing in the world itself.
     const tA = performance.now();
-    if (!paused && !ISL.busy) { const n = Number($('speed').value), lim = Math.max(FRAME_MS, pace.other); if (!part('世界の計算', () => { for (let i = 0; i < n; i++) { advance(); pace.steps++; if (i + 1 < n && performance.now() - tA > lim) { pace.cut++; break; } } })) { paused = true; const p = $('pause'); if (p) p.textContent = '再開'; } }
+    if (!paused && !ISL.busy) { const n = Number($('speed').value), lim = Math.max(FRAME_MS, pace.other); if (!part('世界の計算', () => { let tS = tA; for (let i = 0; i < n; i++) { advance(); pace.steps++; const tN = performance.now(), d = tN - tS; tS = tN; RL.steps++; RL.stepMs += d; if (d > RL.stepMax) RL.stepMax = d; if (i + 1 < n && tN - tA > lim) { pace.cut++; break; } } })) { paused = true; const p = $('pause'); if (p) p.textContent = '再開'; } }
     const tB = performance.now();
     pace.frames++;
     part('描画', draw);
     part('音', audioFrame);
     pace.other = performance.now() - tB; // (drawing and sound, every frame; not the panels and the automatic save, which come once in a while)
+    RL.frames++; RL.drawMs += pace.other; if (pace.other > RL.drawMax) RL.drawMax = pace.other; runlogTick(false);
     if (ms - pace.since >= 1000) { const el = $('pace'), sec = (ms - pace.since) / 1000; if (el) el.textContent = (paused || !pace.steps ? '' : '実測：世界の ' + (pace.steps / 30 / sec).toFixed(1) + ' 秒／実時間 1 秒、' + (pace.frames / sec).toFixed(0) + ' コマ／秒') + (pace.cut > pace.frames / 2 ? '（計算が重く、指定の速度には届いていない）' : '') + (A.gpu && A.gpu.losses ? '／GPU の描画が ' + A.gpu.losses + ' 回失われ、' + (A.gpu.shared().ok ? '作り直した' : 'いまは CPU で皮膚を描いている（遅い）') : '') + (spriteEvery > 1 ? '／描画が重いので、個体の絵を ' + spriteEvery + ' コマに 1 回だけ描き直している（あいだは同じ絵を動かす）' : '') + (detailMin > 9 ? '／それでも重いので、画面上で ' + Math.round(detailMin) + ' ピクセルより小さい個体は線で描いている（右のチェックで止められる）' : ''); pace.steps = pace.frames = pace.cut = 0; pace.since = ms; }
     if (ms - lastPanels > 1000) { lastPanels = ms; part('統計・個体の表示', panels); part('島の表示', islandPanel); }
     if ($('auto').checked && ms - lastSave > (ISL.ws.length ? 120000 : 30000)) { lastSave = ms; part('自動保存', autosave); }
@@ -445,7 +488,7 @@
   let saving = false;
   async function autosave() {
     if (saving) return; saving = true;
-    try { const at = Math.round(w.t), blobs = await worldBlobs(), size = blobs.reduce((a, b) => a + b.size, 0); await dbPut('autosave', blobs.length > 1 ? { format: 'alife2-islands-2', every: ISL.every, count: ISL.count, worlds: blobs } : blobs[0]); $('saveNote').textContent = '自動保存した（' + at + ' 秒時点、' + (blobs.length > 1 ? '島 ' + blobs.length + ' 個、' : '') + mb(size) + '）。保存先はこのブラウザの IndexedDB「' + DB + '」。ALIFE 23 の保存とは別。'; }
+    try { const a0 = performance.now(), at = Math.round(w.t), blobs = await worldBlobs(), size = blobs.reduce((a, b) => a + b.size, 0); RL.saveMB = Math.round(size / 104857.6) / 10; await dbPut('autosave', blobs.length > 1 ? { format: 'alife2-islands-2', every: ISL.every, count: ISL.count, worlds: blobs } : blobs[0]); $('saveNote').textContent = '自動保存した（' + at + ' 秒時点、' + (blobs.length > 1 ? '島 ' + blobs.length + ' 個、' : '') + mb(size) + '）。保存先はこのブラウザの IndexedDB「' + DB + '」。ALIFE 23 の保存とは別。'; RL.saveMs = performance.now() - a0; }
     catch (e) { $('saveNote').textContent = '自動保存に失敗：' + (e && e.message || e) + '。「世界を保存」でファイルに残してください。'; }
     saving = false;
   }
@@ -520,13 +563,16 @@
   $('bg').onchange = () => { try { localStorage.setItem(BG, $('bg').checked ? '1' : '0'); } catch (e) {} };
   try {
     const beat = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 100)'], { type: 'text/javascript' })));
-    beat.onmessage = () => { if (!document.hidden || paused || ISL.busy || !w || !$('bg').checked || !document.body.dataset.ready) return; const t0 = performance.now(); while (performance.now() - t0 < 60) advance(); const ms = performance.now(); if ($('auto').checked && ms - lastSave > 120000) { lastSave = ms; autosave(); } };
+    beat.onmessage = () => { if (document.hidden && document.body.dataset.ready) runlogTick(true); if (!document.hidden || paused || ISL.busy || !w || !$('bg').checked || !document.body.dataset.ready) return; const t0 = performance.now(); let tS = t0; do { advance(); const tN = performance.now(), d = tN - tS; tS = tN; RL.steps++; RL.stepMs += d; if (d > RL.stepMax) RL.stepMax = d; } while (tS - t0 < 60); const ms = performance.now(); if ($('auto').checked && ms - lastSave > 120000) { lastSave = ms; autosave(); } };
   } catch (e) {}
   if (q.get('seed')) $('seed').value = q.get('seed');
   if (q.has('map')) $('map').value = q.get('map') === 'tank' ? '' : q.get('map'); // ?map=tank opens the small tank
   (async () => {
     if (!loaded && q.get('load')) loaded = await (await fetch(q.get('load'))).json().catch(() => null);
     let resumed = false;
+    // The mark above only sees a reload of the same tab. A frozen tab is often closed and the page opened anew: the record of the run tells that
+    // too. The last run was not closed while answering, and wrote its last line more than 45 s ago (so it is not a page still open in another tab).
+    RL.before = runlogRuns(); { const pr = RL.before[RL.before.length - 1], l = pr && runlogLast(pr); if (pr && !pr.clean && !discarded && l && Date.now() - l[0] > 45000) unclean = true; }
     try {
       if (localStorage.getItem(AUTO) === '1' && !q.get('fresh') && !q.get('t') && !loaded) {
         $('auto').checked = true; const d = await dbGet('autosave');
@@ -535,16 +581,21 @@
         // over), and can be written to a file for finding the cause, or started all the same.
         if (d != null && unclean) { $('auto').checked = false; const bar = document.createElement('div'); bar.id = 'unclean'; bar.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:98;background:#5a4a10;color:#fff;padding:8px 10px;font-size:13px';
           const say = t => { bar.firstChild.textContent = t; }, btn = (label, f) => { const x = document.createElement('button'); x.textContent = label; x.style.marginLeft = '8px'; x.onclick = f; bar.append(x); };
-          bar.append(document.createTextNode('前回、このタブのページは応答しないまま終わりました（固まった、または落ちた）。同じことを繰り返さないよう、自動保存の世界は再開せず、新しい世界を始めています。自動保存はそのまま残してあり、いまは上書きしません。'));
+          bar.append(document.createTextNode('前回、このページは応答しないまま終わりました（固まった、落ちた、またはブラウザごと終了した）。同じことを繰り返さないよう、自動保存の世界は再開せず、新しい世界を始めています。自動保存はそのまま残してあり、いまは上書きしません。'));
           btn('自動保存をファイルに書き出す（原因を調べるため）', async () => { try { const blob = d.worlds ? pack(d.worlds) : typeof d === 'string' ? new Blob([d], { type: 'application/json' }) : d, a2 = document.createElement('a'); a2.href = URL.createObjectURL(blob); a2.download = d.worlds ? 'alife2-autosave-islands.alife2' : 'alife2-autosave.json.gz'; a2.click(); say('書き出しました。このファイルを知らせてください。'); } catch (e) { say('書き出せなかった：' + (e && e.message || e)); } });
           btn('それでも自動保存から再開する', async () => { bar.remove(); try { if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); $('auto').checked = true; } catch (e) { fault('自動保存の再開', e); } });
-          btn('閉じる（新しい世界のまま）', () => bar.remove()); document.body.append(bar); }
-        else if (d != null) { if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); resumed = true; $('saveNote').textContent = '自動保存から再開した（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。新しい世界を始めるには「最初から」。'; document.querySelector('details:has(#save)').open = true; }
+          btn('運転の記録を書き出す', () => download('alife2-runlog.txt', runlogText(), 'text/plain'));
+          btn('閉じる（新しい世界のまま）', () => bar.remove()); document.body.append(bar);
+          { const pr = RL.before[RL.before.length - 1]; if (pr && !pr.clean) { const x = document.createElement('div'); x.style.cssText = 'margin-top:4px;opacity:.9'; x.textContent = 'そのときの運転の記録：' + runlogSay(pr) + '。'; bar.append(x); } } }
+        else if (d != null) { if (d.worlds) await openSet(d.worlds); else openSaved(typeof d === 'string' ? d : await blobText(d)); resumed = true; $('saveNote').textContent = '自動保存から再開した（' + Math.round(w.t) + ' 秒時点、' + w.bodies.length + ' 個体）。' + (discarded ? 'ブラウザがこのタブを休止させていた（固まったのではない）。そのあいだ世界は止まっていた。' : '') + '新しい世界を始めるには「最初から」。'; document.querySelector('details:has(#save)').open = true; }
       }
     } catch (e) { $('saveNote').textContent = '自動保存を読めなかったので新しい世界を始めた：' + (e && e.message || e); }
     if (!resumed) start();
     const pre = Number(q.get('t') || 0); for (let i = 0; i < pre * 30; i++) w.step();
     if (q.get('zoom')) { view.scale = Number(q.get('zoom')); const o = w.bodies.slice().sort((a, b) => b.full.segs - a.full.segs)[0]; if (o) { view.cx = o.cx; view.cy = o.cy; select(o); } }
-    window.ALIFE2_WORLD = { get w() { return w; }, get sel() { return sel; }, get view() { return view; }, select }; document.body.dataset.ready = '1'; requestAnimationFrame(loop);
+    runlogStart();
+    if ($('runlog')) { $('runlog').onclick = () => download('alife2-runlog.txt', runlogText(), 'text/plain'); const pr = RL.before[RL.before.length - 1];
+      $('runlogNote').textContent = '運転の記録：ページの様子（世界の時刻、個体数、コマ数、1 刻みと描画の時間、メモリ、GPU の状態）を 10 秒ごとにこの端末に書き残している（最近 5 回ぶん）。固まったあとでも、開き直せば書き出せる。' + (pr ? '前回の運転：' + runlogSay(pr) + '。' + (pr.clean ? '応答したまま閉じた。' : discarded ? 'ブラウザがタブを休止させて終わった。' : '応答しないまま終わった。') : ''); }
+    window.ALIFE2_WORLD = { get w() { return w; }, get sel() { return sel; }, get view() { return view; }, select, get runlog() { return RL; } }; document.body.dataset.ready = '1'; requestAnimationFrame(loop);
   })();
 })();
