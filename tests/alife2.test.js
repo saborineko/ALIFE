@@ -1009,6 +1009,24 @@ test('the safety valve: a body whose numbers run away is taken out at once, and 
   const w = mk(); for (let i = 0; i < 600; i++) w.step(); assert.strictEqual(w.counts.broken, 0); assert.strictEqual(w.faults, undefined); assert.strictEqual(JSON.parse(JSON.stringify(w.save())).faults, undefined);
 });
 
+test('the watch before the valve: a body an end of which moves at more than 60 a second is counted once and written down; nothing is done to it', () => {
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, swimmer = () => G.create({ parts: [G.part({ len: 0.8, r0: 0.4, r1: 0.4, muscle: 0, skin: 0.2, cilia: 0.8, mouth: 0.4, gut: 0.5, gonad: 0.3, nerve: 0.3, nC: 0.5, mCil: 0.5 })] });
+  const w = new A.engine.World({ seed: 8, contact: 1, vision: 1 }); w.seedWith(G.primordial(8)); const o = w.spawn(swimmer(), 60, 40, 1, null); for (let i = 0; i < 60; i++) w.step();
+  assert.strictEqual(w.counts.hasty, undefined); assert.strictEqual(w.nearFaults, undefined); assert.strictEqual(JSON.parse(JSON.stringify(w.save())).nearFaults, undefined, 'a healthy world writes nothing');
+  const twin = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); // (the same world without the push: the watch must change nothing in it)
+  for (let k = 0; k < o.b.np; k++) o.b.vx[k] = 4000; w.step();
+  assert.ok(!o.dead && w.bodies.includes(o), 'the body stays'); assert.strictEqual(w.counts.hasty, 1); assert.strictEqual(w.counts.broken, 0);
+  const f = w.nearFaults[0]; assert.strictEqual(f.id, o.id); assert.ok(f.speed > 60 && f.g && f.g.parts.length && 'build' in f && f.massMin > 0); assert.ok(w.events.some(e => /不具合の前ぶれ/.test(e.text) && e.id === o.id));
+  for (let k = 0; k < o.b.np; k++) o.b.vx[k] = 5000; w.step(); assert.strictEqual(w.counts.hasty, 1, 'counted once a body'); assert.strictEqual(w.nearFaults.length, 1); assert.ok(w.nearFaults[0].speed >= f.speed, 'the record keeps the fastest');
+  const back = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); assert.strictEqual(back.nearFaults.length, 1); assert.strictEqual(back.counts.hasty, 1); const ob = back.bodies.find(q => q.id === o.id); assert.ok(ob && ob.hasty > 60, 'and is not counted again after a reload');
+  for (let k = 0; k < ob.b.np; k++) ob.b.vx[k] = 5000; back.step(); assert.strictEqual(back.counts.hasty, 1);
+  // the fault record of the valve says which version of the program wrote it (null where the version is not loaded, as here)
+  for (let k = 0; k < o.b.np; k++) o.b.vx[k] = 3e7; w.step(); assert.strictEqual(o.dead, 'broken'); assert.ok('build' in w.faults[0]);
+  // and a world that is only watched goes exactly as an unwatched one would: the twin, stepped as far, is the same world as one stepped without ever being looked at
+  const plain = A.engine.World.restore(JSON.parse(JSON.stringify(twin.save()))); for (let i = 0; i < 90; i++) { twin.step(); plain.step(); } assert.strictEqual(JSON.stringify(twin.save().bodies.map(b => [b.id, b.x, b.y, b.E])), JSON.stringify(plain.save().bodies.map(b => [b.id, b.x, b.y, b.E])));
+});
+
 test('a segment eaten down to a sliver does not make the body run away: the water never takes more than the momentum that is left', () => {
   // The fault of a user's world (v2.0.69, a body thrown out of the world at t = 5175): a chain of four segments whose last one had 6 % of its tissue left.
   // The water's drag was limited to "the momentum of the end in one step", counted with the segment's whole mass; what was left weighed a few thousandths
