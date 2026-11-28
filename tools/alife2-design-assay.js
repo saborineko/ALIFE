@@ -17,6 +17,8 @@
 //        (settings: rules to switch on in the saved world, e.g. vents=1 or still=25; and flow=0 for water that does not carry the bodies;
 //         inherit=1: the circuit is given once, at the start, and from then on it is an ordinary part of the genome: mutation and mixing change it, a child
 //         has whatever its parents' genes give it. The side still follows the mother. The run then also tells how much of the circuit is left, and where.)
+//         CAUTION: with inherit=1 the two sides are no longer equal. The idle side's connection to the gland (mSec) neither mutates nor mixes in a world without the
+//         nest rule, so the idle lineage can never shed that cost and the driven one can. Read only how much of the circuit is left, not which side grows.)
 //        node tools/alife2-design-assay.js report <lines.txt>
 const fs = require('fs'), zlib = require('zlib'), A = require('../alife2-genome.js');
 for (const f of ['development', 'neural', 'physics', 'organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
