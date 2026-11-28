@@ -167,7 +167,7 @@
       for (let e = 0; e < 2; e++) {
         const vx = (e ? s.vbx : s.vax) - env.flowX, vy = (e ? s.vby : s.vay) - env.flowY;
         const vt = vx * s.dx + vy * s.dy, vn = -vx * s.dy + vy * s.dx;
-        const me = 0.6 * s.mass / dt; // never remove more than the end's own momentum in one step
+        const me = 0.6 * (s.left == null ? s.mass : s.left) / dt; // never remove more than the end's own momentum in one step (s.left: the mass a wounded segment still has. With the whole mass here, a segment eaten down to a few thousandths was braked by hundreds of times its momentum each step, and its speed grew without bound)
         const ft = -Math.min(kt * Math.abs(vt) + kv, me) * vt, fn = -Math.min(kn * Math.abs(vn) + 2 * kv, me) * vn;
         const fx = ft * s.dx - fn * s.dy, fy = ft * s.dy + fn * s.dx;
         if (e) { b.fx[s.b] += fx; b.fy[s.b] += fy; } else forceA(b, s, fx, fy);
@@ -247,7 +247,7 @@
       for (let q = 0; q < segs.length; q++) {
         const s = segs[q], dx = s.dx, dy = s.dy;
         if (fluid > 0) {
-          const kn = 0.25 * fluid * K.cn * s.sideArea, kt = 0.25 * fluid * (K.cf * s.wetArea + K.cform * s.formArea), kv = K.visc * s.len * fluid * s.vk, me = 0.6 * s.mass / h;
+          const kn = 0.25 * fluid * K.cn * s.sideArea, kt = 0.25 * fluid * (K.cf * s.wetArea + K.cform * s.formArea), kv = K.visc * s.len * fluid * s.vk, me = 0.6 * (s.left == null ? s.mass : s.left) / h;
           for (let e = 0; e < 2; e++) {
             const px = e ? s.bx : s.ax, py = e ? s.by : s.ay, rx = vx - om * (py - cy) - fwx, ry = vy + om * (px - cx) - fwy, vt = rx * dx + ry * dy, vn = -rx * dy + ry * dx;
             const at = kt * (vt < 0 ? -vt : vt) + kv, an = kn * (vn < 0 ? -vn : vn) + 2 * kv, ft = -(at < me ? at : me) * vt, fn = -(an < me ? an : me) * vn;
@@ -301,7 +301,7 @@
   // (solid) Tissue that is gone weighs nothing and catches no water: each segment's mass and the areas the water acts on follow the share of it that is left.
   function remass(b, left) {
     const np = b.np; b.m.fill(0);
-    for (const s of b.segs) { const h = left[s.id] == null ? 1 : left[s.id], m = Math.max(1e-5, s.mass * h); b.m[s.b] += m / 2; let tot = 0; for (const [, r, i] of s.aw) tot += Math.sqrt(r * r + i * i); for (const [k, r, i] of s.aw) b.m[k] += m / 2 * Math.sqrt(r * r + i * i) / tot;
+    for (const s of b.segs) { const h = left[s.id] == null ? 1 : left[s.id], m = Math.max(1e-5, s.mass * h); s.left = m; b.m[s.b] += m / 2; let tot = 0; for (const [, r, i] of s.aw) tot += Math.sqrt(r * r + i * i); for (const [k, r, i] of s.aw) b.m[k] += m / 2 * Math.sqrt(r * r + i * i) / tot;
       if (s.area0 == null) s.area0 = [s.sideArea, s.wetArea, s.formArea]; s.sideArea = s.area0[0] * h; s.wetArea = s.area0[1] * h; s.formArea = s.area0[2] * h; }
     b.mass = 0; for (let k = 0; k < np; k++) { b.im[k] = 1 / b.m[k]; b.mass += b.m[k]; }
     if (b.rigid) { let cx = 0, cy = 0; for (let k = 0; k < np; k++) { cx += b.loc[2 * k] * b.m[k]; cy += b.loc[2 * k + 1] * b.m[k]; } cx /= b.mass; cy /= b.mass; b.inertia = 1e-9;

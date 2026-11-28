@@ -1009,6 +1009,25 @@ test('the safety valve: a body whose numbers run away is taken out at once, and 
   const w = mk(); for (let i = 0; i < 600; i++) w.step(); assert.strictEqual(w.counts.broken, 0); assert.strictEqual(w.faults, undefined); assert.strictEqual(JSON.parse(JSON.stringify(w.save())).faults, undefined);
 });
 
+test('a segment eaten down to a sliver does not make the body run away: the water never takes more than the momentum that is left', () => {
+  // The fault of a user's world (v2.0.69, a body thrown out of the world at t = 5175): a chain of four segments whose last one had 6 % of its tissue left.
+  // The water's drag was limited to "the momentum of the end in one step", counted with the segment's whole mass; what was left weighed a few thousandths
+  // of that, so each step braked the end by hundreds of times its momentum and the speed grew. Here: the same kind of body, its last segment eaten down,
+  // and a push on the end. Before the correction the push of 10 on a sliver of 0.005 ended at tens of thousands of units a second.
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, chain = () => G.create({ parts: [G.part({ len: 2.9, r0: 0.2, r1: 0.9, muscle: 0.04, skin: 0.08, cilia: 0.1, beat: 1, mouth: 0.4, gut: 0.5, gonad: 0.26, nerve: 0.26, range: 0.6, amp: 0.07, store: 0.09, stiff: 0.35 })], links: [G.link({ from: 0, to: 0, sym: 'none', n: 1, repeat: 3, at: 0.77, angle: -0.09, scale: 0.78 })] });
+  for (const left of [0.2, 0.057, 0.02, 0.005, 0.001]) for (const push of [10, 300]) for (const along of [0, 1]) {
+    const w = new A.engine.World({ seed: 5, founders: 0, contact: 1, solid: 1, flow: 0, grainRate: 0, bottomRate: 0 }), o = w.spawn(chain(), 60, 40, 1, null), b = o.b, n = b.segs.length;
+    assert.ok(n >= 3 && !b.rigid, 'a jointed chain'); for (let i = 0; i < 30; i++) w.step();
+    o.hp = new Array(n).fill(1); o.hp[n - 1] = left; w.wound(o); assert.ok(Math.min(...Array.from(b.m)) < 0.6 * left * b.segs[n - 1].mass, 'the end weighs what is left of it');
+    const s = b.segs[n - 1], k = s.b; b.vx[k] += push * (along ? s.dx : -s.dy); b.vy[k] += push * (along ? s.dy : s.dx);
+    let top = 0; for (let i = 0; i < 90; i++) { if (o.hp && o.hp[n - 1] !== left && !o.dead) { o.hp[n - 1] = left; w.wound(o); } /* (it heals fast: kept eaten) */ w.step(); if (o.dead) break; for (let q = 0; q < b.np; q++) top = Math.max(top, Math.abs(b.vx[q]) + Math.abs(b.vy[q])); }
+    assert.ok(top < 60, 'left ' + left + ', push ' + push + (along ? ' along' : ' across') + ': the push dies away (fastest end after it: ' + top.toPrecision(3) + ')'); assert.strictEqual(w.counts.broken || 0, 0); assert.strictEqual(w.faults, undefined);
+  }
+  // a whole body is braked exactly as before: the limit only changes where tissue is missing
+  { const w = new A.engine.World({ seed: 5, founders: 0, contact: 1, solid: 1, flow: 0, grainRate: 0, bottomRate: 0 }), o = w.spawn(chain(), 60, 40, 1, null); for (let i = 0; i < 60; i++) w.step(); assert.ok(o.b.segs.every(q => q.left == null), 'no segment of an unwounded body carries a reduced mass'); }
+});
+
 test('a reloaded world goes on exactly as the world that was not reloaded, also where neurons read the bend of a moving joint', () => {
   // (a neuron reads the bend its joint had before the last move; a reload used to hand it the bend the body was built with)
   for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
