@@ -14,6 +14,7 @@
 //   flee   touch: swims harder while something pushes on it
 //   hurt   wound: swims harder while it is torn or damaged
 // Usage: node tools/alife2-design-assay.js <seconds> <world.json(.gz)> <design> run <k> [other|-] [key=value,…]   (one run: one JSON line)
+//        (settings: rules to switch on in the saved world, e.g. vents=1 or still=25; and flow=0 for water that does not carry the bodies)
 //        node tools/alife2-design-assay.js report <lines.txt>
 const fs = require('fs'), zlib = require('zlib'), A = require('../alife2-genome.js');
 for (const f of ['development', 'neural', 'physics', 'organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
@@ -39,7 +40,7 @@ if (process.argv[2] === 'report') {
 const [secs, file, design, , kArg, sideArg, setArg] = process.argv.slice(2), T = Number(secs), k = Number(kArg), G = A.genome, side = sideArg === 'other' ? 2 : 1;
 if (!(design in NAMES)) { console.error('unknown design: ' + design); process.exit(1); }
 const w = A.engine.World.restore(JSON.parse(file.endsWith('.gz') ? zlib.gunzipSync(fs.readFileSync(file)) : fs.readFileSync(file)));
-if (setArg) { const on = {}; for (const kv of setArg.split(',')) { const [key, v] = kv.split('='); on[key] = Number(v); } w.enable(on); }
+if (setArg) { const on = {}; for (const kv of setArg.split(',')) { const [key, v] = kv.split('='); on[key] = Number(v); } w.enable(on); if (on.flow != null) w.flow = on.flow; /* (flow: the strength of the current, which is not a rule the world switches by itself. flow=0: the water stands still) */ }
 if (w.nest) { console.error('the idle side needs a world without the nest rule'); process.exit(1); }
 w.rand = G.rng(7000 + k); const mr = G.rng(9100 + k);
 // what is usual in this world, so that the signal of the level designs swings about zero: the median over the bodies, now
