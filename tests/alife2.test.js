@@ -1017,7 +1017,7 @@ test('the watch before the valve: a body an end of which moves at more than 60 a
   const twin = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); // (the same world without the push: the watch must change nothing in it)
   for (let k = 0; k < o.b.np; k++) o.b.vx[k] = 4000; w.step();
   assert.ok(!o.dead && w.bodies.includes(o), 'the body stays'); assert.strictEqual(w.counts.hasty, 1); assert.strictEqual(w.counts.broken, 0);
-  const f = w.nearFaults[0]; assert.strictEqual(f.id, o.id); assert.ok(f.speed > 60 && f.g && f.g.parts.length && 'build' in f && f.massMin > 0); assert.ok(w.events.some(e => /不具合の前ぶれ/.test(e.text) && e.id === o.id));
+  const f = w.nearFaults[0]; assert.strictEqual(f.id, o.id); assert.strictEqual(f.kind, 'fast'); assert.ok(f.speed > 60 && f.g && f.g.parts.length && 'build' in f && f.massMin > 0); assert.ok(w.events.some(e => /不具合の前ぶれ/.test(e.text) && e.id === o.id));
   for (let k = 0; k < o.b.np; k++) o.b.vx[k] = 5000; w.step(); assert.strictEqual(w.counts.hasty, 1, 'counted once a body'); assert.strictEqual(w.nearFaults.length, 1); assert.ok(w.nearFaults[0].speed >= f.speed, 'the record keeps the fastest');
   const back = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))); assert.strictEqual(back.nearFaults.length, 1); assert.strictEqual(back.counts.hasty, 1); const ob = back.bodies.find(q => q.id === o.id); assert.ok(ob && ob.hasty > 60, 'and is not counted again after a reload');
   for (let k = 0; k < ob.b.np; k++) ob.b.vx[k] = 5000; back.step(); assert.strictEqual(back.counts.hasty, 1);
@@ -1056,6 +1056,22 @@ test('a reloaded world goes on exactly as the world that was not reloaded, also 
   const c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save()))), q = c.bodies[0], state = z => JSON.stringify([z.E, Array.from(z.b.x), Array.from(z.b.y), z.b.segs.map(s => [s.a, s.cd, s.theta, s.na ? Array.from(s.na) : 0])]);
   assert.deepStrictEqual(q.b.segs.map(s => s.theta), o.b.segs.map(s => s.theta), 'the bend the neurons will read');
   for (const n of [1, 30, 300]) { while (w.tick < 47 + n) { w.step(); c.step(); } assert.strictEqual(state(q), state(o), 'after ' + n + ' steps'); }
+});
+
+test('a crowded body that grows: parts of it that cannot be pushed apart make it tremble, not run away', () => {
+  // The fault of a long run of a user's world (v2.0.71, four bodies of one lineage thrown out of the world within 150 s): a plan of 51 short, fat segments
+  // on three kinds of part. While it grows, new segments a hundredth of a unit long appear among the others; its own parts push each other, the pushes turn
+  // small segments over, the joints' stops throw them back, and each part of a step added speed. The genome is the recorded one (tests/fixtures).
+  // Alone in the water, at the stage it had, it used to be gone in ten seconds.
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, d = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, 'fixtures', 'crowded-body.json'), 'utf8')), body = () => G.create({ parts: d.parts.map(p => G.part(p)), links: d.links.map(l => G.link(l)), birth: d.birth, freq: d.freq });
+  const rules = A.rules.normalize(Object.fromEntries(A.rules.catalog.filter(r => !['wave', 'vents', 'still'].includes(r.key)).map(r => [r.key, r.on])));
+  for (const stage of [0.3, 0.46, 0.6]) { const w = new A.engine.World(Object.assign({}, rules, { seed: 11, map: 'coast', founders: 0 })), o = w.spawn(body(), 76.8, 100, stage, null);
+    assert.ok(!o.b.rigid && o.b.segs.length >= 20 && o.self && o.self.length > 200, 'a jointed body of many segments that can touch itself'); assert.ok(Math.min(...o.b.segs.map(q => q.len)) < 0.06, 'with segments that have only begun to grow');
+    let top = 0; for (let i = 0; i < 30 * 30; i++) { w.step(); if (o.dead) break; for (let k = 0; k < o.b.np; k++) top = Math.max(top, Math.hypot(o.b.vx[k], o.b.vy[k])); }
+    assert.notStrictEqual(o.dead, 'broken', 'from stage ' + stage + ': not thrown out of the world'); assert.strictEqual(w.counts.broken || 0, 0); assert.ok(top < 3 * A.physics.K.vmax, 'no particle gets far past the limit on its speed against the body (fastest: ' + top.toPrecision(3) + ')');
+    assert.ok(Math.abs(o.cx - 76.8) < 30 && Math.abs(o.cy - 100) < 30, 'and the body is still where a body can be');
+    assert.strictEqual(w.counts.hasty, undefined, 'no end was fast without the limit holding it'); if (w.counts.trembled) { const f = w.nearFaults[0]; assert.strictEqual(f.kind, 'held'); assert.strictEqual(f.id, o.id); assert.ok(o.capped > 0); } }
 });
 
 test('every rule of the catalog at once: a world reloaded at any moment is the same world, down to every saved number, 150 steps later', () => {

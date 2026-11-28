@@ -27,7 +27,11 @@
     hold: 0.15,                         // cost of holding tension without moving
     cilia: 0.14,                        // thrust per unit of ciliated surface
     padStress: 9000, muFoot: 1.3, muBelly: 0.55, slip: 0.05,
-    substeps: 8, iters: 6
+    substeps: 8, iters: 6,
+    vmax: 60 // In water, no particle of a jointed body leaves a part of a step moving faster than this through the water. Swimming is under 1 a second and the hardest push
+             // tried on a whole body left 14: a faster particle is the constraints of a body fighting each other (parts of a crowded body that cannot be pushed apart),
+             // and each part of a step would add to it. What is beyond the limit is taken away, as water takes speed, so the fight dies down to a tremor of a few
+             // steps; the body counts how often (b.capped), and the world's watch writes it down as a fault to be looked at. Without water there is no limit
   };
 
   function environment(o) { return Object.assign({ fluid: 1, ground: false, gravity: 4, flowX: 0, flowY: 0 }, o || {}); }
@@ -133,7 +137,12 @@
     let cx = X[s.b] - cax, cy = Y[s.b] - cay, px = X[P.b] - pax, py = Y[P.b] - pay;
     const lc = Math.sqrt(cx * cx + cy * cy) || 1e-9, lp = Math.sqrt(px * px + py * py) || 1e-9; cx /= lc; cy /= lc; px /= lp; py /= lp;
     let C = wrapPi(Math.atan2(px * cy - py * cx, px * cx + py * cy) - target);
-    if (free > 0) { if (C > free) C -= free; else if (C < -free) C += free; else return 0; }
+    if (free > 0) { if (C > free) C -= free; else if (C < -free) C += free; else return 0;
+      // A stop is put right by moving particles along the tangent, which is only right for a small angle. A joint found far beyond its stop (a small segment
+      // turned over by the push of another part of its own body: 5 rad was seen) would be thrown several lengths sideways in one go, further out of place than
+      // before, and the body's speed grew a thousandfold in each part of a step. So one call brings a joint back by half a radian at the most; the next calls
+      // (several in every part of a step) do the rest. A joint that merely reaches its stop is never that far past it, and is treated exactly as before.
+      if (C > 0.5) C = 0.5; else if (C < -0.5) C = -0.5; }
     const gcx = -cy / lc, gcy = cx / lc, gpx = py / lp, gpy = -px / lp; // d(theta)/d(B_child), d(theta)/d(B_parent)
     let n = 0;
     // gradient on each particle; a particle can receive several contributions
@@ -226,6 +235,8 @@
       }
     }
     for (let k = 0; k < np; k++) { b.vx[k] = (b.x[k] - b.ox[k]) / dt; b.vy[k] = (b.y[k] - b.oy[k]) / dt; }
+    if (env.fluid > 0) { const top = K.vmax, top2 = top * top; // (see K.vmax) in water: what a particle has beyond the limit, against the water, is gone, as if the water had taken it
+      for (let k = 0; k < np; k++) { const rx = b.vx[k] - env.flowX, ry = b.vy[k] - env.flowY, r2 = rx * rx + ry * ry; if (r2 > top2) { const f = top / Math.sqrt(r2); b.vx[k] = env.flowX + rx * f; b.vy[k] = env.flowY + ry * f; b.x[k] = b.ox[k] + b.vx[k] * dt; b.y[k] = b.oy[k] + b.vy[k] * dt; b.capped = (b.capped || 0) + 1; } } }
     b.t += dt;
   }
 
@@ -294,6 +305,11 @@
     } else { const k = s.b, u = 1 - t; b.vx[k] += t * jx / b.m[k]; b.vy[k] += t * jy / b.m[k];
       if (u > 0) for (const [k2, r, i] of s.aw) { b.vx[k2] += u * (r * jx + i * jy) / b.m[k2]; b.vy[k2] += u * (r * jy - i * jx) / b.m[k2]; } }
   }
+  // (solid) For a push of 1 at a place along a segment (and for a shift of 1 there): the largest change it makes to the speed (the place) of any single particle,
+  // the far end's own or one that carries the near end. A push is sized by the particle at the far end; a carrier can be hundreds of times lighter (a segment that
+  // has only begun to grow, with a full-grown one hanging on it) and can sit on a long lever. Callers use this to keep every particle within what the push was meant
+  // to give: without it a growing body of fifty segments, alone in the water, threw itself out of the world in ten seconds.
+  function reach(b, s, t) { if (b.rigid) return 1 / b.mass; const u = 1 - t; let m = t * b.im[s.b]; if (u > 0) for (const [k, r, i] of s.aw) { const f = u * Math.sqrt(r * r + i * i) * b.im[k]; if (f > m) m = f; } return m; }
   // (solid) Move a point of a jointed body by (dx, dy) times the share its carriers can take: returns how readily that point moves (the sum of the weights
   // squared over the masses), and with `go` does the moving. Used to part two segments of one body that have run into each other.
   function ease(b, s, t) { const u = 1 - t; let w = t * t * b.im[s.b]; if (u > 0) for (const [k, r, i] of s.aw) w += u * u * (r * r + i * i) * b.im[k]; return w; }
@@ -340,6 +356,6 @@
     return { ok: finite(b), distance: dist, path, speed: dist / T, work, power: work / T, mass: b.mass, costOfTransport: dist > 1e-6 ? work / (b.mass * dist) : Infinity, maxBend, body: b };
   }
 
-  A.physics = { K, build, step, pose, com, momentum, finite, trial, environment, impulse, impulseAt, remass, nearest, near, ease, shiftAt };
+  A.physics = { K, build, step, pose, com, momentum, finite, trial, environment, impulse, impulseAt, remass, nearest, near, ease, shiftAt, reach };
   if (typeof module !== 'undefined') module.exports = A;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
