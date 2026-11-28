@@ -1058,6 +1058,30 @@ test('a reloaded world goes on exactly as the world that was not reloaded, also 
   for (const n of [1, 30, 300]) { while (w.tick < 47 + n) { w.step(); c.step(); } assert.strictEqual(state(q), state(o), 'after ' + n + ' steps'); }
 });
 
+test('every rule of the catalog at once: a world reloaded at any moment is the same world, down to every saved number, 150 steps later', () => {
+  // Twice a new rule left something out of the save (the bend a neuron reads, a trace of matter), and the reloaded world went another way. The rules here are
+  // taken from the catalog itself, so a rule added later is in this test without anyone remembering to add it; and what is compared is the whole save, so a
+  // field added later is compared too. The bodies are a small zoo that makes the states a young world does not have: joints, wounds, neurons that have learnt
+  // and rewired, matter in the water, pads that hold, a voice.
+  for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
+  const G = A.genome, rules = A.rules.normalize(Object.fromEntries(A.rules.catalog.map(r => [r.key, r.on])));
+  const zoo = [
+    G.create({ parts: [G.part({ len: 2.9, r0: 0.2, r1: 0.9, muscle: 0.04, skin: 0.08, cilia: 0.1, beat: 1, mouth: 0.4, gut: 0.5, gonad: 0.26, nerve: 0.26, range: 0.6, amp: 0.07, store: 0.09, stiff: 0.35 })], links: [G.link({ from: 0, to: 0, sym: 'none', n: 1, repeat: 3, at: 0.77, angle: -0.09, scale: 0.78 })] }),
+    G.create({ parts: [G.part({ len: 2, r0: 0.5, r1: 0.5, gut: 0.4, store: 0.4, nerve: 0.5, mouth: 0.3, cilia: 0.3, beat: 1 }), G.part({ len: 1.2, r0: 0.25, r1: 0.2, muscle: 0.5, amp: 0.5, range: 0.9, nerve: 0.5, cilia: 0.6, beat: 1, grip: 0.5, nLife: 0.5, nC: 1, sT: 1, mCil: 0.5, nn: [{ b: 0, k: 0.6, in: [['j', 3], ['t', 1, 0.5], ['c', 1, 0, 0.5]], out: [['C', 1.5], ['J', 0.5]] }] })], links: [G.link({ from: 0, to: 1, sym: 'mirror', at: 0.5, off: 0.9, angle: 1.3, scale: 1, repeat: 1 }), G.link({ from: 1, to: 1, sym: 'none', at: 1, off: 0, angle: 0.2, scale: 0.9, repeat: 2 })] }),
+    G.create({ parts: [G.part({ len: 1, r0: 0.5, r1: 0.5, skin: 0.1, cilia: 0.5, beat: 1, mouth: 0.4, gut: 0.5, gonad: 0.3, nerve: 0.4, gland: 0.3, mSec: 1, nB: 1, voice: 0.3, pitch: 0.4, mVoice: 1, ear: 0.3, hE: 1, eye: 0.2, vE: 1, sA: 1, sW: 1, mBite: -0.5 })] })];
+  const w = new A.engine.World(Object.assign({}, rules, { seed: 7, map: 'coast' })); w.seedWith(G.primordial(7)); for (let i = 0; i < 18; i++) w.spawn(G.copy(zoo[i % 3]), 60 + (i % 6) * 2.2, 60 + Math.floor(i / 6) * 2.5, 1, null);
+  for (const r of A.rules.catalog) assert.ok(w[r.key], 'the rule ' + r.key + ' is on');
+  for (let i = 0; i < 240; i++) w.step();
+  { const o = w.bodies.find(q => !q.b.rigid && q.b.segs.length >= 4); assert.ok(o, 'a jointed chain is alive'); if (!o.hp) o.hp = new Array(o.b.segs.length).fill(1); o.hp[o.b.segs.length - 1] = 0.3; w.wound(o); }
+  const has = (name, n) => assert.ok(n > 0, 'the zoo makes ' + name);
+  has('jointed bodies', w.bodies.filter(o => !o.b.rigid).length); has('wounded bodies', w.bodies.filter(o => o.hp && o.hp.some(h => h < 1)).length); has('neurons', w.bodies.filter(o => o.b.segs.some(q => q.na)).length);
+  has('learnt connections', w.bodies.filter(o => o.b.segs.some(q => q.nw && q.nw.some(x => x !== 0))).length); has('connections that come and go', w.bodies.filter(o => o.b.segs.some(q => q.nz || q.sz)).length);
+  has('matter in the water', Array.from(w.mat).filter(x => x > 0).length); has('vents', w.ventList.length); has('bodies that have sounded', w.bodies.filter(o => o.voN > 0).length); has('bodies that can touch themselves', w.bodies.filter(o => o.self).length); has('bodies that were held', w.bodies.filter(o => o.held != null).length); has('torn tissue', w.counts.torn);
+  for (const more of [0, 150, 300]) { for (let i = 0; i < (more ? 150 : 0); i++) w.step(); const at = w.tick, c = A.engine.World.restore(JSON.parse(JSON.stringify(w.save())));
+    for (let i = 0; i < 150; i++) { w.step(); c.step(); } const a = JSON.parse(JSON.stringify(w.save())), b = JSON.parse(JSON.stringify(c.save()));
+    for (const k of Object.keys(a)) assert.strictEqual(JSON.stringify(b[k]), JSON.stringify(a[k]), 'reloaded at step ' + at + ': "' + k + '" of the save is the same 150 steps later'); assert.deepStrictEqual(Object.keys(b), Object.keys(a)); }
+});
+
 test('the written past stays within limits: old extinct plans and old ancestors keep their numbers but not their genomes; nothing in the world itself changes', () => {
   for (const f of ['organs', 'rules', 'engine']) require('../alife2-' + f + '.js');
   const G = A.genome, mk = () => { const w = new A.engine.World({ seed: 7 }); w.seedWith(G.primordial(7)); for (let i = 0; i < 90; i++) w.step(); return w; }, w = mk(), plain = mk();
